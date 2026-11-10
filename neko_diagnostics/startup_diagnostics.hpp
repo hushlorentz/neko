@@ -130,6 +130,7 @@ struct StartupSIO2Summary
   std::size_t inputBytes = 0;
   SIO2DMAResultPhase resultPhase = SIO2DMAResultPhase::Empty;
   std::size_t resultBytes = 0;
+  std::size_t logicalResultBytes = 0;
 };
 
 struct StartupSIO2DMASummary

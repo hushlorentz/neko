@@ -437,14 +437,16 @@ namespace
   }
 }
 
-TEST_CASE("SIO2 DMA card probe completes only on the next IOP pulse",
+TEST_CASE("SIO2 DMA absent-card profiles complete only on the next IOP pulse",
   "[iop][sio2][sio2-card]")
 {
-  for (const auto descriptor : {0x00100472u, 0x00100473u})
+  for (const auto descriptor : {0x00100472u, 0x00100473u, 0x00140572u, 0x00140573u})
   {
     CAPTURE(descriptor);
+    const auto replyBytes = (descriptor >> 18) & 0x1ff;
+    const auto firstWord = replyBytes == 5 ? 0xf381u : 0x1181u;
     NekoSystem system;
-    stageCardProbe(system, descriptor);
+    stageCardProbe(system, descriptor, firstWord);
     auto &bus = system.iopBus();
     system.runMasterCycles(2);
     REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
@@ -467,7 +469,8 @@ TEST_CASE("SIO2 DMA card probe completes only on the next IOP pulse",
     REQUIRE(system.sio2Controller().dmaResultPhase() == SIO2DMAResultPhase::Ready);
     REQUIRE(system.sio2Controller().dmaResultSize() == 144);
     for (std::size_t index = 0; index < 144; ++index)
-      REQUIRE(system.sio2Controller().dmaResultByte(index) == (index < 4 ? 0xff : 0));
+      REQUIRE(system.sio2Controller().dmaResultByte(index) ==
+        (index < replyBytes ? 0xff : 0));
     REQUIRE_THROWS_AS(system.sio2Controller().dmaResultByte(144), std::out_of_range);
     REQUIRE(system.iopInterruptController().status() == sio2IRQ);
     REQUIRE(bus.read8(receiveAddress).status == IOPBusStatus::Unmapped);
@@ -478,13 +481,17 @@ TEST_CASE("SIO2 DMA card probe completes only on the next IOP pulse",
 TEST_CASE("SIO2 DMA card probe rejects unselected framing without consuming input",
   "[iop][sio2][sio2-card]")
 {
-  for (unsigned invalid = 0; invalid < 10; ++invalid)
+  for (const auto descriptor : {0x00100472u, 0x00140572u})
+  for (unsigned invalid = 0; invalid < 12; ++invalid)
   {
+    CAPTURE(descriptor);
     CAPTURE(invalid);
+    const auto firstWord = descriptor == 0x00140572 ? 0xf381u : 0x1181u;
     NekoSystem system;
-    stageCardProbe(system, invalid == 0 ? 0x00100470 : 0x00100472,
-      invalid == 1 ? 0x00001281 : invalid == 2 ? 0x01001181 :
-        invalid == 9 ? 0x00001180 : 0x00001181,
+    stageCardProbe(system, invalid == 0 ? descriptor & ~3u :
+        invalid == 11 ? descriptor ^ 0x40000 : descriptor,
+      invalid == 1 ? 0x00001281 : invalid == 2 ? firstWord | 0x01000000 :
+        invalid == 9 ? firstWord ^ 1 : invalid == 10 ? firstWord ^ 0xe200 : firstWord,
       invalid == 3 ? 35 : 36, invalid == 4 ? 1 : 0);
     auto &bus = system.iopBus();
     if (invalid == 5)
@@ -523,7 +530,15 @@ TEST_CASE("SIO2 card guest START publishes results on the following IOP instruct
   "[iop][sio2][sio2-card][trace]")
 {
   NekoSystem system;
-  stageCardProbe(system);
+  IOPWord descriptor = 0x00100472;
+  IOPWord firstWord = 0x1181;
+  SECTION("Probe") {}
+  SECTION("Absent f3")
+  {
+    descriptor = 0x00140572;
+    firstWord = 0xf381;
+  }
+  stageCardProbe(system, descriptor, firstWord);
   installProgram(system, std::array<IOPWord, 5>{{
     0x3c01bf80, 0x34218268, 0x340203bd, 0xac220000, 0
   }});
@@ -608,8 +623,10 @@ TEST_CASE("SIO2 DMA card results reject replacement and remain independent of ou
 TEST_CASE("SIO2 DMA card completion respects independently retained interrupt cause",
   "[iop][sio2][sio2-card][save-state]")
 {
+  for (const auto descriptor : {0x00100472u, 0x00140572u})
   for (const bool acknowledge : {false, true})
   {
+    CAPTURE(descriptor);
     CAPTURE(acknowledge);
     NekoSystem system;
     stageInfraredTransfer(system);
@@ -618,7 +635,7 @@ TEST_CASE("SIO2 DMA card completion respects independently retained interrupt ca
     for (std::size_t index = 0; index < infraredPacket.size(); ++index)
       REQUIRE(system.iopBus().read8(receiveAddress).value == 0xff);
     system.iopInterruptController().writeStatus(~sio2IRQ);
-    stageCardProbe(system);
+    stageCardProbe(system, descriptor, descriptor == 0x00140572 ? 0xf381 : 0x1181);
     REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read32(0x1f80826c).status == IOPBusStatus::Unmapped);

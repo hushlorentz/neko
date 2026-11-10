@@ -65,7 +65,11 @@ The snapshot contains:
   The separate `dma_result_phase` is `empty`, `pending`, or `ready`.
   A ready absent-card probe exposes `dma_result_bytes:144`, split into
   `dma_logical_bytes:4` no-ACK samples and `dma_padding_bytes:140` zero padding;
-  pending/empty results expose zero bytes. Output channel12
+  the bounded absent-card `f3` profile instead has five no-ACK samples and
+  139 padding bytes. Counts describe unread bytes: after one output word,
+  `f3` retains one logical byte and 139 padding bytes. Pending/empty results
+  expose zero bytes. These are provisional absent-device compatibility
+  profiles, not successful card replies. Output channel12
   (`iop_dma.sio2_output`) distinguishes `inactive`, `armed_waiting_results`,
   and `armed_results_ready`. Arming or ready results do not imply output
   transport or DMA completion. The inspector still accepts older snapshots

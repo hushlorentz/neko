@@ -3711,8 +3711,19 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded contract through the existing SIO2 owner,
       with atomic lifecycle guards and authored canonical, trace and interrupt
       coverage; distinguish completed rewrites from DMA-backed probe starts.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress without fabricating input, results, completion or peer replies.
+
+### IOP SIO2 Command 0xf3 Dependency
+
+- [x] Research the demonstrated descriptor0x00140572 and sealed `81 f3` input;
+      select endpoint, absent-device/error result shape, lifecycle and IRQ
+      contracts, with approval before active command behavior.
+- [x] Implement the selected bounded command through the existing SIO2 owner,
+      with atomic admission, real output-DMA results and authored canonical,
+      trace and interrupt coverage; preserve the existing probe contracts.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress without fabricating peer replies, readiness or card success.
 
 ### Additional CD/DVD Command and Configuration Scope
 

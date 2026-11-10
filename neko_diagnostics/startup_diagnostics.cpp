@@ -233,10 +233,9 @@ namespace
       << "\",\"input_bytes\":" << summary.sio2.inputBytes
       << ",\"dma_result_phase\":\"" << enumName(summary.sio2.resultPhase, sio2ResultPhases)
       << "\",\"dma_result_bytes\":" << summary.sio2.resultBytes
-      << ",\"dma_logical_bytes\":" << (summary.sio2.resultBytes == SIO2Controller::DMA_INPUT_BYTES
-        ? SIO2Controller::DMA_PROBE_REPLY_BYTES : 0)
-      << ",\"dma_padding_bytes\":" << std::min(summary.sio2.resultBytes,
-        SIO2Controller::DMA_PROBE_PADDING_BYTES) << "}"
+      << ",\"dma_logical_bytes\":" << summary.sio2.logicalResultBytes
+      << ",\"dma_padding_bytes\":" <<
+        summary.sio2.resultBytes - summary.sio2.logicalResultBytes << "}"
       << ",\"dmac\":{\"control\":" << dma.control
       << ",\"hold_control\":" << dma.holdControl
       << ",\"status\":" << dma.status
@@ -421,7 +420,7 @@ StartupSummary inspectStartup(const NekoSystem &system)
   summary.iopDMA.sif1 = inspectIOPSIF(system, system.iopSIF1DMAC(), IOPDMAChannel::SIF1);
   const auto &sio2 = system.sio2Controller();
   summary.sio2 = {sio2.transmitInputPhase(), sio2.transmitInputSize(),
-    sio2.dmaResultPhase(), sio2.dmaResultSize()};
+    sio2.dmaResultPhase(), sio2.dmaResultSize(), sio2.dmaResultLogicalSize()};
   summary.iopDMA.sio2Input = {
     iopDMA.sio2ChannelControl(IOPSIO2DMAChannel::Input),
     iopDMA.sio2MemoryAddress(IOPSIO2DMAChannel::Input),

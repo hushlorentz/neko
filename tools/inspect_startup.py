@@ -195,10 +195,13 @@ def validate_sio2_snapshot(snapshot):
             if (remaining > 144 or remaining % 4 or
                     (remaining != 0) != (phase == "ready")):
                 raise ValueError("snapshot.sio2.dma_result_bytes disagrees with result phase")
-            for field, expected in (("dma_logical_bytes", 4 if remaining == 144 else 0),
-                                    ("dma_padding_bytes", min(remaining, 140))):
-                if uint(sio2[field], f"snapshot.sio2.{field}", 16) != expected:
-                    raise ValueError(f"snapshot.sio2.{field} disagrees with result phase")
+            logical = uint(sio2["dma_logical_bytes"], "snapshot.sio2.dma_logical_bytes", 16)
+            padding = uint(sio2["dma_padding_bytes"], "snapshot.sio2.dma_padding_bytes", 16)
+            valid_counts = {(max(0, reply_bytes - (144 - remaining)),
+                             min(remaining, 144 - reply_bytes))
+                            for reply_bytes in (4, 5)}
+            if (logical, padding) not in valid_counts:
+                raise ValueError("snapshot.sio2 logical/padding bytes disagree with result phase")
     if "iop_dma" in snapshot:
         dma = require(snapshot, "iop_dma", dict)
         if "sio2_input" not in dma:

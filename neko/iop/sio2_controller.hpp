@@ -59,6 +59,7 @@ class SIO2Controller final
     SIO2TransferResult completePendingTransfer() noexcept;
     SIO2DMAResultPhase dmaResultPhase() const noexcept;
     std::size_t dmaResultSize() const noexcept;
+    std::size_t dmaResultLogicalSize() const noexcept;
     std::uint8_t dmaResultByte(std::size_t index) const;
     SIO2ReadResult readReceiveByte() noexcept;
     SIO2ReadResult readTransferStatus(std::size_t index) const;
@@ -77,7 +78,12 @@ class SIO2Controller final
     friend class NekoSaveStateCodec;
     friend class IOPDMAController;
     static bool supportsControl(std::uint32_t value) noexcept;
-    bool hasDMAProbeProgramming() const noexcept;
+    struct DMACardProfile
+    {
+      std::uint8_t command;
+      std::size_t replyBytes;
+    };
+    const DMACardProfile *dmaCardProfile() const noexcept;
     bool hasValidTransferState() const noexcept;
     std::uint32_t peekDMAResultWord() const noexcept;
     void consumeDMAResultWord() noexcept;

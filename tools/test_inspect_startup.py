@@ -81,6 +81,20 @@ def capture_records():
 
 
 class InspectorTests(unittest.TestCase):
+    def test_sio2_f3_snapshot_counts_cross_the_dma_word_boundary(self):
+        for remaining, logical, padding in ((144, 5, 139), (140, 1, 139), (136, 0, 136)):
+            with self.subTest(remaining=remaining):
+                rows = records()
+                result = dict(input_phase="empty", input_bytes=0, dma_result_phase="ready",
+                              dma_result_bytes=remaining, dma_logical_bytes=logical,
+                              dma_padding_bytes=padding)
+                rows[1]["snapshot"]["sio2"] = result
+                self.write(self.path, rows)
+                self.assertEqual(self.report("summary", self.path)["snapshot"]["sio2"],
+                                 result)
+                rows[1]["snapshot"]["sio2"] = dict(result, dma_padding_bytes=padding - 1)
+                self.reject(rows, "sio2")
+
     def test_sio2_partial_results_and_output_beats(self):
         for remaining in (140, 72, 4):
             rows = records()

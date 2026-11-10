@@ -31,11 +31,11 @@ bool SIO2Controller::supportsControl(std::uint32_t value) noexcept
 
 SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 {
-  const bool completedProbeRewrite = value == 0x3bd && control == value &&
+  const bool completedCardRewrite = value == 0x3bd && control == value &&
     transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
     transmitInputCount == 0 && resultCursor == 0 && receiveRemaining == 0 &&
-    hasDMAProbeProgramming();
-  if ((!supportsControl(value) && !completedProbeRewrite) ||
+    dmaCardProfile() != nullptr;
+  if ((!supportsControl(value) && !completedCardRewrite) ||
       resultPhase != SIO2DMAResultPhase::Empty)
   {
     return SIO2AccessStatus::Unsupported;
@@ -51,10 +51,11 @@ SIO2TransferResult SIO2Controller::startTransfer(
     return SIO2TransferResult::Unsupported;
   if (controlValue == 0x3bd)
   {
+    const auto *profile = dmaCardProfile();
     if (ingressPhase != SIO2IngressPhase::DMASealed ||
         transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0 ||
-        !hasDMAProbeProgramming() || transmitInput[0] != 0x81 ||
-        transmitInput[1] != 0x11)
+        profile == nullptr || transmitInput[0] != 0x81 ||
+        transmitInput[1] != profile->command)
       return SIO2TransferResult::Unsupported;
     for (std::size_t index = 2; index < DMA_INPUT_BYTES; ++index)
       if (transmitInput[index] != 0)
@@ -83,17 +84,25 @@ SIO2TransferResult SIO2Controller::startTransfer(
   return result;
 }
 
-bool SIO2Controller::hasDMAProbeProgramming() const noexcept
+const SIO2Controller::DMACardProfile *SIO2Controller::dmaCardProfile() const noexcept
 {
-  if (commandDescriptors[0] != 0x00100472 &&
-      commandDescriptors[0] != 0x00100473)
-    return false;
+  static constexpr DMACardProfile probe{0x11, DMA_PROBE_REPLY_BYTES};
+  static constexpr DMACardProfile absentF3{0xf3, 5};
+  const DMACardProfile *profile = nullptr;
+  switch (commandDescriptors[0])
+  {
+    case 0x00100472:
+    case 0x00100473: profile = &probe; break;
+    case 0x00140572:
+    case 0x00140573: profile = &absentF3; break;
+    default: return nullptr;
+  }
   for (std::size_t index = 1; index < commandDescriptors.size(); ++index)
     if (commandDescriptors[index] != 0)
-      return false;
+      return nullptr;
   const auto port = commandDescriptors[0] & 3;
   return portControls[port * 2] == 0xff020405 &&
-    portControls[port * 2 + 1] == 0x0005ffff;
+    portControls[port * 2 + 1] == 0x0005ffff ? profile : nullptr;
 }
 
 SIO2TransferResult SIO2Controller::completePendingTransfer() noexcept
@@ -119,17 +128,30 @@ std::size_t SIO2Controller::dmaResultSize() const noexcept
     ? DMA_INPUT_BYTES - resultCursor : 0;
 }
 
+std::size_t SIO2Controller::dmaResultLogicalSize() const noexcept
+{
+  if (resultPhase != SIO2DMAResultPhase::Ready)
+    return 0;
+  const auto *profile = dmaCardProfile();
+  assert(profile != nullptr);
+  return resultCursor < profile->replyBytes ? profile->replyBytes - resultCursor : 0;
+}
+
 std::uint8_t SIO2Controller::dmaResultByte(std::size_t index) const
 {
   if (index >= dmaResultSize())
     throw std::out_of_range("SIO2 DMA result byte is unavailable");
-  return resultCursor + index < DMA_PROBE_REPLY_BYTES ? 0xff : 0;
+  return index < dmaResultLogicalSize() ? 0xff : 0;
 }
 
 std::uint32_t SIO2Controller::peekDMAResultWord() const noexcept
 {
   assert(dmaResultSize() >= 4);
-  return resultCursor == 0 ? 0xffffffff : 0;
+  const auto logicalBytes = dmaResultLogicalSize();
+  std::uint32_t value = 0;
+  for (std::size_t index = 0; index < 4 && index < logicalBytes; ++index)
+    value |= std::uint32_t{0xff} << (index * 8);
+  return value;
 }
 
 void SIO2Controller::consumeDMAResultWord() noexcept
@@ -191,7 +213,7 @@ bool SIO2Controller::hasValidTransferState() const noexcept
     case SIO2DMAResultPhase::Pending:
     case SIO2DMAResultPhase::Ready:
       return ingressPhase == SIO2IngressPhase::Empty && transmitInputCount == 0 &&
-        receiveRemaining == 0 && control == 0x3bd && hasDMAProbeProgramming() &&
+        receiveRemaining == 0 && control == 0x3bd && dmaCardProfile() != nullptr &&
         transferCompleted == (resultPhase == SIO2DMAResultPhase::Ready);
     default: return false;
   }
