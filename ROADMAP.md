@@ -3744,6 +3744,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded request through the existing SIO2 owner,
       with atomic admission and authored canonical, trace and interrupt
       coverage; preserve CPU-card, infrared and DMA-backed profiles.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress without fabricating peer replies, readiness or device success.
+
+### IOP SIO2 CPU Multitap Memory-Card Support Query Dependency
+
+- [x] Research descriptor0x00180642, controls0xff020505/0x00030064 and CPU-staged
+      `21 13 00 00 00 00`; select command identity, absent-device results,
+      lifecycle and IRQ contracts, with approval before active behavior.
+- [x] Implement the selected bounded request through the existing SIO2 owner,
+      with atomic admission and authored canonical, trace and interrupt
+      coverage; preserve CPU-card, infrared and DMA-backed profiles.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress without fabricating peer replies, readiness or device success.
 

@@ -95,7 +95,8 @@ SIO2TransferResult SIO2Controller::startCPUTransfer(
   }
   else if (controlValue == 0x3bd && hasCPUMultitapSupportProgramming() &&
       transmitInputCount == CPU_MULTITAP_REPLY_BYTES &&
-      transmitInput[0] == 0x21 && transmitInput[1] == 0x12)
+      transmitInput[0] == 0x21 &&
+      (transmitInput[1] == 0x12 || transmitInput[1] == 0x13))
   {
     for (std::size_t index = 2; index < CPU_MULTITAP_REPLY_BYTES; ++index)
       if (transmitInput[index] != 0)
