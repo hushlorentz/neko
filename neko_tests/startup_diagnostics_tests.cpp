@@ -156,7 +156,7 @@ TEST_CASE("Startup SIO2 DMA codec preserves word data and rejects invalid metada
   for (const auto invalid : {
       NekoTraceEvent{0, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat},
       NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::StateChanged},
-      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat, 12},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat, 13},
       NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
         11 | (4 << 8)},
       NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,

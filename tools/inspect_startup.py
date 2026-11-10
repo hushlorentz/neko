@@ -144,27 +144,32 @@ def validate_sio2_event(record):
             raise ValueError("sio2_dma requires its SIO2 DMA event identity")
         return
     decoded = require(record, "sio2_dma", dict)
+    channel = uint(decoded.get("channel"), "sio2_dma.channel", 8)
+    before, after = ("staged_before", "staged_after") if channel == 11 else (
+        "result_before", "result_after")
     fields = {"endpoint", "channel", "kind", "outcome", "failure", "bus_status",
               "attempted_address", "source_value", "remaining_before",
-              "remaining_after", "staged_before", "staged_after"}
+              "remaining_after", before, after}
     if decoded.keys() != fields:
         raise ValueError("sio2_dma has invalid fields")
-    if (uint(decoded["channel"], "sio2_dma.channel", 8) != 11 or
-            decoded["endpoint"] != "iop_sio2_input" or decoded["kind"] != "payload"):
+    endpoint = "iop_sio2_input" if channel == 11 else "iop_sio2_output"
+    if (channel not in (11, 12) or
+            decoded["endpoint"] != endpoint or decoded["kind"] != "payload"):
         raise ValueError("sio2_dma has invalid endpoint, channel or kind")
     if decoded["outcome"] not in ("accepted", "wait", "completed", "rejected"):
         raise ValueError("sio2_dma has invalid outcome")
     rejected = decoded["outcome"] == "rejected"
     statuses = ("misaligned", "read_only", "unmapped") if rejected else ("none",)
+    failure = "source_read" if channel == 11 else "destination_write"
     if (decoded["bus_status"] not in statuses or
-            decoded["failure"] != ("source_read" if rejected else "none")):
+            decoded["failure"] != (failure if rejected else "none")):
         raise ValueError("sio2_dma has invalid failure/bus_status")
     for field in ("attempted_address", "source_value"):
         uint(decoded[field], f"sio2_dma.{field}", 32)
     for field in ("remaining_before", "remaining_after"):
         if uint(decoded[field], f"sio2_dma.{field}", 8) > 36:
             raise ValueError(f"sio2_dma.{field} exceeds 36 words")
-    for field in ("staged_before", "staged_after"):
+    for field in (before, after):
         if uint(decoded[field], f"sio2_dma.{field}", 16) > 144:
             raise ValueError(f"sio2_dma.{field} exceeds 144 bytes")
 
@@ -186,11 +191,13 @@ def validate_sio2_snapshot(snapshot):
             phase = sio2["dma_result_phase"]
             if phase not in ("empty", "pending", "ready"):
                 raise ValueError("snapshot.sio2.dma_result_phase is invalid")
-            for field, expected in (("dma_result_bytes", 144),
-                                    ("dma_logical_bytes", 4),
-                                    ("dma_padding_bytes", 140)):
-                if uint(sio2[field], f"snapshot.sio2.{field}", 16) != (
-                        expected if phase == "ready" else 0):
+            remaining = uint(sio2["dma_result_bytes"], "snapshot.sio2.dma_result_bytes", 16)
+            if (remaining > 144 or remaining % 4 or
+                    (remaining != 0) != (phase == "ready")):
+                raise ValueError("snapshot.sio2.dma_result_bytes disagrees with result phase")
+            for field, expected in (("dma_logical_bytes", 4 if remaining == 144 else 0),
+                                    ("dma_padding_bytes", min(remaining, 140))):
+                if uint(sio2[field], f"snapshot.sio2.{field}", 16) != expected:
                     raise ValueError(f"snapshot.sio2.{field} disagrees with result phase")
     if "iop_dma" in snapshot:
         dma = require(snapshot, "iop_dma", dict)

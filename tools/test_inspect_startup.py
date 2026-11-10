@@ -81,6 +81,33 @@ def capture_records():
 
 
 class InspectorTests(unittest.TestCase):
+    def test_sio2_partial_results_and_output_beats(self):
+        for remaining in (140, 72, 4):
+            rows = records()
+            rows[1]["snapshot"]["sio2"] = dict(
+                input_phase="empty", input_bytes=0, dma_result_phase="ready",
+                dma_result_bytes=remaining, dma_logical_bytes=0,
+                dma_padding_bytes=remaining)
+            beat = dict(endpoint="iop_sio2_output", channel=12, kind="payload",
+                        outcome="accepted", failure="none", bus_status="none",
+                        attempted_address=0x2004, source_value=0,
+                        remaining_before=remaining // 4,
+                        remaining_after=remaining // 4 - 1,
+                        result_before=remaining, result_after=remaining - 4)
+            rows[3].update(subsystem=17, event_type=20, sio2_dma=beat)
+            self.write(self.path, rows)
+            report = self.report("events", self.path, "--subsystem", "sio2")
+            self.assertEqual(report["events"][0]["sio2_dma"], beat)
+            self.assertEqual(self.report("summary", self.path)["snapshot"]["sio2"]
+                             ["dma_result_bytes"], remaining)
+            rows[3]["sio2_dma"] = dict(beat, outcome="rejected",
+                                      failure="destination_write", bus_status="unmapped")
+            self.write(self.path, rows)
+            self.assertEqual(self.report("events", self.path, "--subsystem", "sio2")
+                             ["events"][0]["sio2_dma"]["failure"], "destination_write")
+            rows[3]["sio2_dma"]["failure"] = "source_read"
+            self.reject(rows, "sio2_dma")
+
     def test_sio2_result_snapshot_distinguishes_pending_bytes_and_padding(self):
         rows = records()
         snapshot = rows[1]["snapshot"]

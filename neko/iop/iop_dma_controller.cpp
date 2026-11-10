@@ -19,9 +19,9 @@ namespace
   constexpr IOPWord SIO2_INPUT_WORDS = SIO2Controller::DMA_INPUT_BYTES / 4;
   constexpr IOPWord SIO2_OUTPUT_START = 0x41000200;
   constexpr IOPWord SIO2_OUTPUT_BCR = 0x10024;
-  constexpr std::array<IOPDMAChannel, 5> GRANT_CHANNELS = {{
+  constexpr std::array<IOPDMAChannel, 6> GRANT_CHANNELS = {{
     IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0,
-    IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input
+    IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input, IOPDMAChannel::SIO2Output
   }};
 
   const char *channelDescription(IOPDMAChannel channel)
@@ -33,6 +33,7 @@ namespace
       case IOPDMAChannel::SIF0: return "SIF0";
       case IOPDMAChannel::SIF1: return "SIF1";
       case IOPDMAChannel::SIO2Input: return "SIO2 input";
+      case IOPDMAChannel::SIO2Output: return "SIO2 output";
     }
     throw std::out_of_range("Unsupported IOP DMA channel.");
   }
@@ -92,7 +93,8 @@ IOPDMABank IOPDMAController::channelBank(IOPDMAChannel channel)
     case IOPDMAChannel::SPU1:
     case IOPDMAChannel::SIF0:
     case IOPDMAChannel::SIF1:
-    case IOPDMAChannel::SIO2Input: return IOPDMABank::Secondary;
+    case IOPDMAChannel::SIO2Input:
+    case IOPDMAChannel::SIO2Output: return IOPDMABank::Secondary;
   }
   throw std::out_of_range("Unsupported IOP DMA channel.");
 }
@@ -111,6 +113,8 @@ std::uint8_t IOPDMAController::channelSlot(IOPDMAChannel channel)
       return 3;
     case IOPDMAChannel::SIO2Input:
       return 4;
+    case IOPDMAChannel::SIO2Output:
+      return 5;
   }
   throw std::out_of_range("Unsupported IOP DMA channel.");
 }
@@ -239,9 +243,12 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
   auto &programming = sio2Channels.at(static_cast<std::size_t>(channel));
   if (channel == IOPSIO2DMAChannel::Output && value == SIO2_OUTPUT_START)
   {
-    if (programming.blockControlRegister != SIO2_OUTPUT_BCR)
+    if (programming.active())
+      return IOPDMAWriteOutcome::Completed;
+    if (programming.blockControlRegister != SIO2_OUTPUT_BCR ||
+        sio2.resultCursor != 0)
       return IOPDMAWriteOutcome::UnsupportedControl;
-    // No DMA-readable SIO2 result source exists yet; retain the pending request.
+    sio2OutputWordsTransferred = 0;
     programming.channelControlRegister = value;
     return IOPDMAWriteOutcome::Completed;
   }
@@ -264,6 +271,8 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
     sio2.cancelDMAInput();
     sio2InputWordsTransferred = 0;
   }
+  if (channel == IOPSIO2DMAChannel::Output)
+    sio2OutputWordsTransferred = 0;
   programming.channelControlRegister = value;
   return IOPDMAWriteOutcome::Completed;
 }
@@ -285,12 +294,12 @@ bool IOPDMAController::sio2OutputActive() const
 
 bool IOPDMAController::sio2OutputEnabled() const
 {
-  return (priority(IOPDMABank::Secondary) & 0x800000) != 0;
+  return channelEnabled(IOPDMAChannel::SIO2Output);
 }
 
 IOPWord IOPDMAController::sio2OutputRemainingWords() const
 {
-  return sio2OutputActive() ? (SIO2_OUTPUT_BCR & 0xffff) : 0;
+  return sio2OutputActive() ? (SIO2_OUTPUT_BCR & 0xffff) - sio2OutputWordsTransferred : 0;
 }
 
 bool IOPDMAController::validSIO2Continuation(const SIO2Controller &sio2) const
@@ -305,6 +314,12 @@ bool IOPDMAController::validSIO2Continuation(const SIO2Controller &sio2) const
       !validSIO2StoppedControl(IOPSIO2DMAChannel::Output, output.channelControlRegister))
     return false;
   if (!sio2.hasValidTransferState())
+    return false;
+  if (sio2OutputWordsTransferred >= SIO2_INPUT_WORDS ||
+      (!sio2OutputActive() && sio2OutputWordsTransferred != 0))
+    return false;
+  if (sio2OutputActive() &&
+      sio2.resultCursor != sio2OutputWordsTransferred * 4)
     return false;
   if (!sio2InputActive())
     return validSIO2StoppedControl(IOPSIO2DMAChannel::Input,
@@ -366,6 +381,59 @@ IOPDMABeatResult IOPDMAController::clockSIO2Input(
     channel.blockControlRegister -= IOPWord{1} << 16;
     channel.channelControlRegister = 0x201;
     sio2InputWordsTransferred = 0;
+    signalChannelCompletion(result.channel);
+  }
+  advanceGrantCursor(result.channel);
+  return result;
+}
+
+IOPDMABeatResult IOPDMAController::inspectSIO2Output(
+  const IOPBus &bus, const SIO2Controller &sio2) const
+{
+  validateSIO2Wiring(bus, sio2);
+  if (!validSIO2Continuation(sio2))
+    throw std::logic_error("IOP SIO2 DMA continuation is outside the bounded profile.");
+  IOPDMABeatResult result;
+  result.channel = IOPDMAChannel::SIO2Output;
+  result.address = sio2MemoryAddress(IOPSIO2DMAChannel::Output);
+  if (!sio2OutputActive() || !sio2OutputEnabled() || sio2.dmaResultSize() < 4)
+    return result;
+  result.value = sio2.peekDMAResultWord();
+  result.status = bus.dmaWriteStatus(result.address);
+  if (result.status != IOPBusStatus::Completed)
+  {
+    result.outcome = IOPDMABeatOutcome::Rejected;
+    result.failure = IOPDMAFailure::DestinationWrite;
+  }
+  else
+    result.outcome = sio2OutputRemainingWords() == 1 ?
+      IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted;
+  return result;
+}
+
+IOPDMABeatResult IOPDMAController::clockSIO2Output(IOPBus &bus, SIO2Controller &sio2)
+{
+  auto result = inspectSIO2Output(bus, sio2);
+  if (result.outcome == IOPDMABeatOutcome::Wait ||
+      result.outcome == IOPDMABeatOutcome::Rejected)
+    return result;
+  const auto write = bus.writeDMAC32(result.address, result.value);
+  if (write.status != IOPBusStatus::Completed)
+  {
+    result.outcome = IOPDMABeatOutcome::Rejected;
+    result.failure = IOPDMAFailure::DestinationWrite;
+    result.status = write.status;
+    return result;
+  }
+  sio2.consumeDMAResultWord();
+  auto &channel = sio2Channels[1];
+  channel.memoryAddressRegister = (channel.memoryAddressRegister + 4) & 0x00ffffff;
+  ++sio2OutputWordsTransferred;
+  if (result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    channel.blockControlRegister -= IOPWord{1} << 16;
+    channel.channelControlRegister &= ~IOPWord{0x01000000};
+    sio2OutputWordsTransferred = 0;
     signalChannelCompletion(result.channel);
   }
   advanceGrantCursor(result.channel);
@@ -626,6 +694,7 @@ std::size_t IOPDMAController::grantChannelIndex(IOPDMAChannel channel)
     case IOPDMAChannel::SIF0: return 2;
     case IOPDMAChannel::SIF1: return 3;
     case IOPDMAChannel::SIO2Input: return 4;
+    case IOPDMAChannel::SIO2Output: return 5;
   }
   throw std::out_of_range("Unsupported IOP DMA grant channel.");
 }
@@ -635,9 +704,9 @@ void IOPDMAController::advanceGrantCursor(IOPDMAChannel channel)
   nextChannel = GRANT_CHANNELS[(grantChannelIndex(channel) + 1) % GRANT_CHANNELS.size()];
 }
 
-std::array<IOPDMAChannel, 5> IOPDMAController::grantOrder() const
+std::array<IOPDMAChannel, 6> IOPDMAController::grantOrder() const
 {
-  std::array<IOPDMAChannel, 5> order;
+  std::array<IOPDMAChannel, 6> order;
   const auto start = grantChannelIndex(nextChannel);
   for (std::size_t index = 0; index < order.size(); ++index)
   {
@@ -730,7 +799,7 @@ void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)
   auto &bank = banks[bankIndex(channelBank(channel))];
   const auto flag = static_cast<std::uint8_t>(1 << channelSlot(channel));
   if ((channel == IOPDMAChannel::SPU0 || channel == IOPDMAChannel::SPU1 ||
-       channel == IOPDMAChannel::SIO2Input) &&
+       channel == IOPDMAChannel::SIO2Input || channel == IOPDMAChannel::SIO2Output) &&
       (bank.control & (IOPWord{flag} << 16)) == 0)
   {
     return;

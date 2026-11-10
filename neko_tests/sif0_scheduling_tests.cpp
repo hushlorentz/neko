@@ -263,7 +263,7 @@ TEST_CASE("Shared IOP grants honor both banks before cyclic ties",
       winner == IOPDMAChannel::SPU0 ? 0x80000 : 0x90000);
     dma.writePriority(BANK, (winner == IOPDMAChannel::SPU1 ? 0x9908 :
       winner == IOPDMAChannel::SIF0 ? 0x9809 :
-      winner == IOPDMAChannel::SIF1 ? 0x8909 : 0x9909) | 0x70000);
+      winner == IOPDMAChannel::SIF1 ? 0x8909 : 0x9909) | 0x770000);
     REQUIRE(dma.grantOrder()[0] == winner);
     REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
     system.clockMasterCycle();
@@ -279,7 +279,7 @@ TEST_CASE("Shared IOP grants honor both banks before cyclic ties",
   }
 }
 
-TEST_CASE("SIO2 input participates in five-channel cyclic and priority grants",
+TEST_CASE("SIO2 input participates in shared cyclic and priority grants",
   "[sio2-input-dma][scheduling][arbitration]")
 {
   const auto prepare = [](NekoSystem &system)
@@ -303,7 +303,7 @@ TEST_CASE("SIO2 input participates in five-channel cyclic and priority grants",
     dma.writePriority(IOPDMABank::Primary, 0x80000);
     dma.writePriority(BANK, 0x88808);
     for (const auto next : {IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input,
-      IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0})
+      IOPDMAChannel::SIO2Output, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0})
     {
       system.runMasterCycles(8);
       REQUIRE(dma.tieBreakChannel() == next);
@@ -325,8 +325,8 @@ TEST_CASE("SIO2 input participates in five-channel cyclic and priority grants",
       dma.writePriority(IOPDMABank::Primary, winner == IOPDMAChannel::SPU0 ? 0x80000 : 0x90000);
       const auto shift = winner == IOPDMAChannel::SPU1 ? 0 :
         winner == IOPDMAChannel::SIF0 ? 8 : winner == IOPDMAChannel::SIF1 ? 12 : 16;
-      dma.writePriority(BANK, winner == IOPDMAChannel::SPU0 ?
-        0x99909 : 0x99909 & ~(IOPWord{7} << shift));
+      dma.writePriority(BANK, 0x700000 | (winner == IOPDMAChannel::SPU0 ?
+        0x99909 : 0x99909 & ~(IOPWord{7} << shift)));
       REQUIRE(dma.grantOrder()[0] == winner);
       system.runMasterCycles(8);
       REQUIRE(dma.spuRemainingWords(0) == (winner == IOPDMAChannel::SPU0 ? 255 : 256));
@@ -362,7 +362,7 @@ TEST_CASE("SIO2 input bypasses waiting SPU and SIF endpoints without extra grant
   REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
   REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
   REQUIRE(dma.sio2InputRemainingWords() == 35);
-  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU0);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIO2Output);
 }
 
 TEST_CASE("Shared IOP grants bypass full SPU and SIF inputs without consuming waits",
@@ -1001,7 +1001,7 @@ TEST_CASE("SIF cursors reject invalid domains transactionally",
   const auto before = destination.saveState();
   const auto traceHash = destination.traceHash();
   for (const bool ee : {false, true})
-    for (const auto value : {2, 8, 12, 255})
+    for (const auto value : {2, 8, 13, 255})
     {
       SaveStateMutation state(original.saveState());
       state.writeScalar(ee ? "system.gifDMAC.sifNextDirection" :
@@ -2362,7 +2362,7 @@ TEST_CASE("Malformed combined SIF ownership rejects without changing a distinct 
       "IOP SIF0 DMA packet continuation is incompatible with channel state"},
     InvalidField{"system.iop.sif1DMA.channelControl", 0x400,
       "IOP SIF1 DMA packet continuation is incompatible with channel state"},
-    InvalidField{"system.iop.dmaController.nextChannel", 12,
+    InvalidField{"system.iop.dmaController.nextChannel", 13,
       "IOP DMA arbitration cursor is invalid"},
     InvalidField{"system.gifDMAC.sifNextDirection", 2,
       "EE SIF arbitration cursor is invalid"}})

@@ -783,7 +783,7 @@ void NekoSystem::stopTrace()
   lastEEFaultContext = {};
   observedSPUWait = {};
   lastSPUWait = {};
-  observedSIO2Wait = false;
+  observedSIO2Wait = {};
   lastSIO2Wait = {};
 }
 
@@ -1287,7 +1287,10 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
         result = clockIOPSIFChannel(channel, order, events);
         break;
       case IOPDMAChannel::SIO2Input:
-        result = clockIOPSIO2Input(order, events);
+        result = clockIOPSIO2Channel(IOPSIO2DMAChannel::Input, order, events);
+        break;
+      case IOPDMAChannel::SIO2Output:
+        result = clockIOPSIO2Channel(IOPSIO2DMAChannel::Output, order, events);
         break;
       default: throw std::logic_error("Unknown IOP DMA grant channel.");
     }
@@ -1299,23 +1302,33 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
   return result;
 }
 
-IOPDMABeatResult NekoSystem::clockIOPSIO2Input(
-  NekoObservationOrder &order, DMAObservations &events)
+IOPDMABeatResult NekoSystem::clockIOPSIO2Channel(
+  IOPSIO2DMAChannel channel, NekoObservationOrder &order, DMAObservations &events)
 {
   auto &dma = iopDMAControllerComponent;
   auto &sio2 = sio2ControllerComponent;
-  if ((!collectingTrace && !probingFailures) || !dma.sio2InputActive())
+  const bool input = channel == IOPSIO2DMAChannel::Input;
+  const auto index = static_cast<std::size_t>(channel);
+  const auto grant = [&]() { return input ? dma.clockSIO2Input(iopBusComponent, sio2)
+    : dma.clockSIO2Output(iopBusComponent, sio2); };
+  const auto remaining = [&]() { return input ? dma.sio2InputRemainingWords()
+    : dma.sio2OutputRemainingWords(); };
+  const auto buffered = [&]() { return input ? sio2.transmitInputSize()
+    : sio2.dmaResultSize(); };
+  if ((!collectingTrace && !probingFailures) ||
+      !(input ? dma.sio2InputActive() : dma.sio2OutputActive()))
   {
-    observedSIO2Wait = false;
-    return dma.clockSIO2Input(iopBusComponent, sio2);
+    observedSIO2Wait[index] = false;
+    return grant();
   }
   NekoSIO2Trace::Beat beat;
-  beat.sourceAddress = dma.sio2MemoryAddress(IOPSIO2DMAChannel::Input);
-  beat.remainingBefore = static_cast<std::uint8_t>(dma.sio2InputRemainingWords());
-  beat.stagedBefore = static_cast<std::uint16_t>(sio2.transmitInputSize());
+  beat.channel = input ? 11 : 12;
+  beat.sourceAddress = dma.sio2MemoryAddress(channel);
+  beat.remainingBefore = static_cast<std::uint8_t>(remaining());
+  beat.stagedBefore = static_cast<std::uint16_t>(buffered());
   // Reserve before completion can publish the independently latched DMA interrupt.
   const auto sequence = order.next++;
-  const auto result = dma.clockSIO2Input(iopBusComponent, sio2);
+  const auto result = grant();
   beat.sourceValue = result.value;
   switch (result.outcome)
   {
@@ -1332,19 +1345,19 @@ IOPDMABeatResult NekoSystem::clockIOPSIO2Input(
       case IOPBusStatus::Misaligned: beat.busStatus = NekoSPUTrace::BusStatus::Misaligned; break;
       case IOPBusStatus::ReadOnly: beat.busStatus = NekoSPUTrace::BusStatus::ReadOnly; break;
       case IOPBusStatus::Unmapped: beat.busStatus = NekoSPUTrace::BusStatus::Unmapped; break;
-      default: throw std::logic_error("Unknown SIO2 DMA source rejection.");
+      default: throw std::logic_error("Unknown SIO2 DMA bus rejection.");
     }
   }
-  beat.remainingAfter = static_cast<std::uint8_t>(dma.sio2InputRemainingWords());
-  beat.stagedAfter = static_cast<std::uint16_t>(sio2.transmitInputSize());
+  beat.remainingAfter = static_cast<std::uint8_t>(remaining());
+  beat.stagedAfter = static_cast<std::uint16_t>(buffered());
   const auto event = nekoSIO2DMABeatEvent(beat);
   const bool waiting = result.outcome == IOPDMABeatOutcome::Wait;
-  const bool repeated = waiting && observedSIO2Wait &&
-    lastSIO2Wait.value0 == event.value0 && lastSIO2Wait.value1 == event.value1 &&
-    lastSIO2Wait.value2 == event.value2 && lastSIO2Wait.value3 == event.value3;
-  observedSIO2Wait = waiting;
+  const bool repeated = waiting && observedSIO2Wait[index] &&
+    lastSIO2Wait[index].value0 == event.value0 && lastSIO2Wait[index].value1 == event.value1 &&
+    lastSIO2Wait[index].value2 == event.value2 && lastSIO2Wait[index].value3 == event.value3;
+  observedSIO2Wait[index] = waiting;
   if (waiting)
-    lastSIO2Wait = event;
+    lastSIO2Wait[index] = event;
   if (!repeated)
   {
     assert(events.count < events.entries.size());

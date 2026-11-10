@@ -704,6 +704,9 @@ TEST_CASE("SIO2 DMA card canonical admission rejects mismatched phases transacti
     {
       CAPTURE(ready);
       CAPTURE(mutation.first);
+      if (ready && mutation.first == "system.iop.sio2.dmaResultPhase" &&
+          mutation.second == 0)
+        continue; // An empty completed result is now the valid fully drained state.
       SaveStateMutation invalid(state);
       invalid.writeScalar(mutation.first, mutation.second);
       invalid.refreshChecksum();

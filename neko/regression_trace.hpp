@@ -162,6 +162,7 @@ namespace NekoSPUTrace
 
 namespace NekoSIO2Trace
 {
+  // Channel 12 records the destination address and remaining result bytes.
   struct Beat
   {
     std::uint8_t channel = 11;

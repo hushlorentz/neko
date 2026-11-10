@@ -79,6 +79,8 @@ class SIO2Controller final
     static bool supportsControl(std::uint32_t value) noexcept;
     bool hasDMAProbeProgramming() const noexcept;
     bool hasValidTransferState() const noexcept;
+    std::uint32_t peekDMAResultWord() const noexcept;
+    void consumeDMAResultWord() noexcept;
     void clearTransmitInput() noexcept;
     bool beginDMAInput() noexcept;
     bool canAcceptDMAWord() const noexcept;
@@ -95,6 +97,7 @@ class SIO2Controller final
     std::uint8_t receiveRemaining = 0;
     bool interruptCause = false;
     SIO2DMAResultPhase resultPhase = SIO2DMAResultPhase::Empty;
+    std::uint8_t resultCursor = 0;
 };
 
 #endif

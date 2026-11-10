@@ -350,7 +350,7 @@ Both prefix and failure-capture writers validate paired identities, enums and
 target/input bounds through the shared C++ decoders before emitting the
 affected record. These diagnostics do not establish silicon timing or boot.
 
-### SIO2 input DMA observations
+### SIO2 DMA observations
 
 SIO2 subsystem 17 event 20 (`DMABeat`) adds `sio2_dma` beside the raw words:
 
@@ -366,10 +366,20 @@ address/value and before/after remaining words and staged bytes. Completion is
 the final accepted word, ordered before its DMA interrupt and CPU observations.
 No per-byte or serial-completion events are generated.
 
+Channel12 uses endpoint `iop_sio2_output` and records the physical destination
+in `attempted_address`, the peeked result word in `source_value`, and remaining
+SIO2 bytes in `result_before`/`result_after` instead of staged input counts.
+A rejected destination reports `destination_write` without consuming results.
+The result snapshot counts unread bytes: four logical absent-card samples
+followed by140 explicit padding bytes; after the first output word only
+padding remains. DMA completion is independent of the earlier serial IRQ.
+Wait suppression is independent for each channel.
+
 The low three bytes of `values[0]` are channel/outcome/bus status.
 `values[1]` packs address/value in its low/high 32 bits; `values[2]` packs
 remaining-before/after in its low two bytes; `values[3]` packs staged-before/after
-in its low two halfwords. Use `nekoDecodeSIO2DMABeat` for the validated C++ view.
+in its low two halfwords (remaining result bytes for channel12).
+Use `nekoDecodeSIO2DMABeat` for the validated C++ view.
 Rejections enter the existing typed DMA first-failure path without a causal
 CPU instruction. Trace and failure-probe gating, session lifecycle and
 destination-owned diagnostics follow the shared DMA rules above.

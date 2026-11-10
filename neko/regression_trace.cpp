@@ -188,7 +188,7 @@ NekoSIO2Trace::Beat nekoDecodeSIO2DMABeat(const NekoTraceEvent &event)
   const auto remainingAfter = (event.value2 >> 8) & 255;
   const auto stagedBefore = event.value3 & 65535;
   const auto stagedAfter = (event.value3 >> 16) & 65535;
-  if (channel != 11 || outcome > 3 || status > 3 ||
+  if ((channel != 11 && channel != 12) || outcome > 3 || status > 3 ||
       remainingBefore > 36 || remainingAfter > 36 ||
       stagedBefore > 144 || stagedAfter > 144 ||
       ((outcome == static_cast<unsigned>(NekoSPUTrace::Outcome::Rejected)) ==

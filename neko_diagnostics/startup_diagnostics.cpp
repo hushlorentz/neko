@@ -1,5 +1,6 @@
 #include "startup_diagnostics.hpp"
 
+#include <algorithm>
 #include <locale>
 #include <ostream>
 #include <sstream>
@@ -71,6 +72,7 @@ namespace
       case IOPDMAChannel::SIF0: return 9;
       case IOPDMAChannel::SIF1: return 10;
       case IOPDMAChannel::SIO2Input: return 11;
+      case IOPDMAChannel::SIO2Output: return 12;
     }
     throw std::invalid_argument("Unknown startup diagnostic IOP DMA channel.");
   }
@@ -231,10 +233,10 @@ namespace
       << "\",\"input_bytes\":" << summary.sio2.inputBytes
       << ",\"dma_result_phase\":\"" << enumName(summary.sio2.resultPhase, sio2ResultPhases)
       << "\",\"dma_result_bytes\":" << summary.sio2.resultBytes
-      << ",\"dma_logical_bytes\":" << (summary.sio2.resultBytes != 0
+      << ",\"dma_logical_bytes\":" << (summary.sio2.resultBytes == SIO2Controller::DMA_INPUT_BYTES
         ? SIO2Controller::DMA_PROBE_REPLY_BYTES : 0)
-      << ",\"dma_padding_bytes\":" << (summary.sio2.resultBytes != 0
-        ? SIO2Controller::DMA_PROBE_PADDING_BYTES : 0) << "}"
+      << ",\"dma_padding_bytes\":" << std::min(summary.sio2.resultBytes,
+        SIO2Controller::DMA_PROBE_PADDING_BYTES) << "}"
       << ",\"dmac\":{\"control\":" << dma.control
       << ",\"hold_control\":" << dma.holdControl
       << ",\"status\":" << dma.status
@@ -564,18 +566,20 @@ void writeStartupSIO2DMABeatJson(
   const char *const statuses[] = {"none", "misaligned", "read_only", "unmapped"};
   const auto outcome = enumName(beat.outcome, outcomes);
   const auto status = enumName(beat.busStatus, statuses);
-  output << "{\"endpoint\":\"iop_sio2_input\",\"channel\":"
+  const bool input = beat.channel == 11;
+  output << "{\"endpoint\":\"" << (input ? "iop_sio2_input" : "iop_sio2_output")
+    << "\",\"channel\":"
     << static_cast<unsigned>(beat.channel)
     << ",\"kind\":\"payload\",\"outcome\":\"" << outcome
     << "\",\"failure\":\"" << (beat.outcome == NekoSPUTrace::Outcome::Rejected
-      ? "source_read" : "none")
+      ? (input ? "source_read" : "destination_write") : "none")
     << "\",\"bus_status\":\"" << status
     << "\",\"attempted_address\":" << beat.sourceAddress
     << ",\"source_value\":" << beat.sourceValue
     << ",\"remaining_before\":" << static_cast<unsigned>(beat.remainingBefore)
     << ",\"remaining_after\":" << static_cast<unsigned>(beat.remainingAfter)
-    << ",\"staged_before\":" << beat.stagedBefore
-    << ",\"staged_after\":" << beat.stagedAfter << '}';
+    << (input ? ",\"staged_before\":" : ",\"result_before\":") << beat.stagedBefore
+    << (input ? ",\"staged_after\":" : ",\"result_after\":") << beat.stagedAfter << '}';
 }
 
 void writeStartupTraceEventFields(

@@ -28,7 +28,8 @@ enum class IOPDMAChannel : std::uint8_t
   SPU1 = 7,
   SIF0 = 9,
   SIF1 = 10,
-  SIO2Input = 11
+  SIO2Input = 11,
+  SIO2Output = 12
 };
 
 enum class IOPSIO2DMAChannel : std::uint8_t
@@ -107,6 +108,8 @@ class IOPDMAController final
     IOPWord sio2OutputRemainingWords() const;
     IOPDMABeatResult inspectSIO2Input(const IOPBus &bus, const SIO2Controller &sio2) const;
     IOPDMABeatResult clockSIO2Input(const IOPBus &bus, SIO2Controller &sio2);
+    IOPDMABeatResult inspectSIO2Output(const IOPBus &bus, const SIO2Controller &sio2) const;
+    IOPDMABeatResult clockSIO2Output(IOPBus &bus, SIO2Controller &sio2);
     // Register readback follows accepted source progress while active.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
@@ -138,7 +141,7 @@ class IOPDMAController final
     IOPDMAWriteOutcome writeSupplementalInitialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
-    std::array<IOPDMAChannel, 5> grantOrder() const;
+    std::array<IOPDMAChannel, 6> grantOrder() const;
     IOPDMAChannel tieBreakChannel() const;
     // Compatibility projections of the shared grant policy onto SIF endpoints.
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;
@@ -192,6 +195,7 @@ class IOPDMAController final
     std::array<SPUChannel, 2> spuChannels = {};
     std::array<IOPDMAChannelState, 2> sio2Channels = {};
     std::uint8_t sio2InputWordsTransferred = 0;
+    std::uint8_t sio2OutputWordsTransferred = 0;
     IOPDMAChannel nextChannel = IOPDMAChannel::SIF0;
 };
 

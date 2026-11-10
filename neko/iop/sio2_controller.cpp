@@ -3,6 +3,8 @@
 #include <cassert>
 #include <stdexcept>
 
+constexpr std::size_t SIO2Controller::DMA_PROBE_PADDING_BYTES;
+
 void SIO2Controller::reset()
 {
   if (ingressPhase == SIO2IngressPhase::DMAOpen ||
@@ -109,14 +111,31 @@ SIO2DMAResultPhase SIO2Controller::dmaResultPhase() const noexcept
 std::size_t SIO2Controller::dmaResultSize() const noexcept
 {
   return resultPhase == SIO2DMAResultPhase::Ready
-    ? DMA_PROBE_REPLY_BYTES + DMA_PROBE_PADDING_BYTES : 0;
+    ? DMA_INPUT_BYTES - resultCursor : 0;
 }
 
 std::uint8_t SIO2Controller::dmaResultByte(std::size_t index) const
 {
   if (index >= dmaResultSize())
     throw std::out_of_range("SIO2 DMA result byte is unavailable");
-  return index < DMA_PROBE_REPLY_BYTES ? 0xff : 0;
+  return resultCursor + index < DMA_PROBE_REPLY_BYTES ? 0xff : 0;
+}
+
+std::uint32_t SIO2Controller::peekDMAResultWord() const noexcept
+{
+  assert(dmaResultSize() >= 4);
+  return resultCursor == 0 ? 0xffffffff : 0;
+}
+
+void SIO2Controller::consumeDMAResultWord() noexcept
+{
+  assert(dmaResultSize() >= 4);
+  resultCursor += 4;
+  if (resultCursor == DMA_INPUT_BYTES)
+  {
+    resultPhase = SIO2DMAResultPhase::Empty;
+    resultCursor = 0;
+  }
 }
 
 SIO2ReadResult SIO2Controller::readReceiveByte() noexcept
@@ -158,6 +177,9 @@ SIO2AccessStatus SIO2Controller::acknowledgeInterrupt(
 
 bool SIO2Controller::hasValidTransferState() const noexcept
 {
+  if (resultCursor % 4 != 0 || resultCursor >= DMA_INPUT_BYTES ||
+      (resultPhase != SIO2DMAResultPhase::Ready && resultCursor != 0))
+    return false;
   switch (resultPhase)
   {
     case SIO2DMAResultPhase::Empty: break;
@@ -194,7 +216,8 @@ bool SIO2Controller::hasValidTransferState() const noexcept
     return receiveRemaining == 0 && !interruptCause &&
       (control == 0 || supportsControl(control));
   }
-  return supportsControl(control) || control == 0xb1;
+  return supportsControl(control) || control == 0xb1 ||
+    (control == 0x3bd && receiveRemaining == 0);
 }
 
 std::uint32_t SIO2Controller::readPortControl(std::size_t index) const

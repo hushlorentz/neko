@@ -3693,7 +3693,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved bounded absent-card probe through the SIO2 owner,
       with next-pulse result production, independent status/IRQ, atomic
       lifecycle guards and canonical continuation; keep CPU infrared distinct.
-- [ ] Connect real SIO2 results to channel12 shared DMA grants with explicit
+- [x] Connect real SIO2 results to channel12 shared DMA grants with explicit
       padding, backpressure, write-before-consume progress, cancellation and
       masked completion; never manufacture results for an armed request.
 - [ ] Validate authored serial/DMA continuation across pending, ready, partial
