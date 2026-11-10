@@ -191,6 +191,7 @@ class IOPBus final
       CacheInitializationControl,
       HighAddressInitializationControl,
       RAMInitializationControl,
+      DEV9Revision,
       AbsentROM1
     };
 

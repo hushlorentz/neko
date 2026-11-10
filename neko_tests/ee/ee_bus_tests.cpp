@@ -5264,7 +5264,12 @@ TEST_CASE("EE absent DEV9 revision is an exact stateless byte read",
   REQUIRE_FALSE(bus.readDMAC128(0x1f801460, &quadword));
   REQUIRE_FALSE(bus.writeDMAC128(0x1f801460, quadword));
   REQUIRE(system.iopBus().read8(ADDRESS).status == IOPBusStatus::Unmapped);
-  REQUIRE(system.iopBus().read16(ADDRESS).status == IOPBusStatus::Unmapped);
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    const auto revision = system.iopBus().read16(ADDRESS);
+    REQUIRE(revision.status == IOPBusStatus::Completed);
+    REQUIRE(revision.value == 0);
+  }
   REQUIRE(system.iopBus().write8(ADDRESS, 0).status == IOPBusStatus::Unmapped);
   REQUIRE(system.iopBus().readDMAC32(0x1f80146c).status == IOPBusStatus::Unmapped);
   REQUIRE(system.eeStateHash() == eeHash);

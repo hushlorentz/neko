@@ -1,4 +1,5 @@
 #include "iop_bus.hpp"
+#include "dev9_revision.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_dma_controller.hpp"
 #include "iop_sif1_dma_channel.hpp"
@@ -479,6 +480,12 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     }
   }
 
+  if (first == DEV9Revision::ADDRESS &&
+      last < first + sizeof(std::uint16_t))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::DEV9Revision};
+  }
+
   const auto ssbus = locateSSBUS(address, last);
   if (ssbus.device != Device::None)
   {
@@ -847,6 +854,10 @@ IOPBusReadResult IOPBus::readDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::DEV9Revision:
+      return width == sizeof(std::uint16_t)
+        ? IOPBusReadResult{IOPBusStatus::Completed, DEV9Revision::ABSENT_VALUE}
+        : IOPBusReadResult{};
     case Device::SPU2SPDIFConfiguration:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1324,6 +1335,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2UnprogrammedCoreStatus:
+    case Device::DEV9Revision:
     case Device::AbsentROM1:
     case Device::None:
       return {};

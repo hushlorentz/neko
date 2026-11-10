@@ -3755,8 +3755,19 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded request through the existing SIO2 owner,
       with atomic admission and authored canonical, trace and interrupt
       coverage; preserve CPU-card, infrared and DMA-backed profiles.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress without fabricating peer replies, readiness or device success.
+
+### IOP DEV9 Revision Halfword Read Dependency
+
+- [x] Research the originating IOP halfword read at0x1f80146e and its register
+      family; select evidence-backed identity, owner, read value and side
+      effects without inferring readiness or generic MMIO fallback.
+- [x] Implement the selected bounded register contract with focused CPU/bus
+      and immediate-family regressions through one shared revision policy;
+      preserve existing EE access limits and initialization contracts.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
 
 ### Additional CD/DVD Command and Configuration Scope
 

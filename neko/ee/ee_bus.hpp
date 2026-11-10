@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "boot_rom.hpp"
+#include "dev9_revision.hpp"
 #include "ee_ba0_registers.hpp"
 #include "ee_types.hpp"
 #include "gif.hpp"
@@ -173,7 +174,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t IOP_STARTUP_3800 = 0x1f803800;
   constexpr std::uint32_t IOP_RAM_BASE = 0x1c000000;
   constexpr std::uint32_t IOP_RAM_END = 0x1c200000;
-  constexpr std::uint32_t IOP_DEV9_REVISION = 0x1f80146e;
+  constexpr std::uint32_t IOP_DEV9_REVISION = DEV9Revision::ADDRESS;
   constexpr std::uint32_t IOP_DEV9_INIT_1470 = 0x1f801470;
   constexpr std::uint32_t IOP_DEV9_INIT_1472 = 0x1f801472;
 

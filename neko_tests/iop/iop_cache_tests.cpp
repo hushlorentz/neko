@@ -1478,6 +1478,33 @@ TEST_CASE("SIO2 guest merge loads use the aligned programming word and delayed w
   }
 }
 
+TEST_CASE("IOP DEV9 revision bypasses cached payloads while isolation retains ownership",
+  "[iop][cache][dev9-revision]")
+{
+  for (const bool swapped : {false, true})
+  for (IOPAddress address : {0x1f80146eu, 0x9f80146eu, 0xbf80146eu})
+  {
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address & ~IOPAddress(3), 0xfacebeef).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0xface);
+    const IOPCache isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    const auto revision = core.readData16(address);
+    REQUIRE(revision.outcome == IOPAccessOutcome::Completed);
+    REQUIRE(revision.value == 0);
+    REQUIRE(revision.physicalAddress == 0x1f80146e);
+    REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
 TEST_CASE("IOP absent ROM1 data bypasses caches without admitting instruction fetch",
   "[iop][cache][rom1]")
 {

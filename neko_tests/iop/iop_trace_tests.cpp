@@ -131,6 +131,67 @@ TEST_CASE("IOP system publishes fetch issue and retirement only on CPU clocks",
   REQUIRE(events[2].value3 == 1);
 }
 
+TEST_CASE("IOP DEV9 revision LHU aliases retain the load delay and trace identity",
+  "[iop][execution][trace][dev9-revision]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (IOPAddress address : {0x1f80146eu, 0x9f80146eu, 0xbf80146eu})
+  {
+    CAPTURE(address);
+    NekoSystem traced;
+    NekoSystem plain;
+    for (auto *system : {&traced, &plain})
+    {
+      instruction(*system, 0, 0x3c010000 | (address >> 16));
+      instruction(*system, 4, 0x34210000 | (address & 0xffff));
+      instruction(*system, 8, 0x24021234);
+      instruction(*system, 12, 0x94220000);
+      instruction(*system, 16, 0x00402021);
+      instruction(*system, 20, 0x00402821);
+      system->iopCore().startExecution(0xa0000000);
+    }
+    traced.startTrace();
+    for (auto *system : {&traced, &plain})
+    {
+      system->runMasterCycles(32);
+      REQUIRE(system->iopCore().retiredInstructions() == 4);
+      REQUIRE(system->iopCore().exception().kind == IOPException::None);
+      REQUIRE(system->iopCore().generalRegister(2) == 0x1234);
+      system->runMasterCycles(8);
+      REQUIRE(system->iopCore().generalRegister(4) == 0x1234);
+      REQUIRE(system->iopCore().generalRegister(2) == 0);
+      system->runMasterCycles(8);
+      REQUIRE(system->iopCore().generalRegister(5) == 0);
+      REQUIRE(system->iopCore().retiredInstructions() == 6);
+      REQUIRE(system->iopCore().programCounter() == 0xa0000018);
+      REQUIRE(system->iopCore().exception().kind == IOPException::None);
+    }
+    REQUIRE(traced.iopStateHash() == plain.iopStateHash());
+    REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    REQUIRE(traced.sifStateHash() == plain.sifStateHash());
+    REQUIRE(plain.trace().empty());
+    unsigned reads = 0;
+    for (const auto &event : traced.trace())
+    {
+      if (event.subsystem != Subsystem::IOP ||
+          event.type != Type::MemoryAccess || event.value0 != address)
+      {
+        continue;
+      }
+      requireIdentity(event, Subsystem::IOP, Type::MemoryAccess, 25);
+      REQUIRE(event.value1 == 0);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        0x1f80146e, 2, Memory::AccessKind::DataLoad,
+        Memory::Outcome::Completed, address == 0xbf80146e
+          ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached,
+        true, 0}));
+      ++reads;
+    }
+    REQUIRE(reads == 1);
+  }
+}
+
 TEST_CASE("IOP three-word SSBUS initialization is trace-observational",
   "[iop][ssbus][trace]")
 {
