@@ -374,10 +374,15 @@ Channel12 uses endpoint `iop_sio2_output` and records the physical destination
 in `attempted_address`, the peeked result word in `source_value`, and remaining
 SIO2 bytes in `result_before`/`result_after` instead of staged input counts.
 A rejected destination reports `destination_write` without consuming results.
-The result snapshot counts unread bytes: four logical absent-card samples
-followed by140 explicit padding bytes; after the first output word only
-padding remains. DMA completion is independent of the earlier serial IRQ.
+The result snapshot counts unread bytes: the probe profile has four logical
+absent-card samples followed by140 explicit padding bytes; the `f3` profile
+has five followed by139. After the first output word, `f3` retains one logical
+byte while the probe has only padding. DMA completion is independent of the
+earlier serial IRQ.
 Wait suppression is independent for each channel.
+CPU replies from the infrared and bounded `81 52 00` absent-card profiles
+do not enter these DMA result counts. An armed output channel can remain
+waiting while CPU receive bytes are available or drained.
 
 The low three bytes of `values[0]` are channel/outcome/bus status.
 `values[1]` packs address/value in its low/high 32 bits; `values[2]` packs

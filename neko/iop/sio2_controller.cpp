@@ -34,7 +34,7 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
   const bool completedCardRewrite = value == 0x3bd && control == value &&
     transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
     transmitInputCount == 0 && resultCursor == 0 && receiveRemaining == 0 &&
-    dmaCardProfile() != nullptr;
+    (dmaCardProfile() != nullptr || hasCPUCardReadProgramming());
   if ((!supportsControl(value) && !completedCardRewrite) ||
       resultPhase != SIO2DMAResultPhase::Empty)
   {
@@ -49,28 +49,50 @@ SIO2TransferResult SIO2Controller::startTransfer(
 {
   if (resultPhase != SIO2DMAResultPhase::Empty)
     return SIO2TransferResult::Unsupported;
-  if (controlValue == 0x3bd)
-  {
-    const auto *profile = dmaCardProfile();
-    if (ingressPhase != SIO2IngressPhase::DMASealed ||
-        transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0 ||
-        profile == nullptr || transmitInput[0] != 0x81 ||
-        transmitInput[1] != profile->command)
+  if (ingressPhase == SIO2IngressPhase::CPU)
+    return startCPUTransfer(controlValue);
+  if (controlValue == 0x3bd && ingressPhase == SIO2IngressPhase::DMASealed)
+    return startDMACardTransfer();
+  return SIO2TransferResult::Unsupported;
+}
+
+SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
+{
+  const auto *profile = dmaCardProfile();
+  if (transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0 ||
+      profile == nullptr || transmitInput[0] != 0x81 ||
+      transmitInput[1] != profile->command)
+    return SIO2TransferResult::Unsupported;
+  for (std::size_t index = 2; index < DMA_INPUT_BYTES; ++index)
+    if (transmitInput[index] != 0)
       return SIO2TransferResult::Unsupported;
-    for (std::size_t index = 2; index < DMA_INPUT_BYTES; ++index)
-      if (transmitInput[index] != 0)
-        return SIO2TransferResult::Unsupported;
-    clearTransmitInput();
-    control = controlValue;
-    transferCompleted = false;
-    resultPhase = SIO2DMAResultPhase::Pending;
-    return SIO2TransferResult::Pending;
+  clearTransmitInput();
+  control = 0x3bd;
+  transferCompleted = false;
+  resultPhase = SIO2DMAResultPhase::Pending;
+  return SIO2TransferResult::Pending;
+}
+
+SIO2TransferResult SIO2Controller::startCPUTransfer(
+  std::uint32_t controlValue) noexcept
+{
+  if (receiveRemaining != 0)
+    return SIO2TransferResult::Unsupported;
+  std::uint8_t replyBytes = 0;
+  if (controlValue == 0xb1 &&
+      (commandDescriptors[0] == 0x001c0740 || commandDescriptors[0] == 0x001c0741) &&
+      commandDescriptors[1] == 0 && transmitInputCount == 7 &&
+      transmitInput[0] == 0x61)
+  {
+    replyBytes = 7;
   }
-  if (ingressPhase != SIO2IngressPhase::CPU ||
-      controlValue != 0xb1 || receiveRemaining != 0 ||
-      (commandDescriptors[0] != 0x001c0740 && commandDescriptors[0] != 0x001c0741) ||
-      commandDescriptors[1] != 0 ||
-      transmitInputCount != 7 || transmitInput[0] != 0x61)
+  else if (controlValue == 0x3bd && hasCPUCardReadProgramming() &&
+      transmitInputCount == CPU_CARD_REPLY_BYTES &&
+      transmitInput[0] == 0x81 && transmitInput[1] == 0x52 && transmitInput[2] == 0)
+  {
+    replyBytes = CPU_CARD_REPLY_BYTES;
+  }
+  else
   {
     return SIO2TransferResult::Unsupported;
   }
@@ -79,9 +101,21 @@ SIO2TransferResult SIO2Controller::startTransfer(
   control = controlValue;
   clearTransmitInput();
   transferCompleted = true;
-  receiveRemaining = 7;
+  receiveRemaining = replyBytes;
   interruptCause = true;
   return result;
+}
+
+bool SIO2Controller::hasCPUCardReadProgramming() const noexcept
+{
+  if (commandDescriptors[0] != 0x000c0342 && commandDescriptors[0] != 0x000c0343)
+    return false;
+  for (std::size_t index = 1; index < commandDescriptors.size(); ++index)
+    if (commandDescriptors[index] != 0)
+      return false;
+  const auto port = commandDescriptors[0] & 3;
+  return portControls[port * 2] == 0xffc00505 &&
+    portControls[port * 2 + 1] == 0x000201f4;
 }
 
 const SIO2Controller::DMACardProfile *SIO2Controller::dmaCardProfile() const noexcept
@@ -244,7 +278,7 @@ bool SIO2Controller::hasValidTransferState() const noexcept
       (control == 0 || supportsControl(control));
   }
   return supportsControl(control) || control == 0xb1 ||
-    (control == 0x3bd && receiveRemaining == 0);
+    (control == 0x3bd && receiveRemaining <= CPU_CARD_REPLY_BYTES);
 }
 
 std::uint32_t SIO2Controller::readPortControl(std::size_t index) const

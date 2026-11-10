@@ -84,6 +84,10 @@ class SIO2Controller final
       std::size_t replyBytes;
     };
     const DMACardProfile *dmaCardProfile() const noexcept;
+    static constexpr std::uint8_t CPU_CARD_REPLY_BYTES = 3;
+    bool hasCPUCardReadProgramming() const noexcept;
+    SIO2TransferResult startCPUTransfer(std::uint32_t controlValue) noexcept;
+    SIO2TransferResult startDMACardTransfer() noexcept;
     bool hasValidTransferState() const noexcept;
     std::uint32_t peekDMAResultWord() const noexcept;
     void consumeDMAResultWord() noexcept;

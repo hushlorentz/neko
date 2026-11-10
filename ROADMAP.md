@@ -3722,6 +3722,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded command through the existing SIO2 owner,
       with atomic admission, real output-DMA results and authored canonical,
       trace and interrupt coverage; preserve the existing probe contracts.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress without fabricating peer replies, readiness or card success.
+
+### IOP SIO2 CPU Command 0x52 Dependency
+
+- [x] Research descriptor0x000c0342, controls0xffc00505/0x000201f4 and CPU-staged
+      `81 52 00`; select endpoint, absent-device results, lifecycle and IRQ
+      contracts, with approval before active command behavior.
+- [x] Implement the selected bounded command through the existing CPU-ingress
+      and receive owner, with atomic admission and authored canonical, trace
+      and interrupt coverage; preserve DMA-backed and infrared profiles.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress without fabricating peer replies, readiness or card success.
 
