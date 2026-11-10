@@ -3699,9 +3699,20 @@ not requirements for exhaustive subsystem coverage.
 - [x] Validate authored serial/DMA continuation across pending, ready, partial
       and cancelled states, including transactional canonical rejection and
       independent serial/DMA interrupts.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress; distinguish negative peripheral results from fabricated success
       or completed boot.
+
+### IOP SIO2 Completed-Probe Control Dependency
+
+- [x] Research the demonstrated completed-state CTRL|0x0c rewrite with empty
+      ingress/results and inactive output DMA; select bounded retained-control,
+      restart and IRQ semantics before admitting the new lifecycle case.
+- [x] Implement the selected bounded contract through the existing SIO2 owner,
+      with atomic lifecycle guards and authored canonical, trace and interrupt
+      coverage; distinguish completed rewrites from DMA-backed probe starts.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress without fabricating input, results, completion or peer replies.
 
 ### Additional CD/DVD Command and Configuration Scope
 

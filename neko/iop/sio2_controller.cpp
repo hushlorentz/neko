@@ -31,7 +31,12 @@ bool SIO2Controller::supportsControl(std::uint32_t value) noexcept
 
 SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 {
-  if (!supportsControl(value) || resultPhase != SIO2DMAResultPhase::Empty)
+  const bool completedProbeRewrite = value == 0x3bd && control == value &&
+    transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
+    transmitInputCount == 0 && resultCursor == 0 && receiveRemaining == 0 &&
+    hasDMAProbeProgramming();
+  if ((!supportsControl(value) && !completedProbeRewrite) ||
+      resultPhase != SIO2DMAResultPhase::Empty)
   {
     return SIO2AccessStatus::Unsupported;
   }
