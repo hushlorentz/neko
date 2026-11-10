@@ -380,8 +380,9 @@ has five followed by139. After the first output word, `f3` retains one logical
 byte while the probe has only padding. DMA completion is independent of the
 earlier serial IRQ.
 Wait suppression is independent for each channel.
-CPU replies from the infrared and bounded `81 52 00` absent-card profiles
-do not enter these DMA result counts. An armed output channel can remain
+CPU replies from the infrared, bounded `81 52 00` absent-card, and
+`21 12 00 00 00 00` absent-multitap profiles do not enter these DMA result
+counts. An armed output channel can remain
 waiting while CPU receive bytes are available or drained.
 
 The low three bytes of `values[0]` are channel/outcome/bus status.

@@ -31,11 +31,12 @@ bool SIO2Controller::supportsControl(std::uint32_t value) noexcept
 
 SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 {
-  const bool completedCardRewrite = value == 0x3bd && control == value &&
+  const bool completedRewrite = value == 0x3bd && control == value &&
     transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
     transmitInputCount == 0 && resultCursor == 0 && receiveRemaining == 0 &&
-    (dmaCardProfile() != nullptr || hasCPUCardReadProgramming());
-  if ((!supportsControl(value) && !completedCardRewrite) ||
+    (dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
+      hasCPUMultitapSupportProgramming());
+  if ((!supportsControl(value) && !completedRewrite) ||
       resultPhase != SIO2DMAResultPhase::Empty)
   {
     return SIO2AccessStatus::Unsupported;
@@ -92,6 +93,15 @@ SIO2TransferResult SIO2Controller::startCPUTransfer(
   {
     replyBytes = CPU_CARD_REPLY_BYTES;
   }
+  else if (controlValue == 0x3bd && hasCPUMultitapSupportProgramming() &&
+      transmitInputCount == CPU_MULTITAP_REPLY_BYTES &&
+      transmitInput[0] == 0x21 && transmitInput[1] == 0x12)
+  {
+    for (std::size_t index = 2; index < CPU_MULTITAP_REPLY_BYTES; ++index)
+      if (transmitInput[index] != 0)
+        return SIO2TransferResult::Unsupported;
+    replyBytes = CPU_MULTITAP_REPLY_BYTES;
+  }
   else
   {
     return SIO2TransferResult::Unsupported;
@@ -108,14 +118,26 @@ SIO2TransferResult SIO2Controller::startCPUTransfer(
 
 bool SIO2Controller::hasCPUCardReadProgramming() const noexcept
 {
-  if (commandDescriptors[0] != 0x000c0342 && commandDescriptors[0] != 0x000c0343)
+  return hasPairedCPUProgramming(0x000c0342, 0xffc00505, 0x000201f4);
+}
+
+bool SIO2Controller::hasCPUMultitapSupportProgramming() const noexcept
+{
+  return hasPairedCPUProgramming(0x00180642, 0xff020505, 0x00030064);
+}
+
+bool SIO2Controller::hasPairedCPUProgramming(std::uint32_t firstDescriptor,
+  std::uint32_t firstPortControl, std::uint32_t secondPortControl) const noexcept
+{
+  if (commandDescriptors[0] != firstDescriptor &&
+      commandDescriptors[0] != firstDescriptor + 1)
     return false;
   for (std::size_t index = 1; index < commandDescriptors.size(); ++index)
     if (commandDescriptors[index] != 0)
       return false;
   const auto port = commandDescriptors[0] & 3;
-  return portControls[port * 2] == 0xffc00505 &&
-    portControls[port * 2 + 1] == 0x000201f4;
+  return portControls[port * 2] == firstPortControl &&
+    portControls[port * 2 + 1] == secondPortControl;
 }
 
 const SIO2Controller::DMACardProfile *SIO2Controller::dmaCardProfile() const noexcept
@@ -278,7 +300,7 @@ bool SIO2Controller::hasValidTransferState() const noexcept
       (control == 0 || supportsControl(control));
   }
   return supportsControl(control) || control == 0xb1 ||
-    (control == 0x3bd && receiveRemaining <= CPU_CARD_REPLY_BYTES);
+    (control == 0x3bd && receiveRemaining <= CPU_MULTITAP_REPLY_BYTES);
 }
 
 std::uint32_t SIO2Controller::readPortControl(std::size_t index) const

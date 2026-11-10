@@ -85,7 +85,11 @@ class SIO2Controller final
     };
     const DMACardProfile *dmaCardProfile() const noexcept;
     static constexpr std::uint8_t CPU_CARD_REPLY_BYTES = 3;
+    static constexpr std::uint8_t CPU_MULTITAP_REPLY_BYTES = 6;
     bool hasCPUCardReadProgramming() const noexcept;
+    bool hasCPUMultitapSupportProgramming() const noexcept;
+    bool hasPairedCPUProgramming(std::uint32_t firstDescriptor,
+      std::uint32_t firstPortControl, std::uint32_t secondPortControl) const noexcept;
     SIO2TransferResult startCPUTransfer(std::uint32_t controlValue) noexcept;
     SIO2TransferResult startDMACardTransfer() noexcept;
     bool hasValidTransferState() const noexcept;
