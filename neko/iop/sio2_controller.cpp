@@ -5,8 +5,9 @@
 
 void SIO2Controller::reset()
 {
-  if (ingressPhase == SIO2IngressPhase::DMAOpen)
-    throw std::logic_error("SIO2 reset requires coordinated cancellation of open DMA input");
+  if (ingressPhase == SIO2IngressPhase::DMAOpen ||
+      resultPhase != SIO2DMAResultPhase::Empty)
+    throw std::logic_error("SIO2 reset requires coordinated cancellation of DMA input/results");
   control = 0;
   portControls.fill(0);
   commandDescriptors.fill(0);
@@ -28,7 +29,7 @@ bool SIO2Controller::supportsControl(std::uint32_t value) noexcept
 
 SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 {
-  if (!supportsControl(value))
+  if (!supportsControl(value) || resultPhase != SIO2DMAResultPhase::Empty)
   {
     return SIO2AccessStatus::Unsupported;
   }
@@ -39,6 +40,24 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 SIO2TransferResult SIO2Controller::startTransfer(
   std::uint32_t controlValue) noexcept
 {
+  if (resultPhase != SIO2DMAResultPhase::Empty)
+    return SIO2TransferResult::Unsupported;
+  if (controlValue == 0x3bd)
+  {
+    if (ingressPhase != SIO2IngressPhase::DMASealed ||
+        transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0 ||
+        !hasDMAProbeProgramming() || transmitInput[0] != 0x81 ||
+        transmitInput[1] != 0x11)
+      return SIO2TransferResult::Unsupported;
+    for (std::size_t index = 2; index < DMA_INPUT_BYTES; ++index)
+      if (transmitInput[index] != 0)
+        return SIO2TransferResult::Unsupported;
+    clearTransmitInput();
+    control = controlValue;
+    transferCompleted = false;
+    resultPhase = SIO2DMAResultPhase::Pending;
+    return SIO2TransferResult::Pending;
+  }
   if (ingressPhase != SIO2IngressPhase::CPU ||
       controlValue != 0xb1 || receiveRemaining != 0 ||
       (commandDescriptors[0] != 0x001c0740 && commandDescriptors[0] != 0x001c0741) ||
@@ -55,6 +74,49 @@ SIO2TransferResult SIO2Controller::startTransfer(
   receiveRemaining = 7;
   interruptCause = true;
   return result;
+}
+
+bool SIO2Controller::hasDMAProbeProgramming() const noexcept
+{
+  if (commandDescriptors[0] != 0x00100472 &&
+      commandDescriptors[0] != 0x00100473)
+    return false;
+  for (std::size_t index = 1; index < commandDescriptors.size(); ++index)
+    if (commandDescriptors[index] != 0)
+      return false;
+  const auto port = commandDescriptors[0] & 3;
+  return portControls[port * 2] == 0xff020405 &&
+    portControls[port * 2 + 1] == 0x0005ffff;
+}
+
+SIO2TransferResult SIO2Controller::completePendingTransfer() noexcept
+{
+  if (resultPhase != SIO2DMAResultPhase::Pending)
+    return SIO2TransferResult::Idle;
+  resultPhase = SIO2DMAResultPhase::Ready;
+  transferCompleted = true;
+  const auto result = interruptCause ? SIO2TransferResult::Completed
+    : SIO2TransferResult::CompletedWithInterrupt;
+  interruptCause = true;
+  return result;
+}
+
+SIO2DMAResultPhase SIO2Controller::dmaResultPhase() const noexcept
+{
+  return resultPhase;
+}
+
+std::size_t SIO2Controller::dmaResultSize() const noexcept
+{
+  return resultPhase == SIO2DMAResultPhase::Ready
+    ? DMA_PROBE_REPLY_BYTES + DMA_PROBE_PADDING_BYTES : 0;
+}
+
+std::uint8_t SIO2Controller::dmaResultByte(std::size_t index) const
+{
+  if (index >= dmaResultSize())
+    throw std::out_of_range("SIO2 DMA result byte is unavailable");
+  return index < DMA_PROBE_REPLY_BYTES ? 0xff : 0;
 }
 
 SIO2ReadResult SIO2Controller::readReceiveByte() noexcept
@@ -96,6 +158,16 @@ SIO2AccessStatus SIO2Controller::acknowledgeInterrupt(
 
 bool SIO2Controller::hasValidTransferState() const noexcept
 {
+  switch (resultPhase)
+  {
+    case SIO2DMAResultPhase::Empty: break;
+    case SIO2DMAResultPhase::Pending:
+    case SIO2DMAResultPhase::Ready:
+      return ingressPhase == SIO2IngressPhase::Empty && transmitInputCount == 0 &&
+        receiveRemaining == 0 && control == 0x3bd && hasDMAProbeProgramming() &&
+        transferCompleted == (resultPhase == SIO2DMAResultPhase::Ready);
+    default: return false;
+  }
   switch (ingressPhase)
   {
     case SIO2IngressPhase::Empty:
@@ -130,9 +202,14 @@ std::uint32_t SIO2Controller::readPortControl(std::size_t index) const
   return portControls.at(index);
 }
 
-void SIO2Controller::writePortControl(std::size_t index, std::uint32_t value)
+SIO2AccessStatus SIO2Controller::writePortControl(
+  std::size_t index, std::uint32_t value)
 {
-  portControls.at(index) = value;
+  auto &port = portControls.at(index);
+  if (resultPhase != SIO2DMAResultPhase::Empty)
+    return SIO2AccessStatus::Unsupported;
+  port = value;
+  return SIO2AccessStatus::Accepted;
 }
 
 std::uint32_t SIO2Controller::readCommandDescriptor(std::size_t index) const
@@ -143,9 +220,11 @@ std::uint32_t SIO2Controller::readCommandDescriptor(std::size_t index) const
 SIO2AccessStatus SIO2Controller::writeCommandDescriptor(
   std::size_t index, std::uint32_t value)
 {
-  if (index == 0 && ingressPhase == SIO2IngressPhase::DMAOpen)
+  auto &descriptor = commandDescriptors.at(index);
+  if (resultPhase != SIO2DMAResultPhase::Empty ||
+      (index == 0 && ingressPhase == SIO2IngressPhase::DMAOpen))
     return SIO2AccessStatus::Unsupported;
-  commandDescriptors.at(index) = value;
+  descriptor = value;
   if (index == 0)
   {
     clearTransmitInput();
@@ -162,7 +241,8 @@ void SIO2Controller::clearTransmitInput() noexcept
 
 SIO2AccessStatus SIO2Controller::writeTransmitByte(std::uint8_t value) noexcept
 {
-  if (ingressPhase == SIO2IngressPhase::DMAOpen ||
+  if (resultPhase != SIO2DMAResultPhase::Empty ||
+      ingressPhase == SIO2IngressPhase::DMAOpen ||
       ingressPhase == SIO2IngressPhase::DMASealed ||
       transmitInputCount >= transmitInput.size())
   {
@@ -175,7 +255,8 @@ SIO2AccessStatus SIO2Controller::writeTransmitByte(std::uint8_t value) noexcept
 
 bool SIO2Controller::beginDMAInput() noexcept
 {
-  if (ingressPhase != SIO2IngressPhase::Empty || receiveRemaining != 0)
+  if (resultPhase != SIO2DMAResultPhase::Empty ||
+      ingressPhase != SIO2IngressPhase::Empty || receiveRemaining != 0)
     return false;
   ingressPhase = SIO2IngressPhase::DMAOpen;
   return true;

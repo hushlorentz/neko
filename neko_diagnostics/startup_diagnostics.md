@@ -62,6 +62,14 @@ The snapshot contains:
   active/enable state, priority, and side-effect-free next-beat inspection.
 - SIO2 ingress phase/count (`sio2.input_phase`/`input_bytes`) and input channel
   11 programming, active/enable state and remaining words (`iop_dma.sio2_input`).
+  The separate `dma_result_phase` is `empty`, `pending`, or `ready`.
+  A ready absent-card probe exposes `dma_result_bytes:144`, split into
+  `dma_logical_bytes:4` no-ACK samples and `dma_padding_bytes:140` zero padding;
+  pending/empty results expose zero bytes. Output channel12
+  (`iop_dma.sio2_output`) distinguishes `inactive`, `armed_waiting_results`,
+  and `armed_results_ready`. Arming or ready results do not imply output
+  transport or DMA completion. The inspector still accepts older snapshots
+  without result fields.
 
 Run progress is **per call**: EE instruction counts are accepted instructions,
 IOP instruction counts are retired instructions. Snapshot cycle/retirement

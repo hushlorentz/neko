@@ -173,12 +173,25 @@ def validate_sio2_snapshot(snapshot):
     # Older reports predate ingress diagnostics and have neither member.
     if "sio2" in snapshot:
         sio2 = require(snapshot, "sio2", dict)
-        if sio2.keys() != {"input_phase", "input_bytes"}:
+        legacy_fields = {"input_phase", "input_bytes"}
+        result_fields = {"dma_result_phase", "dma_result_bytes",
+                         "dma_logical_bytes", "dma_padding_bytes"}
+        if sio2.keys() not in (legacy_fields, legacy_fields | result_fields):
             raise ValueError("snapshot.sio2 has invalid fields")
         if sio2["input_phase"] not in ("empty", "cpu", "dma_open", "dma_sealed"):
             raise ValueError("snapshot.sio2.input_phase is invalid")
         if uint(sio2["input_bytes"], "snapshot.sio2.input_bytes", 16) > 1023:
             raise ValueError("snapshot.sio2.input_bytes exceeds staging capacity")
+        if "dma_result_phase" in sio2:
+            phase = sio2["dma_result_phase"]
+            if phase not in ("empty", "pending", "ready"):
+                raise ValueError("snapshot.sio2.dma_result_phase is invalid")
+            for field, expected in (("dma_result_bytes", 144),
+                                    ("dma_logical_bytes", 4),
+                                    ("dma_padding_bytes", 140)):
+                if uint(sio2[field], f"snapshot.sio2.{field}", 16) != (
+                        expected if phase == "ready" else 0):
+                    raise ValueError(f"snapshot.sio2.{field} disagrees with result phase")
     if "iop_dma" in snapshot:
         dma = require(snapshot, "iop_dma", dict)
         if "sio2_input" not in dma:

@@ -1169,8 +1169,8 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       {
         return {};
       }
-      sio2->writePortControl(location.offset, value);
-      return {IOPBusStatus::Completed};
+      return sio2->writePortControl(location.offset, value) == SIO2AccessStatus::Accepted
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2CommandDescriptor:
       if (width != sizeof(IOPWord) || sio2 == nullptr)
       {

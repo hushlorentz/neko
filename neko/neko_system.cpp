@@ -1544,6 +1544,9 @@ void NekoSystem::clockMasterCycle()
       iopInterruptControllerComponent.assertSource(IOPInterruptSource::CDVD);
     }
     cdvdControllerComponent.completeSubcommand();
+    if (sio2ControllerComponent.completePendingTransfer() ==
+        SIO2TransferResult::CompletedWithInterrupt)
+      iopInterruptControllerComponent.assertSource(IOPInterruptSource::SIO2);
     spu2ControllerComponent.advanceInputClock();
     const auto transfer = clockIOPDMA(observationScope.order, dmaObservations);
     if (transfer.outcome == IOPDMABeatOutcome::Rejected)

@@ -248,6 +248,8 @@ void NekoSaveStateCodec::writeIOPState(
       system.sio2ControllerComponent.receiveRemaining);
     writer->writeFieldBool("interruptCause",
       system.sio2ControllerComponent.interruptCause);
+    writer->writeFieldU8("dmaResultPhase",
+      static_cast<std::uint8_t>(system.sio2ControllerComponent.resultPhase));
   }
   {
     auto scope = writer->scope("spu2");
@@ -540,8 +542,12 @@ void NekoSaveStateCodec::readIOP(
     sio2.transferCompleted = reader->readFieldBool("transferCompleted");
     sio2.receiveRemaining = reader->readFieldU8("receiveRemaining");
     sio2.interruptCause = reader->readFieldBool("interruptCause");
+    const auto resultPhase = reader->readFieldU8("dmaResultPhase");
+    reader->requireField(resultPhase <= static_cast<std::uint8_t>(SIO2DMAResultPhase::Ready),
+      "SIO2 DMA result phase is invalid");
+    sio2.resultPhase = static_cast<SIO2DMAResultPhase>(resultPhase);
     reader->requireField(sio2.hasValidTransferState(),
-      "SIO2 transfer state is outside the bounded absent-infrared profile");
+      "SIO2 transfer state is outside the bounded absent-device profiles");
   }
   {
     auto scope = reader->scope("spu2");

@@ -3681,9 +3681,27 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved pending output request through the existing DMA
       owner, with atomic rejection, canonical continuation and diagnostics;
       no result consumption, RAM transfer, completion or fabricated replies.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond the start origin; identify the next dependency without
       claiming card success or completed boot.
+
+### IOP SIO2 DMA-backed Serial Start Dependency
+
+- [x] Research the demonstrated CTRL0x3bd start with sealed DMA input and an
+      armed output request; select endpoint, result, IRQ and lifecycle contracts
+      and obtain approval before active serial behavior.
+- [x] Implement the approved bounded absent-card probe through the SIO2 owner,
+      with next-pulse result production, independent status/IRQ, atomic
+      lifecycle guards and canonical continuation; keep CPU infrared distinct.
+- [ ] Connect real SIO2 results to channel12 shared DMA grants with explicit
+      padding, backpressure, write-before-consume progress, cancellation and
+      masked completion; never manufacture results for an armed request.
+- [ ] Validate authored serial/DMA continuation across pending, ready, partial
+      and cancelled states, including transactional canonical rejection and
+      independent serial/DMA interrupts.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress; distinguish negative peripheral results from fabricated success
+      or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

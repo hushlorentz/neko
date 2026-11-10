@@ -81,6 +81,30 @@ def capture_records():
 
 
 class InspectorTests(unittest.TestCase):
+    def test_sio2_result_snapshot_distinguishes_pending_bytes_and_padding(self):
+        rows = records()
+        snapshot = rows[1]["snapshot"]
+        for phase in ("empty", "pending", "ready"):
+            result = dict(input_phase="empty", input_bytes=0,
+                          dma_result_phase=phase,
+                          dma_result_bytes=144 if phase == "ready" else 0,
+                          dma_logical_bytes=4 if phase == "ready" else 0,
+                          dma_padding_bytes=140 if phase == "ready" else 0)
+            snapshot["sio2"] = result
+            self.write(self.path, rows)
+            self.assertEqual(self.report("summary", self.path)["snapshot"]["sio2"], result)
+        for field, value in (("dma_result_phase", "invalid"),
+                             ("dma_result_bytes", 143),
+                             ("dma_logical_bytes", 6),
+                             ("dma_padding_bytes", 138)):
+            snapshot["sio2"] = dict(result, **{field: value})
+            self.reject(rows, "sio2")
+        snapshot["sio2"] = dict(result, dma_result_phase="pending")
+        self.reject(rows, "sio2")
+        snapshot["sio2"] = dict(result)
+        del snapshot["sio2"]["dma_padding_bytes"]
+        self.reject(rows, "sio2")
+
     def test_sio2_dma_filters_preserve_word_progress_in_both_sources(self):
         beat = dict(endpoint="iop_sio2_input", channel=11, kind="payload",
                     outcome="accepted", failure="none", bus_status="none",

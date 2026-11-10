@@ -44,6 +44,7 @@ namespace
     "source_tag", "payload", "completion", "destination_tag"
   };
   const char *const sio2IngressPhases[] = {"empty", "cpu", "dma_open", "dma_sealed"};
+  const char *const sio2ResultPhases[] = {"empty", "pending", "ready"};
 
   template<typename Enum, std::size_t N>
   const char *enumName(Enum value, const char *const (&names)[N])
@@ -227,7 +228,13 @@ namespace
       << "," << sif.packingLatch[3] << "]}"
       << ",\"sio2\":{\"input_phase\":\""
       << enumName(summary.sio2.inputPhase, sio2IngressPhases)
-      << "\",\"input_bytes\":" << summary.sio2.inputBytes << "}"
+      << "\",\"input_bytes\":" << summary.sio2.inputBytes
+      << ",\"dma_result_phase\":\"" << enumName(summary.sio2.resultPhase, sio2ResultPhases)
+      << "\",\"dma_result_bytes\":" << summary.sio2.resultBytes
+      << ",\"dma_logical_bytes\":" << (summary.sio2.resultBytes != 0
+        ? SIO2Controller::DMA_PROBE_REPLY_BYTES : 0)
+      << ",\"dma_padding_bytes\":" << (summary.sio2.resultBytes != 0
+        ? SIO2Controller::DMA_PROBE_PADDING_BYTES : 0) << "}"
       << ",\"dmac\":{\"control\":" << dma.control
       << ",\"hold_control\":" << dma.holdControl
       << ",\"status\":" << dma.status
@@ -303,12 +310,16 @@ namespace
       << ",\"active\":" << jsonBoolean(sio2Input.active)
       << ",\"enabled\":" << jsonBoolean(sio2Input.enabled) << "}";
     const auto &sio2Output = iopDMA.sio2Output;
+    const auto *outputState = "inactive";
+    if (sio2Output.active)
+      outputState = summary.sio2.resultPhase == SIO2DMAResultPhase::Ready
+        ? "armed_results_ready" : "armed_waiting_results";
     output << ",\"sio2_output\":{\"channel\":12,\"control\":" << sio2Output.control
       << ",\"madr\":" << sio2Output.memoryAddress
       << ",\"bcr\":" << sio2Output.blockControl
       << ",\"remaining_words\":" << sio2Output.remainingWords
       << ",\"active\":" << jsonBoolean(sio2Output.active)
-      << ",\"state\":\"" << (sio2Output.active ? "armed_waiting_results" : "inactive")
+      << ",\"state\":\"" << outputState
       << "\",\"enabled\":" << jsonBoolean(sio2Output.enabled) << "}";
     output << "},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
       << ",\"mask\":" << summary.eeInterrupts.mask
@@ -407,7 +418,8 @@ StartupSummary inspectStartup(const NekoSystem &system)
   summary.iopDMA.sif0.tagAddress = system.iopSIF0DMAC().tagAddress();
   summary.iopDMA.sif1 = inspectIOPSIF(system, system.iopSIF1DMAC(), IOPDMAChannel::SIF1);
   const auto &sio2 = system.sio2Controller();
-  summary.sio2 = {sio2.transmitInputPhase(), sio2.transmitInputSize()};
+  summary.sio2 = {sio2.transmitInputPhase(), sio2.transmitInputSize(),
+    sio2.dmaResultPhase(), sio2.dmaResultSize()};
   summary.iopDMA.sio2Input = {
     iopDMA.sio2ChannelControl(IOPSIO2DMAChannel::Input),
     iopDMA.sio2MemoryAddress(IOPSIO2DMAChannel::Input),

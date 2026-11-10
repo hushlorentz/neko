@@ -266,7 +266,7 @@ TEST_CASE("Startup SIO2 snapshot separates ingress ownership from DMA gating",
     REQUIRE(snapshot.iopDMA.sio2Input.control == 0x01000201);
     std::ostringstream output;
     writeStartupSummaryJsonLine(output, snapshot);
-    REQUIRE(output.str().find("\"sio2\":{\"input_phase\":\"dma_open\",\"input_bytes\":0}") !=
+    REQUIRE(output.str().find("\"sio2\":{\"input_phase\":\"dma_open\",\"input_bytes\":0,") !=
       std::string::npos);
     REQUIRE(output.str().find(
       "\"sio2_input\":{\"channel\":11,\"control\":16777729,\"madr\":4096,"
@@ -289,7 +289,7 @@ TEST_CASE("Startup SIO2 snapshot separates ingress ownership from DMA gating",
   snapshot.sio2.inputBytes = 144;
   std::ostringstream sealed;
   writeStartupSummaryJsonLine(sealed, snapshot);
-  REQUIRE(sealed.str().find("\"sio2\":{\"input_phase\":\"dma_sealed\",\"input_bytes\":144}") !=
+  REQUIRE(sealed.str().find("\"sio2\":{\"input_phase\":\"dma_sealed\",\"input_bytes\":144,") !=
     std::string::npos);
   snapshot.sio2.inputPhase = static_cast<SIO2IngressPhase>(255);
   std::ostringstream invalid;
@@ -731,7 +731,9 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("status":0,"cause":0,"epc":0,"bad_vaddr":0},"sif":{"mscom":0,"smcom":0,)"
     R"("msflag":0,"smflag":0,"control":0,"iop_doorbell":0,"sif0_words":0,)"
     R"("sif1_words":0,"free_words":0,"packing_cursor":0,"packing_latch":[0,0,0,0]},)"
-    R"("sio2":{"input_phase":"empty","input_bytes":0},)"
+    R"("sio2":{"input_phase":"empty","input_bytes":0,)"
+    R"("dma_result_phase":"empty","dma_result_bytes":0,)"
+    R"("dma_logical_bytes":0,"dma_padding_bytes":0},)"
     R"("dmac":{"control":0,"hold_control":0,)"
     R"("status":0,"interleave_size":0,"interrupt_pending":false,)"
     R"("priority_control":0,"stall_address":0,"sif_grant_order":["sif0","sif1"],"channels":[)"
