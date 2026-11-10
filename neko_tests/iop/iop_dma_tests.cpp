@@ -338,6 +338,205 @@ namespace
     }
   }
 
+  TEST_CASE("IOP SIO2 serial and DMA phases continue identically after restoration",
+    "[iop][dma][sio2-continuation][save-state][trace]")
+  {
+    NekoSystem original;
+    original.runMasterCycles(2);
+    stageSIO2Output(original);
+    original.iopDMAController().writeInterrupt(SECONDARY, 0xa00000);
+    for (unsigned word = 0; word < 36; ++word)
+      REQUIRE(original.iopBus().write32(0x2000 + word * 4, 0xa5a5a5a5).status ==
+        IOPBusStatus::Completed);
+    unsigned consumed = 0;
+    bool cancelled = false;
+    SECTION("Pending serial result between IOP pulses")
+    {
+      REQUIRE(original.sio2Controller().dmaResultPhase() == SIO2DMAResultPhase::Pending);
+    }
+    SECTION("Ready result with disabled output")
+    {
+      original.iopDMAController().writePriority(SECONDARY, 0x80000);
+      original.runMasterCycles(7);
+      REQUIRE(original.sio2Controller().dmaResultSize() == 144);
+    }
+    SECTION("Partially drained result")
+    {
+      original.runMasterCycles(15);
+      consumed = 2;
+      REQUIRE(original.sio2Controller().dmaResultSize() == 136);
+    }
+    SECTION("Cancelled partially drained result")
+    {
+      original.runMasterCycles(15);
+      consumed = 2;
+      cancelled = true;
+      REQUIRE(original.iopBus().write32(SIO2_CHCR[1], 0x40000200).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(original.sio2Controller().dmaResultSize() == 136);
+    }
+    original.runMasterCycles(3);
+    REQUIRE(original.iopDMAController().sio2MemoryAddress(IOPSIO2DMAChannel::Output) ==
+      0x2000 + consumed * 4);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    for (auto *system : {&original, &restored, &plain})
+    {
+      REQUIRE(system->iopBus().write32(DPCR2, 0x880000).status == IOPBusStatus::Completed);
+      if (cancelled)
+      {
+        const auto before = system->saveState();
+        REQUIRE(system->iopBus().write32(SIO2_CHCR[1], 0x41000200).status ==
+          IOPBusStatus::Unmapped);
+        requireState(*system, before);
+      }
+      system->runMasterCycles(288);
+      REQUIRE(system->sio2Controller().dmaResultPhase() ==
+        (cancelled ? SIO2DMAResultPhase::Ready : SIO2DMAResultPhase::Empty));
+      REQUIRE(system->sio2Controller().dmaResultSize() == (cancelled ? 136 : 0));
+      REQUIRE(system->iopDMAController().sio2OutputRemainingWords() == 0);
+      REQUIRE(system->iopDMAController().sio2MemoryAddress(IOPSIO2DMAChannel::Output) ==
+        (cancelled ? 0x2008 : 0x2090));
+      REQUIRE(system->iopDMAController().sio2BlockControl(IOPSIO2DMAChannel::Output) ==
+        (cancelled ? 0x10024 : 0x24));
+      REQUIRE(system->iopBus().read32(SIO2_CHCR[1]).value == 0x40000200);
+      REQUIRE(system->sio2Controller().readInterruptStatus() == 1);
+      REQUIRE((system->iopDMAController().interruptStatus(SECONDARY) & 0x20000000) ==
+        (cancelled ? 0 : 0x20000000));
+      REQUIRE(system->iopInterruptController().status() ==
+        ((1u << 17) | (cancelled ? 0 : DMAC_CAUSE)));
+      for (unsigned word = 0; word < 36; ++word)
+        REQUIRE(system->iopBus().read32(0x2000 + word * 4).value ==
+          (cancelled && word >= consumed ? 0xa5a5a5a5 : word == 0 ? 0xffffffff : 0));
+    }
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    REQUIRE(plain.trace().empty());
+    unsigned beats = 0;
+    for (const auto &event : original.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::SIO2 ||
+          event.type != NekoTraceEventType::DMABeat)
+        continue;
+      const auto beat = nekoDecodeSIO2DMABeat(event);
+      REQUIRE(beat.channel == 12);
+      REQUIRE(beat.outcome == (beats + consumed == 35 ?
+        NekoSPUTrace::Outcome::Completed : NekoSPUTrace::Outcome::Accepted));
+      REQUIRE(beat.sourceAddress == 0x2000 + (consumed + beats) * 4);
+      REQUIRE(beat.sourceValue == (consumed + beats == 0 ? 0xffffffff : 0));
+      REQUIRE(beat.stagedBefore == (36 - consumed - beats) * 4);
+      REQUIRE(beat.stagedAfter == beat.stagedBefore - 4);
+      ++beats;
+    }
+    REQUIRE(beats == (cancelled ? 0 : 36 - consumed));
+  }
+
+  TEST_CASE("IOP SIO2 restored serial and DMA completion acknowledge independently",
+    "[iop][dma][sio2-continuation][save-state]")
+  {
+    for (const bool serialFirst : {false, true})
+    {
+      CAPTURE(serialFirst);
+      NekoSystem source;
+      stageSIO2Output(source);
+      source.iopDMAController().writeInterrupt(SECONDARY, 0xa00000);
+      source.runMasterCycles(281);
+      NekoSystem restored;
+      restored.loadState(source.saveState());
+      auto &bus = restored.iopBus();
+      auto &dma = restored.iopDMAController();
+      auto &sio2 = restored.sio2Controller();
+      auto &interrupts = restored.iopInterruptController();
+      constexpr IOPWord serialIRQ = 1u << 17;
+      REQUIRE(interrupts.status() == (serialIRQ | DMAC_CAUSE));
+      REQUIRE(sio2.readInterruptStatus() == 1);
+      REQUIRE((dma.interruptStatus(SECONDARY) & 0x20000000) != 0);
+      for (const bool serial : {serialFirst, !serialFirst})
+      {
+        CAPTURE(serial);
+        const auto latched = interrupts.status();
+        if (serial)
+        {
+          REQUIRE(bus.write32(0x1f808280, 1).status == IOPBusStatus::Completed);
+          REQUIRE(sio2.readInterruptStatus() == 0);
+          REQUIRE((dma.interruptStatus(SECONDARY) & 0x20000000) ==
+            (serialFirst ? 0x20000000 : 0));
+        }
+        else
+        {
+          REQUIRE(bus.write32(DICR2, 0x20a00000).status == IOPBusStatus::Completed);
+          REQUIRE((dma.interruptStatus(SECONDARY) & 0x20000000) == 0);
+          REQUIRE(sio2.readInterruptStatus() == (serialFirst ? 0 : 1));
+        }
+        REQUIRE(interrupts.status() == latched);
+        REQUIRE(bus.write32(0x1f801070, ~(serial ? serialIRQ : DMAC_CAUSE)).status ==
+          IOPBusStatus::Completed);
+        REQUIRE(interrupts.status() == (latched & ~(serial ? serialIRQ : DMAC_CAUSE)));
+        const auto remaining = interrupts.status();
+        restored.runMasterCycles(16);
+        REQUIRE(interrupts.status() == remaining);
+        REQUIRE(sio2.dmaResultSize() == 0);
+        REQUIRE(dma.sio2OutputRemainingWords() == 0);
+      }
+      REQUIRE(interrupts.status() == 0);
+      REQUIRE(sio2.readControl() == 0x3bd);
+      REQUIRE(sio2.readTransferStatus(0).value == 0x1d100);
+    }
+  }
+
+  TEST_CASE("IOP SIO2 linked partial and cancelled states reject corruption transactionally",
+    "[iop][dma][sio2-continuation][save-state][trace]")
+  {
+    NekoSystem destination;
+    stageSIO2Output(destination, 0x4000);
+    destination.startTrace();
+    destination.runMasterCycles(1);
+    const auto before = destination.saveState();
+    const auto hash = destination.iopStateHash();
+    const auto events = destination.trace();
+    for (const bool cancelled : {false, true})
+    {
+      CAPTURE(cancelled);
+      NekoSystem source;
+      stageSIO2Output(source);
+      source.runMasterCycles(9);
+      REQUIRE(source.sio2Controller().dmaResultSize() == 136);
+      if (cancelled)
+        REQUIRE(source.iopBus().write32(SIO2_CHCR[1], 0x40000200).status ==
+          IOPBusStatus::Completed);
+      const auto checkpoint = source.saveState();
+      for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
+        {"system.iop.sio2.dmaResultPhase", 0},
+        {"system.iop.sio2.dmaResultPhase", 1},
+        {"system.iop.dmaController.sio2OutputWordsTransferred", cancelled ? 1u : 0u},
+        {"system.iop.dmaController.sio2Programming[1].channelControl",
+          cancelled ? 0x41000200u : 0x40000200u},
+        {"system.iop.dmaController.sio2Programming[1].memoryAddress", 0x1000000}})
+      {
+        CAPTURE(mutation.first);
+        SaveStateMutation invalid(checkpoint);
+        invalid.writeScalar(mutation.first, mutation.second);
+        invalid.refreshChecksum();
+        REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+        REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+        REQUIRE(destination.iopStateHash() == hash);
+        IOPTraceTest::requireEvents(destination.trace(), events);
+      }
+      requireState(destination, before);
+    }
+    destination.runMasterCycles(8);
+    REQUIRE(destination.sio2Controller().dmaResultSize() == 136);
+    REQUIRE(destination.iopBus().read32(0x4004).value == 0);
+  }
+
   TEST_CASE("IOP SIO2 output DMA waiting results do not block a lower priority input",
     "[iop][dma][sio2-output-transport][scheduling][trace]")
   {

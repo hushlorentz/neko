@@ -3696,7 +3696,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Connect real SIO2 results to channel12 shared DMA grants with explicit
       padding, backpressure, write-before-consume progress, cancellation and
       masked completion; never manufacture results for an armed request.
-- [ ] Validate authored serial/DMA continuation across pending, ready, partial
+- [x] Validate authored serial/DMA continuation across pending, ready, partial
       and cancelled states, including transactional canonical rejection and
       independent serial/DMA interrupts.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
