@@ -3787,6 +3787,17 @@ not requirements for exhaustive subsystem coverage.
       owner without assuming inactive voices or authorizing audio execution.
 - [x] Implement paired-core passive PMON/NON mask programming with CPU/bus,
       lifecycle and persistence coverage; preserve unsupported voice execution.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Unnamed Halfword Zero Initialization at0x1f9007b8
+
+- [x] Research the originating IOP halfword zero-store at0x1f9007b8 and its
+      containing register family; select evidence-backed identity, owner and
+      bounded semantics without inferring audio execution or readiness.
+- [x] Implement exact zero halfword writes through the existing SPU2 owner with
+      focused CPU/bus and lifecycle coverage, including persistence if affected;
+      preserve unsupported neighboring accesses and execution limits.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
 

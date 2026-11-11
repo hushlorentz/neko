@@ -2111,7 +2111,8 @@ TEST_CASE("SPU2 ADMAS loads restore before and after the delayed result",
 TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores",
   "[iop][spu2][spu2-initialization]")
 {
-  for (const auto address : unknownInitializationAddresses)
+  for (const auto address : {unknownInitializationAddresses[0],
+      unknownInitializationAddresses[1], IOPAddress(0x1f9007b8)})
   {
     CAPTURE(address);
     NekoSystem system;
@@ -2158,14 +2159,15 @@ TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores
 TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads and transports",
   "[iop][spu2][spu2-initialization][spu2-autodma]")
 {
-  for (const auto &addresses : {unknownInitializationAddresses, autoDMAAddresses})
-  for (const auto address : addresses)
+  for (const auto address : {unknownInitializationAddresses[0],
+      unknownInitializationAddresses[1], IOPAddress(0x1f9007b8),
+      autoDMAAddresses[0], autoDMAAddresses[1]})
   {
     CAPTURE(address);
     NekoSystem system;
     auto &bus = system.iopBus();
-    const std::uint16_t selection = addresses == autoDMAAddresses
-      ? (address == autoDMAAddresses[0] ? 1 : 2) : 0;
+    const std::uint16_t selection = address == autoDMAAddresses[0] ? 1 :
+      address == autoDMAAddresses[1] ? 2 : 0;
     SPU2InputTest::programProfile(system.spu2Controller());
     REQUIRE(bus.write16(address, selection).status == IOPBusStatus::Completed);
     const auto before = system.iopStateHash();
@@ -2200,7 +2202,10 @@ TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads an
     REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
       IOPBusStatus::Unmapped);
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
-    for (IOPAddress other : {0x1f900b5eu, 0x1f900b64u,
+    for (IOPAddress other : {0x1f9007b0u, 0x1f9007b2u, 0x1f9007b4u,
+        0x1f9007b6u, 0x1f9007bau, 0x1f9007bcu, 0x1f9007beu,
+        0x1f9003b8u, 0x1f900bb8u, 0x1f900fb8u,
+        0x1f900b5eu, 0x1f900b64u,
         0x1f900360u, 0x1f900362u, 0x1f900f60u, 0x1f900f62u,
         0x1f9001aeu, 0x1f9001b2u, 0x1f9005aeu, 0x1f9005b2u,
         0x1f9009b0u, 0x1f900db0u,
@@ -2218,6 +2223,92 @@ TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads an
     REQUIRE(unattached.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(unattached.write16(address, selection).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopStateHash() == before);
+  }
+}
+
+TEST_CASE("SPU2 unnamed 7b8 initialization preserves guest store outcomes",
+  "[iop][spu2][spu2-initialization][trace]")
+{
+  for (auto segment : {0u, 0x80000000u, 0xa0000000u})
+  for (std::uint16_t value : {0, 1, 0xffff})
+  for (bool delaySlot : {false, true})
+  {
+    const IOPAddress physical = 0x1f9007b8;
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(value);
+    CAPTURE(delaySlot);
+    NekoSystem system;
+    SPU2InputTest::programProfile(system.spu2Controller());
+    REQUIRE(system.spu2Controller().writeAutoDMAWriteSelection(0, 1));
+    REQUIRE(system.spu2Controller().beginInputWrite(0));
+    REQUIRE(system.spu2Controller().writeInputWord(0, 0x12345678));
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
+    installInitializationStoreProgram(system, address, value);
+    if (!delaySlot)
+    {
+      REQUIRE(system.iopBus().write32(0xc, 0).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(0x14, 0).status == IOPBusStatus::Completed);
+    }
+    const auto before = system.spu2Controller().inputWriteState(0);
+    system.startTrace();
+    system.runMasterCycles(delaySlot ? 48 : 56);
+    const bool accepted = value == 0;
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().executionState() == (accepted
+      ? IOPExecutionState::Running : IOPExecutionState::Halted));
+    REQUIRE(system.iopCore().retiredInstructions() ==
+      (accepted ? (delaySlot ? 6 : 7) : 4));
+    REQUIRE(system.iopCore().programCounter() ==
+      (accepted ? 0xa000001c : 0xa0000010));
+    REQUIRE(system.iopCore().generalRegister(3) == (accepted ? 0x1234 : 0));
+    if (!accepted)
+    {
+      REQUIRE(system.iopCore().stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(system.iopCore().storeFailure().value == value);
+    }
+    IOPTraceTest::Events actual;
+    unsigned stores = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == address)
+      {
+        actual.push_back(event);
+      }
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::InstructionIssued &&
+          event.value0 == 0xa0000010)
+      {
+        REQUIRE(event.value1 == 0xa4220000);
+        REQUIRE(event.value3 == (delaySlot
+          ? NekoIOPTraceInstruction::DELAY_SLOT : 0));
+        ++stores;
+      }
+    }
+    REQUIRE(stores == 1);
+    namespace Memory = NekoIOPTraceMemory;
+    const auto metadata = nekoPackIOPMemoryTraceMetadata({
+      physical, 2, Memory::AccessKind::DataStore,
+      accepted ? Memory::Outcome::Completed : Memory::Outcome::Unmapped,
+      segment == 0xa0000000 ? Memory::CacheRoute::Uncached :
+        Memory::CacheRoute::Cached,
+      true, 3});
+    IOPTraceTest::requireEvents(actual, {
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, value, 0, metadata}
+    });
+    const auto after = system.spu2Controller().inputWriteState(0);
+    REQUIRE(after.selected == before.selected);
+    REQUIRE(after.writeOpen == before.writeOpen);
+    REQUIRE(after.requested == before.requested);
+    REQUIRE(after.fillHalf == before.fillHalf);
+    REQUIRE(after.readHalf == before.readHalf);
+    REQUIRE(after.fillWords == before.fillWords);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
   }
 }
 
