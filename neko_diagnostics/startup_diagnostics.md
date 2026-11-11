@@ -687,7 +687,7 @@ python3 -B tools/run_bios_discovery.py out/bios-discovery/after-ier --status
 
 | State | Meaning |
 | --- | --- |
-| `running` | Ownership lock is held; stage/start/progress are reported, not proof of throughput. |
+| `running` | Ownership lock is held; active stages/start/progress are reported, not proof of throughput. |
 | `execution_finished` | Expected helper exit0 and required terminal evidence agree; inspection pending. |
 | `verified` | Explicit inspection receipt and its retained evidence still agree. |
 | `failed` | Nonzero completion, inconsistent evidence or invalidated inspection. |
@@ -695,8 +695,12 @@ python3 -B tools/run_bios_discovery.py out/bios-discovery/after-ier --status
 | `unknown` | Missing/legacy/malformed ownership records; never inferred success. |
 
 Status exit0 means `verified`; exit1 means running/inspection pending; exit2
-means failed/interrupted/unknown. Read the JSON, not just the code. Required
-compact JSON must parse, recorded output sizes must agree, required comparisons
+means failed/interrupted/unknown. Read the JSON, not just the code.
+`active_stages` lists all pending commands while running; `active_stage` and
+its timestamp/exit describe the latest pending command, or the latest completed
+command when none is pending. A completed cold pass does not hide a still-owned
+checkpoint capture.
+Required compact JSON must parse, recorded output sizes must agree, required comparisons
 must agree and retained canonical/checkpoint bytes are hashed,
 so status inspection can read tens of MiB. It does not reread large JSONL
 traces. Status/finalize reject run options and cannot trigger execution.
@@ -809,7 +813,13 @@ python3 -B tools/run_bios_discovery.py out/bios-discovery/checkpoint-1m-2m --che
 This mode performs exactly four BIOS runs: one untraced cold start creating
 `checkpoint.state`, one cold traced continuation with tracing delayed to the
 checkpoint cycle, one restored traced continuation, and one genuinely
-untraced restored continuation. The last three stop at the same absolute
+untraced restored continuation. The two independent cold starts overlap, using
+at most two native processes; both are reaped before restored execution starts.
+One driver owns the processes and writes the manifest serially. Exceptions
+or interruption kill and reap outstanding children before releasing ownership.
+Trace compression still streams through bounded buffers. Per-command elapsed
+times overlap and include time until reaping; do not sum them as batch wall time.
+The last three stop at the same absolute
 ceiling or earlier CPU host stop. Both traced runs always use the bounded
 failure recorder and the existing 3,000,000-event cap.
 

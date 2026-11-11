@@ -3829,6 +3829,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded contract with focused CPU/bus and
       lifecycle coverage, including persistence if affected; retain unsupported
       execution, neighboring accesses and transports.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Halfword Programming at0x1f9007be
+
+- [ ] Research the originating IOP delay-slot halfword zero-store at0x1f9007be
+      and the containing unnamed range; reassess bounded semantics through the
+      existing owner without assuming adjacent registers share a function.
+- [ ] Implement the selected bounded contract with focused CPU/bus and
+      lifecycle coverage, including persistence if affected; retain unsupported
+      execution, neighboring accesses and transports.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
 

@@ -193,6 +193,7 @@ class DiscoveryTests(unittest.TestCase):
         self.binary.touch()
         self.binary.chmod(0o755)
         self.calls = []
+        self.processes = {}
         self.run_statuses = [0, 0, 0, 0]
         self.run_count = 0
         self.build_status = 0
@@ -248,14 +249,21 @@ class DiscoveryTests(unittest.TestCase):
         return REAL_RUN(command, **kwargs)
 
     def spawn(self, command, **kwargs):
-        if command[0] != str(self.binary):
+        if command[0] not in ("cmake", str(self.binary)):
+            self.calls.append(command)
             return REAL_POPEN(command, **kwargs)
-        output = io.BytesIO()
+        piped = kwargs["stdout"] == subprocess.PIPE
+        output = io.BytesIO() if piped else kwargs["stdout"]
         result = self.execute(command, cwd=kwargs["cwd"], stdout=output,
                               stderr=kwargs["stderr"])
-        output.seek(0)
-        return Mock(stdout=output, wait=Mock(return_value=result.returncode),
-                    kill=Mock())
+        if piped:
+            output.seek(0)
+        process = Mock(stdout=output if piped else None,
+                       wait=Mock(return_value=result.returncode), kill=Mock())
+        if "--save-checkpoint" in command:
+            path = Path(command[command.index("--save-checkpoint") + 1])
+            self.processes[path.stem] = process
+        return process
 
     def invoke(self, status=0, *, failure_context=False, cycles=None,
                checkpoint_at=None, checkpoint=None):
@@ -344,6 +352,75 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(receipt["master_cycle"], 40)
         self.assertEqual(receipt["state"], discovery.file_identity(checkpoint))
 
+    def test_cold_pass_starts_before_checkpoint_wait_and_status_tracks_both(self):
+        execute = self.execute
+
+        def while_checkpoint_runs(command, **kwargs):
+            if "--trace-from-cycle" in command:
+                checkpoint = self.processes.get("checkpoint")
+                self.assertIsNotNone(checkpoint, "checkpoint must already be running")
+                checkpoint.wait.assert_not_called()
+                report = discovery.campaign.status(self.output)
+                self.assertEqual(report["state"], "running")
+                self.assertEqual(report["active_stages"], ["checkpoint", "cold"])
+
+                def join_checkpoint():
+                    report = discovery.campaign.status(self.output)
+                    self.assertEqual(report["active_stage"], "checkpoint")
+                    self.assertEqual(report["active_stages"], ["checkpoint"])
+                    return 0
+
+                checkpoint.wait.side_effect = join_checkpoint
+            return execute(command, **kwargs)
+
+        with patch.object(self, "execute", side_effect=while_checkpoint_runs):
+            self.create_checkpoint()
+        for process in self.processes.values():
+            process.wait.assert_called_once()
+            process.kill.assert_not_called()
+        self.assertTrue(all(entry["returncode"] is not None
+                            for entry in self.read("manifest.json")["commands"]))
+
+    def test_cold_error_reaps_checkpoint_before_releasing_campaign_ownership(self):
+        execute = self.execute
+
+        def observe_checkpoint(command, **kwargs):
+            if "--trace-from-cycle" in command:
+                checkpoint = self.processes.get("checkpoint")
+                self.assertIsNotNone(checkpoint, "checkpoint must already be running")
+                checkpoint.kill.side_effect = lambda: self.assertEqual(
+                    discovery.campaign.status(self.output)["state"], "running")
+            return execute(command, **kwargs)
+
+        self.run_statuses = [0, 2, 1, 1]
+        with patch.object(self, "execute", side_effect=observe_checkpoint):
+            self.invoke(status=2, checkpoint_at=40)
+        checkpoint = self.processes["checkpoint"]
+        checkpoint.kill.assert_called_once()
+        checkpoint.wait.assert_called_once()
+        self.assertEqual(self.run_count, 2)
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+        self.assertFalse((self.output / "checkpoint.state.json").exists())
+
+    def test_cold_launch_interrupt_reaps_checkpoint_and_preserves_partial_receipts(self):
+        execute = self.execute
+
+        def interrupt_cold_launch(command, **kwargs):
+            if "--trace-from-cycle" in command:
+                raise KeyboardInterrupt()
+            return execute(command, **kwargs)
+
+        with patch.object(self, "execute", side_effect=interrupt_cold_launch):
+            self.invoke(status=130, checkpoint_at=40)
+        checkpoint = self.processes.get("checkpoint")
+        self.assertIsNotNone(checkpoint, "interrupted launch must reap its sibling")
+        checkpoint.kill.assert_called_once()
+        checkpoint.wait.assert_called_once()
+        entries = self.read("manifest.json")["commands"]
+        self.assertIsNotNone(entries[-2]["returncode"])
+        self.assertIsNone(entries[-1]["returncode"])
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "interrupted")
+
     def test_validated_checkpoint_can_drive_the_regular_four_run_matrix(self):
         checkpoint = self.create_checkpoint()
         self.output = self.root / "reuse"
@@ -386,7 +463,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_checkpoint_host_stop_is_not_a_usable_checkpoint(self):
         self.run_statuses = [1] * 4
         self.invoke(status=2, checkpoint_at=40)
-        self.assertEqual(self.run_count, 1)
+        self.assertEqual(self.run_count, 2)
         self.assertFalse((self.output / "checkpoint.state.json").exists())
 
     def test_fixed_matrix_and_real_inspection_preserve_artifacts(self):

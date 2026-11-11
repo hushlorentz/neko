@@ -271,9 +271,11 @@ def status(directory):
                 if (type(commands) is not list or
                         any(type(entry) is not dict for entry in commands)):
                     raise ValueError("Invalid running command receipts")
-                active = commands[-1] if commands else {}
+                pending = [entry for entry in commands if entry.get("returncode") is None]
+                active = pending[-1] if pending else commands[-1] if commands else {}
                 return dict(state="running", owner_pid=execution.get("owner_pid"),
                             command=execution.get("command"),
+                            active_stages=[entry.get("name") for entry in pending],
                             active_stage=active.get("name"),
                             stage_exit=active.get("returncode"),
                             stage_started_at=active.get("started_at"),

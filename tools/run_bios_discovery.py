@@ -3,6 +3,7 @@
 """Capture compact cold-start discovery or validate/reuse a BIOS checkpoint."""
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import filecmp
 import gzip
@@ -26,8 +27,9 @@ TRACE_EVENTS = 3000000
 RUN_NAMES = ("traced1", "traced2", "plain1", "plain2")
 
 
-def capture(directory, manifest, name, command, *, extension="stdout",
-            accepted=(0,), compressed=False):
+@contextmanager
+def running_capture(directory, manifest, name, command, *, extension="stdout",
+                    accepted=(0,), compressed=False):
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
     entry = dict(name=name, command=command, returncode=None,
@@ -39,40 +41,45 @@ def capture(directory, manifest, name, command, *, extension="stdout",
     manifest["commands"].append(entry)
     write_json(directory / "manifest.json", manifest)
     with output.open("xb") as stdout, errors.open("xb") as stderr:
-        if compressed:
-            process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
-                                       stderr=stderr)
-            try:
-                with process.stdout as pipe:
-                    with gzip.GzipFile(filename="", mode="wb", fileobj=stdout,
-                                       compresslevel=6, mtime=0) as zipped:
-                        uncompressed_bytes = 0
-                        for chunk in iter(lambda: pipe.read(1024 * 1024), b""):
-                            zipped.write(chunk)
-                            uncompressed_bytes += len(chunk)
-                status = process.wait()
-            except BaseException:
-                process.kill()
-                entry["returncode"] = process.wait()
-                entry["elapsed_seconds"] = time.monotonic() - started
-                write_json(directory / "manifest.json", manifest)
-                raise
-        else:
-            result = subprocess.run(command, cwd=ROOT, stdout=stdout, stderr=stderr,
-                                    check=False)
-            status = result.returncode
+        process = subprocess.Popen(command, cwd=ROOT,
+                                   stdout=subprocess.PIPE if compressed else stdout,
+                                   stderr=stderr)
+        try:
+            yield process, stdout, entry
+            status = process.wait()
+        except BaseException:
+            process.kill()
+            entry["returncode"] = process.wait()
+            entry["elapsed_seconds"] = time.monotonic() - started
+            write_json(directory / "manifest.json", manifest)
+            raise
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
     entry["returncode"] = status
     entry["elapsed_seconds"] = time.monotonic() - started
     entry["output_bytes"] = output.stat().st_size
-    if compressed:
-        entry["uncompressed_bytes"] = uncompressed_bytes
     write_json(directory / "manifest.json", manifest)
     print(f"[{name}] exit {status}, {entry['elapsed_seconds']:.2f}s",
           file=sys.stderr, flush=True)
     if status not in accepted:
         raise ValueError(
             f"{name} exited {status}; see {output} and {errors}")
-    return status
+
+
+def capture(directory, manifest, name, command, *, extension="stdout",
+            accepted=(0,), compressed=False):
+    with running_capture(directory, manifest, name, command, extension=extension,
+                         accepted=accepted, compressed=compressed) as (process, stdout, entry):
+        if compressed:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=stdout,
+                               compresslevel=6, mtime=0) as zipped:
+                uncompressed_bytes = 0
+                for chunk in iter(lambda: process.stdout.read(1024 * 1024), b""):
+                    zipped.write(chunk)
+                    uncompressed_bytes += len(chunk)
+            entry["uncompressed_bytes"] = uncompressed_bytes
+    return entry["returncode"]
 
 
 def report_path(directory, name):
@@ -162,22 +169,25 @@ def inspect_batch(directory, manifest):
 def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
     checkpoint = directory / "checkpoint.state"
     base = [str(binary), "bios-startup", str(bios)]
-    exits = dict(checkpoint=capture(directory, manifest, "checkpoint",
-        base + ["--cycles", str(cycle), "--save-checkpoint", str(checkpoint)],
-        extension="jsonl"))
+    with running_capture(directory, manifest, "checkpoint",
+            base + ["--cycles", str(cycle), "--save-checkpoint", str(checkpoint)],
+            extension="jsonl") as (_, _, checkpoint_entry):
+        exits = dict(cold=capture(directory, manifest, "cold",
+            base + ["--cycles", str(ceiling), "--trace-events", str(TRACE_EVENTS),
+                    "--failure-context", "--trace-from-cycle", str(cycle),
+                    "--save-checkpoint", str(directory / "cold-final.state")],
+            extension="jsonl", accepted=(0, 1), compressed=True))
+    exits["checkpoint"] = checkpoint_entry["returncode"]
     created = load_log(directory / "checkpoint.jsonl")
     if (created.result["snapshot"]["master_cycle"] != cycle or
             not created.result["run"]["cycle_limit_reached"]):
         raise ValueError("Checkpoint creation did not reach its selected cycle")
-    for name in ("cold", "resumed", "resumed-plain"):
-        command = base + ["--cycles", str(ceiling)]
-        if name != "cold":
-            command += ["--resume-checkpoint", str(checkpoint)]
+    for name in ("resumed", "resumed-plain"):
+        command = base + ["--cycles", str(ceiling),
+                          "--resume-checkpoint", str(checkpoint)]
         traced = name != "resumed-plain"
         if traced:
             command += ["--trace-events", str(TRACE_EVENTS), "--failure-context"]
-            if name == "cold":
-                command += ["--trace-from-cycle", str(cycle)]
         command += ["--save-checkpoint", str(directory / f"{name}-final.state")]
         exits[name] = capture(directory, manifest, name, command,
             extension="jsonl", accepted=(0, 1), compressed=traced)

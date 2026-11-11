@@ -15,6 +15,25 @@ import run_bios_discovery as discovery
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    def test_checkpoint_conformance_preserves_native_cold_restore_equivalence(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes(bytes(4194304))
+            directory = root / "conformance"
+            with patch.object(discovery, "build_neko", return_value=binary), \
+                 redirect_stderr(io.StringIO()):
+                result = discovery.run_batch(
+                    directory, bios, master_cycles=64, checkpoint_at=8)
+            self.assertTrue(result["comparisons_equal"])
+            self.assertEqual(result["bios_exit_codes"],
+                             {"checkpoint": 0, "cold": 0, "resumed": 0, "resumed-plain": 0})
+            manifest = json.loads((directory / "manifest.json").read_text())
+            self.assertTrue(all(state["equal"] for state in manifest["final_states"].values()))
+            self.assertTrue(all(entry["returncode"] == 0 for entry in manifest["commands"]))
+            self.assertEqual(discovery.campaign.status(directory)["state"], "execution_finished")
+
     def test_architectural_rejection_retains_matching_scout_replay_identity(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:
