@@ -3777,6 +3777,16 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded status contract through SPU2Controller
       with CPU/bus, lifecycle, trace and restored-continuation coverage;
       preserve existing input/DMA ownership and unsupported execution limits.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Pitch-Modulation and Noise Mask Programming
+
+- [x] Research the originating IOP halfword zero-store at0x1f900180 and its
+      containing register family; select bounded semantics and the existing
+      owner without assuming inactive voices or authorizing audio execution.
+- [x] Implement paired-core passive PMON/NON mask programming with CPU/bus,
+      lifecycle and persistence coverage; preserve unsupported voice execution.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
 

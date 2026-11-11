@@ -646,7 +646,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 107 save-state layout is byte-stable")
+TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -661,14 +661,11 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 107);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 108);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE);
-  CHECK(
-    hashBytes(state) ==
-    VERSION_107_PREPARED_STATE_HASH);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 16);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -752,7 +749,18 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
     REQUIRE(address->containerOffset == transferStartOffset + 2 * index);
     REQUIRE(address->scalarValue == 0);
   }
-  const auto selectionOffset = transferStartOffset + 8;
+  const auto modeOffset = transferStartOffset + 8;
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    const auto *mode = snapshot.find(
+      "system.iop.spu2.voiceModeMasks[" + std::to_string(index) + "].value");
+    REQUIRE(mode != nullptr);
+    REQUIRE(mode->kind == SaveStateFieldKind::U16);
+    REQUIRE(mode->size == 2);
+    REQUIRE(mode->containerOffset == modeOffset + 2 * index);
+    REQUIRE(mode->scalarValue == 0);
+  }
+  const auto selectionOffset = modeOffset + 16;
   for (std::size_t core = 0; core < 2; ++core)
   {
     const auto *selection = snapshot.find(
@@ -829,6 +837,22 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
   REQUIRE(cdvdResult->size == 16);
   auto previousVersion = state;
+  previousVersion.erase(previousVersion.begin() + modeOffset,
+    previousVersion.begin() + modeOffset + 16);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 107;
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
+    previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
+    hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
+  REQUIRE(previousVersion.size() == VERSION_107_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_107_PREPARED_STATE_HASH);
+  REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
+  REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
+  REQUIRE(system.saveState() == state);
+  const auto version107Offset = [modeOffset](std::size_t offset)
+  {
+    return offset >= modeOffset + 16 ? offset - 16 : offset;
+  };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(
     "system.iop.dmaController.sio2OutputWordsTransferred");
@@ -841,8 +865,10 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   REQUIRE(outputProgress->size == 1);
   REQUIRE(outputProgress->scalarValue == 0);
   REQUIRE(outputProgress->containerOffset == currentSio2ProgrammingOffset + 25);
-  previousVersion.erase(previousVersion.begin() + outputProgress->containerOffset);
-  previousVersion.erase(previousVersion.begin() + dmaResultCursor->containerOffset);
+  previousVersion.erase(previousVersion.begin() +
+    version107Offset(outputProgress->containerOffset));
+  previousVersion.erase(previousVersion.begin() +
+    version107Offset(dmaResultCursor->containerOffset));
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 106;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -853,13 +879,15 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
-  const auto legacySio2ProgrammingOffset = currentSio2ProgrammingOffset - 1;
+  const auto legacySio2ProgrammingOffset =
+    version107Offset(currentSio2ProgrammingOffset) - 1;
   const auto *resultPhase = snapshot.find("system.iop.sio2.dmaResultPhase");
   REQUIRE(resultPhase != nullptr);
   REQUIRE(resultPhase->kind == SaveStateFieldKind::U8);
   REQUIRE(resultPhase->size == 1);
   REQUIRE(resultPhase->scalarValue == 0);
-  previousVersion.erase(previousVersion.begin() + resultPhase->containerOffset);
+  previousVersion.erase(previousVersion.begin() +
+    version107Offset(resultPhase->containerOffset));
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 105;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -873,7 +901,8 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   const auto *ingressPhase = snapshot.find("system.iop.sio2.transmitInput.phase");
   REQUIRE(ingressPhase != nullptr);
   previousVersion.erase(previousVersion.begin() + legacySio2ProgrammingOffset + 23);
-  previousVersion.erase(previousVersion.begin() + ingressPhase->containerOffset);
+  previousVersion.erase(previousVersion.begin() +
+    version107Offset(ingressPhase->containerOffset));
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 104;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -911,8 +940,10 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
-  previousVersion.erase(previousVersion.begin() + cdvdResult->containerOffset + 5,
-    previousVersion.begin() + cdvdResult->containerOffset + cdvdResult->size - 3);
+  previousVersion.erase(
+    previousVersion.begin() + version107Offset(cdvdResult->containerOffset) + 5,
+    previousVersion.begin() + version107Offset(cdvdResult->containerOffset) +
+      cdvdResult->size - 3);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 101;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -945,8 +976,10 @@ TEST_CASE("Version 107 save-state layout is byte-stable")
   REQUIRE(parameters->size == 16);
   REQUIRE(parameterCount->containerOffset == resultCursor->containerOffset + 1);
   REQUIRE(parameters->containerOffset == parameterCount->containerOffset + 1);
-  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset - 11,
-    previousVersion.begin() + parameters->containerOffset + parameters->size - 11);
+  previousVersion.erase(
+    previousVersion.begin() + version107Offset(parameterCount->containerOffset) - 11,
+    previousVersion.begin() + version107Offset(parameters->containerOffset) +
+      parameters->size - 11);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 99;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);

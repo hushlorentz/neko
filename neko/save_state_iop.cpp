@@ -327,6 +327,15 @@ void NekoSaveStateCodec::writeIOPState(
       }
     }
     {
+      auto masks = writer->scope("voiceModeMasks");
+      const auto &words = system.spu2ControllerComponent.voiceModeMasks;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
+    {
       auto selections = writer->scope("autoDMAWriteSelection");
       const auto &words = system.spu2ControllerComponent.autoDMAWriteSelection;
       for (std::size_t core = 0; core < words.size(); ++core)
@@ -625,6 +634,15 @@ void NekoSaveStateCodec::readIOP(
     {
       auto addresses = reader->scope("transferStartAddress");
       auto &words = system->spu2ControllerComponent.transferStartAddress;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto masks = reader->scope("voiceModeMasks");
+      auto &words = system->spu2ControllerComponent.voiceModeMasks;
       for (std::size_t index = 0; index < words.size(); ++index)
       {
         auto word = reader->element(index);

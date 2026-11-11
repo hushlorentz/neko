@@ -160,6 +160,7 @@ class IOPBus final
       SPU2MasterVolumeControl,
       SPU2CoreAttribute,
       SPU2VoiceMix,
+      SPU2VoiceModeMask,
       SPU2MainMix,
       SPU2EffectInputVolume,
       SPU2EffectEndAddressHigh,

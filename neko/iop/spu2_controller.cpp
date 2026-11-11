@@ -41,6 +41,7 @@ void SPU2Controller::reset() noexcept
   effectInputVolumes.fill(0);
   effectEndAddressHigh.fill(0);
   transferStartAddress.fill(0);
+  voiceModeMasks.fill(0);
   autoDMAWriteSelection.fill(0);
 }
 
@@ -300,6 +301,16 @@ bool SPU2Controller::writeCoreAttribute(
   }
   attribute = value;
   return true;
+}
+
+std::uint16_t SPU2Controller::readVoiceModeMask(std::size_t index) const
+{
+  return voiceModeMasks.at(index);
+}
+
+void SPU2Controller::writeVoiceModeMask(std::size_t index, std::uint16_t value)
+{
+  voiceModeMasks.at(index) = value;
 }
 
 std::uint16_t SPU2Controller::readVoiceMix(std::size_t index) const

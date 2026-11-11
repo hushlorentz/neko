@@ -41,6 +41,7 @@ class SPU2Controller final
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
+    static constexpr std::size_t VOICE_MODE_HALFWORD_COUNT = 8;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
     static constexpr std::size_t TRANSFER_START_HALFWORD_COUNT = 4;
     static constexpr std::uint16_t INPUT_CLOCK_PERIOD = 768;
@@ -75,9 +76,11 @@ class SPU2Controller final
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
     void writeTransferStartAddress(std::size_t index, std::uint16_t value);
+    std::uint16_t readVoiceModeMask(std::size_t index) const;
+    void writeVoiceModeMask(std::size_t index, std::uint16_t value);
     // Provisional STATX zero only while this core's input is deselected and closed.
     bool hasInactiveCoreStatus(std::size_t core) const;
-    // Provisional KOFF effect; replace before voice programming or key-on.
+    // Provisional KOFF effect; replace before voice source/envelope or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
@@ -137,6 +140,8 @@ class SPU2Controller final
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
     // Per core: raw TSA high/low images; no decoded address or active cursor.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
+    // Per core: raw PMON low/high, NON low/high; no voice or noise execution.
+    std::array<std::uint16_t, VOICE_MODE_HALFWORD_COUNT> voiceModeMasks{};
     std::array<std::uint16_t, CORE_COUNT> autoDMAWriteSelection{};
 };
 

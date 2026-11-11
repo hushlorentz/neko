@@ -287,11 +287,13 @@ namespace
 }
 
 TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownership",
-  "[iop][spu2][cache]")
+  "[iop][spu2][spu2-mode][cache]")
 {
   for (IOPAddress physical : {
       0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
+      0x1f900180u, 0x1f900182u, 0x1f900184u, 0x1f900186u,
+      0x1f900580u, 0x1f900582u, 0x1f900584u, 0x1f900586u,
       0x1f900188u, 0x1f90018au, 0x1f90018cu, 0x1f90018eu,
       0x1f900190u, 0x1f900192u, 0x1f900194u, 0x1f900196u,
       0x1f900588u, 0x1f90058au, 0x1f90058cu, 0x1f90058eu,
@@ -332,11 +334,13 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
 }
 
 TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
-  "[iop][spu2][cache]")
+  "[iop][spu2][spu2-mode][cache]")
 {
   for (IOPAddress physical : {
       0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
+      0x1f900180u, 0x1f900182u, 0x1f900184u, 0x1f900186u,
+      0x1f900580u, 0x1f900582u, 0x1f900584u, 0x1f900586u,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
       0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u,
@@ -413,11 +417,13 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
 }
 
 TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception ownership",
-  "[iop][spu2][execution]")
+  "[iop][spu2][spu2-mode][execution]")
 {
   for (IOPAddress physical : {
       0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
+      0x1f900180u, 0x1f900182u, 0x1f900184u, 0x1f900186u,
+      0x1f900580u, 0x1f900582u, 0x1f900584u, 0x1f900586u,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
       0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u,

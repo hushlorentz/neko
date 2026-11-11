@@ -48,6 +48,11 @@ namespace
     spu2TransferStartAddressAddresses = {{
       0x1f9001a8, 0x1f9001aa, 0x1f9005a8, 0x1f9005aa
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::VOICE_MODE_HALFWORD_COUNT>
+    spu2VoiceModeAddresses = {{
+      0x1f900180, 0x1f900182, 0x1f900184, 0x1f900186,
+      0x1f900580, 0x1f900582, 0x1f900584, 0x1f900586
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::VOICE_MIX_HALFWORD_COUNT>
     spu2VoiceMixAddresses = {{
       0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
@@ -404,6 +409,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, core, Device::SPU2CoreAttribute};
+    }
+  }
+  for (std::size_t index = 0; index < spu2VoiceModeAddresses.size(); ++index)
+  {
+    if (first == spu2VoiceModeAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2VoiceModeMask};
     }
   }
   for (std::size_t index = 0; index < spu2VoiceMixAddresses.size(); ++index)
@@ -873,6 +886,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readCoreAttribute(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoiceModeMask:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceModeMask(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2VoiceMix:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1092,6 +1110,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       spu2->writeMainMix(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2VoiceModeMask:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeVoiceModeMask(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2VoiceMix:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
