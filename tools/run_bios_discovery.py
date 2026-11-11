@@ -6,7 +6,6 @@ import argparse
 from datetime import datetime, timezone
 import filecmp
 import gzip
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +14,8 @@ import sys
 import time
 
 from inspect_startup import EVIDENCE_NOTE, load_log, uint
+import bios_campaign as campaign
+from bios_campaign import file_identity, write_json
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,16 +26,12 @@ TRACE_EVENTS = 3000000
 RUN_NAMES = ("traced1", "traced2", "plain1", "plain2")
 
 
-def write_json(path, report):
-    path.write_text(json.dumps(report, indent=2, sort_keys=True,
-                               allow_nan=False) + "\n", encoding="utf-8")
-
-
 def capture(directory, manifest, name, command, *, extension="stdout",
             accepted=(0,), compressed=False):
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
     entry = dict(name=name, command=command, returncode=None,
+                 accepted_exit_codes=list(accepted),
                  stdout=output.name, stderr=errors.name,
                  started_at=datetime.now(timezone.utc).isoformat())
     started = time.monotonic()
@@ -81,16 +78,6 @@ def capture(directory, manifest, name, command, *, extension="stdout",
 def report_path(directory, name):
     compressed = name.startswith("traced") or name in ("cold", "resumed")
     return directory / f"{name}.jsonl{'.gz' if compressed else ''}"
-
-
-def file_identity(path):
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-            size += len(chunk)
-    return dict(sha256=digest.hexdigest(), bytes=size)
 
 
 def read_checkpoint(path, bios, ceiling):
@@ -221,7 +208,7 @@ def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
 
 
 def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=False,
-              checkpoint=None, checkpoint_at=None):
+              checkpoint=None, checkpoint_at=None, invocation=None):
     master_cycles = uint(master_cycles, "Cycle ceiling")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
@@ -243,8 +230,11 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
         manifest["checkpoint_at"] = checkpoint_at
     if failure_context or checkpoint_at is not None:
         manifest["failure_context"] = True
+    write_json(directory / "manifest.json", manifest)
+    owner = campaign.Owner(directory, invocation)
     try:
         binary = build_neko(directory, manifest)
+        manifest.update(binary_identity=file_identity(binary), bios_identity=file_identity(bios))
         if metadata is not None and metadata.get("binary") != file_identity(binary):
             raise ValueError("Checkpoint executable changed; regenerate and validate "
                              "with --checkpoint-at")
@@ -281,6 +271,8 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
                         else str(error))
         write_json(directory / "manifest.json", manifest)
         raise
+    finally:
+        owner.finish(manifest, sys.exc_info()[1])
 
 
 def failure_signature(failure):
@@ -311,7 +303,7 @@ def prune_scout_states(directory, manifest, keep):
 
 
 def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
-                    replay_window):
+                    replay_window, invocation=None):
     ceiling = uint(master_cycles, "Cycle ceiling")
     interval = uint(checkpoint_every, "Checkpoint interval")
     window = uint(replay_window, "Replay window")
@@ -326,9 +318,11 @@ def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
                     note=EVIDENCE_NOTE)
     write_json(directory / "manifest.json", manifest)
     started = time.monotonic()
+    owner = campaign.Owner(directory, invocation)
     try:
         binary = build_neko(directory, manifest)
         identity = dict(binary=file_identity(binary), bios=file_identity(bios))
+        manifest.update(binary_identity=identity["binary"], bios_identity=identity["bios"])
         checkpoint = None
         start = 0
         while True:
@@ -444,10 +438,19 @@ def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
                         elapsed_seconds=time.monotonic() - started)
         write_json(directory / "manifest.json", manifest)
         raise
+    finally:
+        owner.finish(manifest, sys.exc_info()[1])
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--status" in argv or "--finalize" in argv:
+        return campaign.main(argv)
+    invocation = [sys.executable, "-B", str(Path(__file__).resolve()), *argv]
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Inspect without execution: DIRECTORY --status; finalize inspected "
+               "evidence: DIRECTORY --finalize --outer-exit 0.")
     parser.add_argument("directory", type=Path,
                         help="New artifact directory; existing paths are refused.")
     parser.add_argument("--bios", type=Path,
@@ -480,7 +483,8 @@ def main(argv=None):
                 checkpoint_every=(5000000 if arguments.checkpoint_every is None
                                   else arguments.checkpoint_every),
                 replay_window=(10000 if arguments.replay_window is None
-                               else arguments.replay_window))
+                               else arguments.replay_window),
+                invocation=invocation)
             print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
             return 0 if report["status"] in ("equal", "ceiling_reached") else 1
         if arguments.checkpoint_every is not None or arguments.replay_window is not None:
@@ -490,7 +494,8 @@ def main(argv=None):
                            failure_context=arguments.failure_context,
                            checkpoint=(arguments.checkpoint.resolve()
                                        if arguments.checkpoint is not None else None),
-                           checkpoint_at=arguments.checkpoint_at)
+                           checkpoint_at=arguments.checkpoint_at,
+                           invocation=invocation)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1
     except (OSError, ValueError) as error:

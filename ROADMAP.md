@@ -1709,6 +1709,15 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Validate the staged workflow with BIOS-free regression and integration
       tests, independent review, and complete optimized/AddressSanitizer checks.
 
+### BIOS Campaign Driving
+
+- [x] Add durable campaign ownership, deterministic execution status and an
+      explicit evidence-inspection gate without changing BIOS execution modes.
+- [x] Add a maintained launch/monitor/reconcile/finalize procedure with
+      completion monitoring, session recovery and no implicit relaunch.
+- [x] Validate lifecycle/error handling with BIOS-free regressions and authored
+      integration coverage; obtain independent correctness review.
+
 ### BIOS Prerequisite Discovery and Bounded Repairs
 
 - [x] Classify the initial discovered pre-handshake dependencies against the approved
@@ -3807,6 +3816,17 @@ not requirements for exhaustive subsystem coverage.
       containing unnamed range; reassess bounded semantics through the existing
       owner without assuming adjacent registers share a hardware function.
 - [x] Implement the selected bounded contract with focused CPU/bus and
+      lifecycle coverage, including persistence if affected; retain unsupported
+      execution, neighboring accesses and transports.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Halfword Programming at0x1f9007bc
+
+- [ ] Research the originating IOP halfword zero-store at0x1f9007bc and its
+      containing unnamed range; reassess bounded semantics through the existing
+      owner without assuming adjacent registers share a hardware function.
+- [ ] Implement the selected bounded contract with focused CPU/bus and
       lifecycle coverage, including persistence if affected; retain unsupported
       execution, neighboring accesses and transports.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical

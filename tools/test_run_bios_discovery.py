@@ -88,7 +88,10 @@ class StagedDiscoveryTests(unittest.TestCase):
         status = 1 if failed and "--stop-on-first-failure" in command or (
             failed and "--scout" in command and cycle < ceiling) else 0
         manifest["commands"].append(dict(name=name, command=command,
-                                         returncode=status, elapsed_seconds=0.1))
+                                         returncode=status, elapsed_seconds=0.1,
+                                         accepted_exit_codes=list(kwargs.get("accepted", (0,))),
+                                         output_bytes=path.stat().st_size,
+                                         stdout=path.name, stderr=f"{name}.stderr"))
         discovery.write_json(directory / "manifest.json", manifest)
         return status
 
@@ -127,6 +130,9 @@ class StagedDiscoveryTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "ceiling_reached")
         self.assertEqual(len(self.commands), 3)
         self.assertNotIn("failure_reproduced", manifest)
+        status = discovery.campaign.status(self.output)
+        self.assertEqual(status["state"], "execution_finished")
+        self.assertEqual(status["scope"], "scout_ceiling")
 
     def test_scout_replay_disagreement_is_preserved_as_a_mismatch(self):
         self.replay_mismatch = True
@@ -134,6 +140,7 @@ class StagedDiscoveryTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "mismatch")
         self.assertFalse(manifest["failure_reproduced"])
         self.assertTrue((self.output / "scout-10.state").is_file())
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
 
     def test_scout_failure_on_checkpoint_boundary_replays_from_before_the_fault(self):
         self.failure_cycle = 20
@@ -577,6 +584,171 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.run_count, 4)
         self.assertEqual(self.read("manifest.json")["status"], "error")
         self.assertTrue((self.output / "summary.stderr").read_text())
+
+    def test_execution_completion_requires_explicit_inspection_and_outer_exit(self):
+        self.invoke()
+        report = discovery.campaign.status(self.output)
+        self.assertEqual(report["state"], "execution_finished")
+        self.assertEqual(report["scope"], "conformance")
+        receipt = self.read("execution.json")
+        self.assertEqual(receipt["returncode"], 0)
+        self.assertIn(str(self.bios), receipt["command"])
+        for name in ("verification-notes.txt", "review.txt", "cleanup.receipt"):
+            (self.output / name).write_text(f"Authored {name}\n")
+        with self.assertRaisesRegex(ValueError, "outer exit"):
+            discovery.campaign.finalize(self.output, 2)
+        self.assertEqual(discovery.campaign.status(self.output)["state"],
+                         "execution_finished")
+        discovery.campaign.finalize(self.output, 0)
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "verified")
+        discovery.campaign.finalize(self.output, 0)  # Idempotent, not a second run.
+        self.assertEqual(self.run_count, 4)
+        (self.output / "review.txt").write_text("Changed after finalization\n")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_checkpoint_finalization_checks_retained_canonical_bytes(self):
+        self.create_checkpoint()
+        self.assertEqual(discovery.campaign.status(self.output)["state"],
+                         "execution_finished")
+        path = self.output / "cold-final.state"
+        data = path.read_bytes()
+        path.write_bytes(bytes([data[0] ^ 1]) + data[1:])
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_invalid_nested_canonical_receipt_fails_closed(self):
+        self.create_checkpoint()
+        manifest = self.read("manifest.json")
+        manifest["final_states"]["cold"] = None
+        discovery.write_json(self.output / "manifest.json", manifest)
+        execution = self.read("execution.json")
+        execution["manifest"] = discovery.file_identity(self.output / "manifest.json")
+        discovery.write_json(self.output / "execution.json", execution)
+        report = discovery.campaign.status(self.output)
+        self.assertEqual(report["state"], "failed")
+        self.assertIn("Invalid canonical", report["reason"])
+
+    def test_status_cli_cannot_launch_a_campaign_and_rejects_run_options(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = discovery.main([str(self.output), "--status"])
+        self.assertEqual(result, 2)
+        self.assertEqual(json.loads(output.getvalue())["state"], "unknown")
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.calls, [])
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            discovery.main([str(self.output), "--status", "--cycles", "10"])
+
+    def test_finalization_refuses_missing_inspection_evidence(self):
+        self.invoke()
+        with self.assertRaisesRegex((OSError, ValueError), "verification-notes"):
+            discovery.campaign.finalize(self.output, 0)
+        self.assertFalse((self.output / "inspection.json").exists())
+
+    def test_missing_or_changed_terminal_evidence_never_reports_success(self):
+        self.invoke()
+        comparison = self.output / "compare-traces.json"
+        original = comparison.read_bytes()
+        for content in (b"{", b'{"equal": false}\n'):
+            with self.subTest(content=content):
+                comparison.write_bytes(content)
+                self.assertEqual(discovery.campaign.status(self.output)["state"],
+                                 "failed")
+        comparison.write_bytes(original)
+        self.assertEqual(discovery.campaign.status(self.output)["state"],
+                         "execution_finished")
+        execution = self.read("execution.json")
+        execution["returncode"] = None
+        discovery.write_json(self.output / "execution.json", execution)
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "interrupted")
+
+    def test_malformed_summary_and_truncated_native_output_fail_closed(self):
+        self.invoke()
+        for name in ("summary.json", "traced1.jsonl.gz"):
+            with self.subTest(name=name):
+                path = self.output / name
+                original = path.read_bytes()
+                path.write_bytes(b"[" + original[1:] if name.endswith(".json")
+                                 else original[:-1])
+                self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+                path.write_bytes(original)
+
+    def test_completion_between_receipt_read_and_lock_probe_uses_terminal_receipt(self):
+        self.invoke()
+        initial = dict(self.read("execution.json"), returncode=None)
+        read_json = discovery.campaign.read_json
+        execution_reads = 0
+
+        def read_before_release(path):
+            nonlocal execution_reads
+            if path.name == "execution.json":
+                execution_reads += 1
+                if execution_reads == 1:
+                    return initial
+            return read_json(path)
+
+        with patch.object(discovery.campaign, "read_json",
+                          side_effect=read_before_release):
+            report = discovery.campaign.status(self.output)
+        self.assertEqual(report["state"], "execution_finished")
+
+    def test_error_and_interrupt_are_terminal_but_not_verified(self):
+        self.build_status = 1
+        self.invoke(status=2)
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+        self.output = self.root / "interrupted"
+        self.build_status = 0
+        self.run_error = KeyboardInterrupt()
+        self.invoke(status=130)
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "interrupted")
+
+    def test_legacy_manifest_and_malformed_receipt_are_unknown_not_verified(self):
+        self.output.mkdir()
+        discovery.write_json(self.output / "manifest.json", dict(status="equal"))
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "unknown")
+        (self.output / "execution.json").write_text("{")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "unknown")
+
+    def test_atomic_manifest_failure_preserves_previous_readable_receipt(self):
+        self.output.mkdir()
+        path = self.output / "manifest.json"
+        discovery.write_json(path, dict(status="running"))
+        with patch.object(discovery.campaign.os, "replace",
+                          side_effect=OSError("authored replacement failure")):
+            with self.assertRaisesRegex(OSError, "replacement failure"):
+                discovery.write_json(path, dict(status="equal"))
+        self.assertEqual(self.read("manifest.json"), dict(status="running"))
+        self.assertEqual(list(self.output.iterdir()), [path])
+
+
+class CampaignOwnershipTests(unittest.TestCase):
+    def test_live_ownership_and_abrupt_death_are_not_inferred_from_a_pid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            program = (
+                "import sys; from pathlib import Path; import bios_campaign as c; "
+                "d = Path(sys.argv[1]); "
+                "c.write_json(d / 'manifest.json', "
+                "{'status': 'running', 'commands': []}); "
+                "owner = c.Owner(d); print('ready', flush=True); sys.stdin.read()")
+            process = REAL_POPEN(
+                [sys.executable, "-B", "-c", program, str(directory)],
+                cwd=Path(discovery.__file__).parent, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(process.stdout.readline().strip(), "ready")
+                self.assertEqual(discovery.campaign.status(directory)["state"], "running")
+                with self.assertRaisesRegex(ValueError, "already owned"):
+                    discovery.campaign.Owner(directory)
+                with self.assertRaisesRegex(ValueError, "running"):
+                    discovery.campaign.finalize(directory, 0)
+                process.kill()
+                process.wait(timeout=5)
+                self.assertEqual(discovery.campaign.status(directory)["state"],
+                                 "interrupted")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate(timeout=5)
 
 
 if __name__ == "__main__":

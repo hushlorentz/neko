@@ -29,6 +29,9 @@ class ScoutIntegrationTests(unittest.TestCase):
             self.assertEqual(result["status"], "equal")
             self.assertTrue(result["failure_reproduced"])
             self.assertEqual(result["first_failure"]["instruction"]["bits"], "0x4c000000")
+            status = discovery.campaign.status(root / "discovery")
+            self.assertEqual(status["state"], "execution_finished")
+            self.assertEqual(status["scope"], "scout_origin")
 
     def test_authored_halfword_fault_reproduces_from_a_periodic_checkpoint(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()

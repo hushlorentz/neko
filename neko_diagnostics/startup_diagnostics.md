@@ -663,6 +663,68 @@ Run the BIOS-free workflow and inspector tests with:
 python3 -B -m unittest discover -s tools -p 'test_*.py' -v
 ```
 
+### Campaign ownership and completion
+
+Retain campaign ownership through completion, monitor progress, reconcile the
+actual process exit and finalize evidence before reporting verification.
+A background launch is **running**, never done. Recovery starts from the
+existing batch and ownership record, not another launch.
+
+New batches retain `owner.lock` and atomic `execution.json`/`manifest.json`
+receipts. The OS-held lock identifies a live owner without trusting a PID that
+may have been reused. `execution.json` records the invocation, owner PID,
+timestamps, expected helper return code and final manifest identity; input
+and executable identities are recorded in the manifest. The receipt is written
+before the helper returns, so the actual outer process exit must still be
+observed separately. Abrupt termination releases the lock but may leave a
+native child running; no automatic recovery or relaunch is attempted.
+
+Inspect an existing batch without building or running the BIOS:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/bios-discovery/after-ier --status
+```
+
+| State | Meaning |
+| --- | --- |
+| `running` | Ownership lock is held; stage/start/progress are reported, not proof of throughput. |
+| `execution_finished` | Expected helper exit0 and required terminal evidence agree; inspection pending. |
+| `verified` | Explicit inspection receipt and its retained evidence still agree. |
+| `failed` | Nonzero completion, inconsistent evidence or invalidated inspection. |
+| `interrupted` | Recorded interrupt or ownership lost without a terminal receipt; inspect possible children. |
+| `unknown` | Missing/legacy/malformed ownership records; never inferred success. |
+
+Status exit0 means `verified`; exit1 means running/inspection pending; exit2
+means failed/interrupted/unknown. Read the JSON, not just the code. Required
+compact JSON must parse, recorded output sizes must agree, required comparisons
+must agree and retained canonical/checkpoint bytes are hashed,
+so status inspection can read tens of MiB. It does not reread large JSONL
+traces. Status/finalize reject run options and cannot trigger execution.
+
+After the actual outer exit0 has been observed, inspect originating evidence,
+complete the required review, update project/roadmap state and inspect/clean
+obsolete output. Retain substantive `verification-notes.txt`, `review.txt`
+and `cleanup.receipt` in the batch, then explicitly attest completion:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/bios-discovery/after-ier --finalize --outer-exit 0
+```
+
+Finalization refuses a live owner, unsuccessful/incomplete evidence, a nonzero
+outer exit or missing/empty inspection files. `inspection.json` binds those
+files and compact/canonical evidence by hash; repeating unchanged finalization
+is idempotent. Nonempty files and the outer-exit argument are attestations,
+not independent proof of their contents. Lost outer results remain inspection
+blocked; never supply a guessed zero. Sessions/watchdogs do not provide
+cross-session orchestration. Legacy batches are not rewritten or retroactively
+certified. Keep current gate evidence; later pruning/modification invalidates
+current verified status, even when historical comparison receipts remain.
+
+The reported `scope` is `conformance`, `scout_origin` or `scout_ceiling`.
+`verified` only certifies this recorded workflow/scope, not real-hardware
+conformance or successful boot. Authorization, bounds, checkpoint provenance
+and commit checkpoints are unchanged.
+
 ### Staged discovery: scout, replay, verify
 
 Use the staged mode to find the next dependency without repeating long full
