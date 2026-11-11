@@ -317,31 +317,65 @@ namespace
     }
     system.iopCore().startExecution(0xa0000000);
   }
+
+  void prepareInactiveInputs(NekoSystem &system)
+  {
+    auto &spu = system.spu2Controller();
+    SPU2InputTest::programProfile(spu);
+    for (std::size_t core = 0; core < coreStatusAddresses.size(); ++core)
+    {
+      REQUIRE(system.iopBus().write16(autoDMAAddresses[core],
+        autoDMAWriteSelections[core]).status == IOPBusStatus::Completed);
+      REQUIRE(spu.writeInputWord(core, 0x12345678));
+      REQUIRE(system.iopBus().write16(autoDMAAddresses[core], 0).status ==
+        IOPBusStatus::Completed);
+    }
+  }
 }
 
-TEST_CASE("SPU2 PCM input rejects unsupported selection and stale quiescent status",
-  "[iop][spu2][spu2-input]")
+TEST_CASE("SPU2 inactive status follows each core's input lifecycle",
+  "[iop][spu2][spu2-input][spu2-statx]")
 {
-  NekoSystem system;
-  auto &bus = system.iopBus();
-  REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Unmapped);
-  for (const auto programming : {
-      HalfwordProgramming{0x1f9007c6, 0x0900, 0},
-      HalfwordProgramming{0x1f9007c8, 0x0200, 0},
-      HalfwordProgramming{0x1f9007cc, 0x0000, 0},
-      HalfwordProgramming{0x1f9007ca, 0x0008, 0},
-      HalfwordProgramming{0x1f9007c0, 0xc032, 0},
-      HalfwordProgramming{0x1f90019a, 0xc000, 0}})
+  for (std::size_t core = 0; core < coreStatusAddresses.size(); ++core)
   {
-    REQUIRE(bus.write16(programming.address, programming.value).status ==
+    CAPTURE(core);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &spu = system.spu2Controller();
+    const auto peer = 1 - core;
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Unmapped);
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(bus.write16(autoDMAAddresses[peer], autoDMAWriteSelections[peer]).status ==
       IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(spu.writeInputWord(core, 0x24681357));
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    spu.cancelInputWrite(core);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    bus.reset();
+    system.iopCore().reset();
+    system.runMasterCycles(80);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(autoDMAAddresses[core], 0).status == IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    for (unsigned repeat = 0; repeat < 3; ++repeat)
+    {
+      const auto read = bus.read16(coreStatusAddresses[core]);
+      REQUIRE(read.status == IOPBusStatus::Completed);
+      REQUIRE(read.value == 0);
+      REQUIRE(bus.read16(coreStatusAddresses[peer]).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(spu.readSoundRAMHalfword(0x2100 + core * 0x400) == 0x1357);
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    system.reset();
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
   }
-  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Completed);
-  REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Completed);
-  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Completed);
-  REQUIRE(bus.write16(0x1f9001b0, 0).status == IOPBusStatus::Completed);
-  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
 }
 
 TEST_CASE("SPU2 PCM input clock starts on the 768th IOP pulse",
@@ -452,13 +486,13 @@ TEST_CASE("SPU2 PCM starvation preserves partial targets and cancellation preser
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x1357);
   REQUIRE(spu.writeAutoDMAWriteSelection(0, 0));
   REQUIRE_FALSE(spu.inputWriteRequested(0));
-  REQUIRE_FALSE(spu.hasQuiescentCoreStatus(0));
+  REQUIRE(spu.hasInactiveCoreStatus(0));
   SPU2InputTest::advanceSamples(spu, 256);
   REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
   REQUIRE(spu.writeInputWord(0, 0x76543210));
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x3210);
   spu.reset();
-  REQUIRE(spu.hasQuiescentCoreStatus(0));
+  REQUIRE(spu.hasInactiveCoreStatus(0));
   REQUIRE_FALSE(spu.inputWriteRequested(0));
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0);
 }
@@ -496,7 +530,7 @@ TEST_CASE("SPU2 selected PCM input guards only its live profile",
   REQUIRE(system.iopBus().write16(configurationAddresses[0], 0).status ==
     IOPBusStatus::Completed);
   REQUIRE(system.iopBus().read16(coreStatusAddresses[1]).status ==
-    IOPBusStatus::Unmapped);
+    IOPBusStatus::Completed);
   REQUIRE(system.iopBus().write32(0x1f801508, 0x01000201).status ==
     IOPBusStatus::Unmapped);
 }
@@ -1421,7 +1455,7 @@ TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports
   }
 }
 
-TEST_CASE("SPU2 quiescent status reads preserve programming and pending signals",
+TEST_CASE("SPU2 inactive status reads preserve programming and pending signals",
   "[iop][spu2][spu2-statx]")
 {
   NekoSystem system;
@@ -1431,6 +1465,7 @@ TEST_CASE("SPU2 quiescent status reads preserve programming and pending signals"
     REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
     REQUIRE(bus.read16(address).value == 0);
   }
+  prepareInactiveInputs(system);
   programConfiguration(system);
   programMasterVolumes(system);
   system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
@@ -1471,7 +1506,7 @@ TEST_CASE("SPU2 quiescent status reads preserve programming and pending signals"
   }
 }
 
-TEST_CASE("SPU2 quiescent status excludes writes neighbors and non-CPU transports",
+TEST_CASE("SPU2 inactive status excludes writes neighbors and non-CPU transports",
   "[iop][spu2][spu2-statx]")
 {
   for (const auto address : coreStatusAddresses)
@@ -1479,6 +1514,7 @@ TEST_CASE("SPU2 quiescent status excludes writes neighbors and non-CPU transport
     CAPTURE(address);
     NekoSystem system;
     auto &bus = system.iopBus();
+    prepareInactiveInputs(system);
     programConfiguration(system);
     programMasterVolumes(system);
     const auto before = system.iopStateHash();
@@ -1528,7 +1564,7 @@ TEST_CASE("SPU2 quiescent status excludes writes neighbors and non-CPU transport
   }
 }
 
-TEST_CASE("SPU2 quiescent status guests preserve aliases and branch load delays",
+TEST_CASE("SPU2 inactive status guests preserve aliases and branch load delays",
   "[iop][spu2][spu2-statx][trace]")
 {
   for (const auto physical : coreStatusAddresses)
@@ -1539,6 +1575,7 @@ TEST_CASE("SPU2 quiescent status guests preserve aliases and branch load delays"
     CAPTURE(address);
     CAPTURE(load);
     NekoSystem system;
+    prepareInactiveInputs(system);
     REQUIRE(system.iopBus().write16(coreAttributeAddresses[0], 0x8000).status ==
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], 0x8000).status ==
@@ -1580,7 +1617,7 @@ TEST_CASE("SPU2 quiescent status guests preserve aliases and branch load delays"
   }
 }
 
-TEST_CASE("SPU2 quiescent status loads restore across branch and load continuations",
+TEST_CASE("SPU2 inactive status loads restore across branch and load continuations",
   "[iop][spu2][spu2-statx][save-state][trace]")
 {
   for (const auto address : coreStatusAddresses)
@@ -1589,6 +1626,7 @@ TEST_CASE("SPU2 quiescent status loads restore across branch and load continuati
     CAPTURE(address);
     CAPTURE(cut);
     NekoSystem original;
+    prepareInactiveInputs(original);
     programConfiguration(original);
     programMasterVolumes(original);
     REQUIRE(original.iopBus().write16(coreAttributeAddresses[0], 0x8000).status ==

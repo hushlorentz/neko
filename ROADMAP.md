@@ -3766,6 +3766,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded register contract with focused CPU/bus
       and immediate-family regressions through one shared revision policy;
       preserve existing EE access limits and initialization contracts.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Post-Input Core Status Read Dependency
+
+- [x] Research the originating core-0 status halfword read at0x1f900344 after
+      Auto DMA input use; select both-core lifecycle/status semantics through
+      the existing owner without assuming zero or fabricated status progression.
+- [x] Implement the selected bounded status contract through SPU2Controller
+      with CPU/bus, lifecycle, trace and restored-continuation coverage;
+      preserve existing input/DMA ownership and unsupported execution limits.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
 

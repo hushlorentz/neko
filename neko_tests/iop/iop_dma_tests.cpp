@@ -2962,7 +2962,7 @@ TEST_CASE("IOP SPU CHCR unsupported start controls and profiles preserve selecte
 }
 
 TEST_CASE("IOP SPU CHCR repeated starts preserve progress and stopped controls abort without IRQ",
-  "[iop][dma][spu-chcr]")
+  "[iop][dma][spu-chcr][spu2-statx]")
 {
   for (std::size_t core = 0; core < 2; ++core)
   for (const IOPWord stop : {0u, 0x201u})
@@ -3004,8 +3004,14 @@ TEST_CASE("IOP SPU CHCR repeated starts preserve progress and stopped controls a
     REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) == 0);
     REQUIRE(dma.tieBreakChannel() == cursor);
     REQUIRE(spu.readSoundRAMHalfword(target) == 0x5678);
+    REQUIRE(bus.read16(core == 0 ? 0x1f900344 : 0x1f900744).status ==
+      IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(admas, 0).status == IOPBusStatus::Completed);
-    REQUIRE(bus.read16(core == 0 ? 0x1f900344 : 0x1f900744).status == IOPBusStatus::Unmapped);
+    const auto inactive = system.iopStateHash();
+    const auto status = bus.read16(core == 0 ? 0x1f900344 : 0x1f900744);
+    REQUIRE(status.status == IOPBusStatus::Completed);
+    REQUIRE(status.value == 0);
+    REQUIRE(system.iopStateHash() == inactive);
     REQUIRE(bus.write32(SPU_MADR[core], 0x2000).status == IOPBusStatus::Completed);
     REQUIRE(bus.write32(0x2000, 0xabcdfedc).status == IOPBusStatus::Completed);
     REQUIRE(bus.write16(admas, static_cast<std::uint16_t>(1u << core)).status ==
@@ -3019,7 +3025,7 @@ TEST_CASE("IOP SPU CHCR repeated starts preserve progress and stopped controls a
 }
 
 TEST_CASE("IOP SPU CPU started channels wait on capacity and complete only after final acceptance",
-  "[iop][dma][spu-chcr]")
+  "[iop][dma][spu-chcr][spu2-statx]")
 {
   for (std::size_t core = 0; core < 2; ++core)
   for (const bool masked : {false, true})
@@ -3044,6 +3050,8 @@ TEST_CASE("IOP SPU CPU started channels wait on capacity and complete only after
     REQUIRE(dma.spuRemainingWords(core) == 256);
     REQUIRE(bus.read32(SPU_CHCR[core]).value == 0x01000201);
     REQUIRE_FALSE(spu.inputWriteRequested(core));
+    REQUIRE(bus.read16(core == 0 ? 0x1f900344 : 0x1f900744).status ==
+      IOPBusStatus::Unmapped);
     const auto before = dma.spuMemoryAddress(core);
     system.runMasterCycles(8);
     REQUIRE(dma.spuMemoryAddress(core) == before);
@@ -3061,6 +3069,15 @@ TEST_CASE("IOP SPU CPU started channels wait on capacity and complete only after
       (masked ? SUMMARY | mask | (mask << 8) : 0)));
     REQUIRE(((system.iopInterruptController().status() & DMAC_CAUSE) != 0) == masked);
     REQUIRE((system.iopInterruptController().status() & (1u << 9)) == 0);
+    REQUIRE(bus.read16(core == 0 ? 0x1f900344 : 0x1f900744).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(core == 0 ? 0x1f9001b0 : 0x1f9005b0, 0).status ==
+      IOPBusStatus::Completed);
+    const auto inactive = system.iopStateHash();
+    const auto status = bus.read16(core == 0 ? 0x1f900344 : 0x1f900744);
+    REQUIRE(status.status == IOPBusStatus::Completed);
+    REQUIRE(status.value == 0);
+    REQUIRE(system.iopStateHash() == inactive);
   }
 }
 

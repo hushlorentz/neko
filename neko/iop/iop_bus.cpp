@@ -452,7 +452,7 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     if (first == statusAddress &&
         last < first + sizeof(std::uint16_t))
     {
-      return {IOPBusRegion::Mmio, core, Device::SPU2UnprogrammedCoreStatus};
+      return {IOPBusRegion::Mmio, core, Device::SPU2InactiveCoreStatus};
     }
   }
   for (const auto keyOffAddress : spu2KeyOffAddresses)
@@ -903,9 +903,9 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readMainMix(location.offset)}
         : IOPBusReadResult{};
-    case Device::SPU2UnprogrammedCoreStatus:
+    case Device::SPU2InactiveCoreStatus:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
-        spu2->hasQuiescentCoreStatus(location.offset)
+        spu2->hasInactiveCoreStatus(location.offset)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0}
         : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
@@ -1334,7 +1334,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       // Tolerate the observed retail initialization, not general RAM resizing.
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
-    case Device::SPU2UnprogrammedCoreStatus:
+    case Device::SPU2InactiveCoreStatus:
     case Device::DEV9Revision:
     case Device::AbsentROM1:
     case Device::None:

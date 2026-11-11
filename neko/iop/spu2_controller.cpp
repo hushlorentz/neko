@@ -355,9 +355,9 @@ void SPU2Controller::writeTransferStartAddress(
   transferStartAddress.at(index) = value;
 }
 
-bool SPU2Controller::hasQuiescentCoreStatus(std::size_t core) const
+bool SPU2Controller::hasInactiveCoreStatus(std::size_t core) const
 {
-  return !inputStates.at(core).everSelected;
+  return autoDMAWriteSelection.at(core) == 0 && !inputStates.at(core).writeOpen;
 }
 
 void SPU2Controller::keyOffUnprogrammedVoices() const noexcept

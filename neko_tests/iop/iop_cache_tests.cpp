@@ -487,7 +487,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
   }
 }
 
-TEST_CASE("SPU2 quiescent status bypasses cached payloads but preserves isolation",
+TEST_CASE("SPU2 inactive status bypasses cached payloads but preserves isolation",
   "[iop][spu2][spu2-statx][cache]")
 {
   for (IOPAddress physical : {0x1f900344u, 0x1f900744u})
@@ -500,6 +500,11 @@ TEST_CASE("SPU2 quiescent status bypasses cached payloads but preserves isolatio
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
+    SPU2InputTest::programProfile(spu2);
+    const auto selected = physical == 0x1f900344 ? 0u : 1u;
+    REQUIRE(spu2.writeAutoDMAWriteSelection(selected, 1u << selected));
+    REQUIRE(spu2.writeInputWord(selected, 0x12345678));
+    REQUIRE(spu2.writeAutoDMAWriteSelection(selected, 0));
     IOPCore core;
     core.attachBus(&bus);
     const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;

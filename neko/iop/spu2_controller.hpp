@@ -75,8 +75,8 @@ class SPU2Controller final
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
     void writeTransferStartAddress(std::size_t index, std::uint16_t value);
-    // STATX zero is supported only before the core's first input selection.
-    bool hasQuiescentCoreStatus(std::size_t core) const;
+    // Provisional STATX zero only while this core's input is deselected and closed.
+    bool hasInactiveCoreStatus(std::size_t core) const;
     // Provisional KOFF effect; replace before voice programming or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
