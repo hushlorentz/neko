@@ -646,7 +646,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
+TEST_CASE("Version 109 save-state layout is byte-stable", "[spu2-pio]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -661,11 +661,11 @@ TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 108);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 109);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 16);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 24);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -749,7 +749,18 @@ TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
     REQUIRE(address->containerOffset == transferStartOffset + 2 * index);
     REQUIRE(address->scalarValue == 0);
   }
-  const auto modeOffset = transferStartOffset + 8;
+  const auto cursorOffset = transferStartOffset + 8;
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto *cursor = snapshot.find(
+      "system.iop.spu2.transferCursor[" + std::to_string(core) + "].value");
+    REQUIRE(cursor != nullptr);
+    REQUIRE(cursor->kind == SaveStateFieldKind::U32);
+    REQUIRE(cursor->size == 4);
+    REQUIRE(cursor->containerOffset == cursorOffset + 4 * core);
+    REQUIRE(cursor->scalarValue == 0);
+  }
+  const auto modeOffset = cursorOffset + 8;
   for (std::size_t index = 0; index < 8; ++index)
   {
     const auto *mode = snapshot.find(
@@ -837,7 +848,7 @@ TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
   REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
   REQUIRE(cdvdResult->size == 16);
   auto previousVersion = state;
-  previousVersion.erase(previousVersion.begin() + modeOffset,
+  previousVersion.erase(previousVersion.begin() + cursorOffset,
     previousVersion.begin() + modeOffset + 16);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 107;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
@@ -849,9 +860,9 @@ TEST_CASE("Version 108 save-state layout is byte-stable", "[spu2-mode]")
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
-  const auto version107Offset = [modeOffset](std::size_t offset)
+  const auto version107Offset = [cursorOffset](std::size_t offset)
   {
-    return offset >= modeOffset + 16 ? offset - 16 : offset;
+    return offset >= cursorOffset + 24 ? offset - 24 : offset;
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

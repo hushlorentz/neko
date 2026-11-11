@@ -48,6 +48,10 @@ namespace
     spu2TransferStartAddressAddresses = {{
       0x1f9001a8, 0x1f9001aa, 0x1f9005a8, 0x1f9005aa
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::CORE_COUNT>
+    spu2TransferDataAddresses = {{
+      0x1f9001ac, 0x1f9005ac
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::VOICE_MODE_HALFWORD_COUNT>
     spu2VoiceModeAddresses = {{
       0x1f900180, 0x1f900182, 0x1f900184, 0x1f900186,
@@ -457,6 +461,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2TransferStartAddress};
+    }
+  }
+  for (std::size_t core = 0; core < spu2TransferDataAddresses.size(); ++core)
+  {
+    if (first == spu2TransferDataAddresses[core] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, core, Device::SPU2TransferData};
     }
   }
   for (std::size_t core = 0; core < spu2CoreStatusAddresses.size(); ++core)
@@ -1062,6 +1074,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == 1 || width == 2 || width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
+    case Device::SPU2TransferData:
     case Device::SPU2UnprogrammedKeyOff:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
@@ -1083,6 +1096,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2TransferData:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeTransferData(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2TransferStartAddress:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

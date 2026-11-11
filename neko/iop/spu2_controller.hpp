@@ -31,7 +31,7 @@ struct SPU2InputTick
   std::array<SPU2InputSample, 2> samples{};
 };
 
-// Bounded SPU2 programming; no audio engine or volume sweeps.
+// Bounded SPU2 programming and input transfers; no audio engine or volume sweeps.
 class SPU2Controller final
 {
   public:
@@ -76,6 +76,8 @@ class SPU2Controller final
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
     void writeTransferStartAddress(std::size_t index, std::uint16_t value);
+    // Provisional synchronous PIO, only while both PCM inputs are inactive.
+    bool writeTransferData(std::size_t core, std::uint16_t value);
     std::uint16_t readVoiceModeMask(std::size_t index) const;
     void writeVoiceModeMask(std::size_t index, std::uint16_t value);
     // Provisional STATX zero only while this core's input is deselected and closed.
@@ -138,8 +140,9 @@ class SPU2Controller final
     std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
     // Passive raw EEA high images; no decoded address or effect work area.
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
-    // Per core: raw TSA high/low images; no decoded address or active cursor.
+    // Per core: raw programmed TSA high/low images, independent of PIO progress.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
+    std::array<std::uint32_t, CORE_COUNT> transferCursor{};
     // Per core: raw PMON low/high, NON low/high; no voice or noise execution.
     std::array<std::uint16_t, VOICE_MODE_HALFWORD_COUNT> voiceModeMasks{};
     std::array<std::uint16_t, CORE_COUNT> autoDMAWriteSelection{};

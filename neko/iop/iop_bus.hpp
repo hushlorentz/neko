@@ -165,6 +165,7 @@ class IOPBus final
       SPU2EffectInputVolume,
       SPU2EffectEndAddressHigh,
       SPU2TransferStartAddress,
+      SPU2TransferData,
       SPU2InactiveCoreStatus,
       SPU2UnprogrammedKeyOff,
       SPU2AutoDMAWriteSelection,

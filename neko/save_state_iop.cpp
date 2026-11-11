@@ -327,6 +327,15 @@ void NekoSaveStateCodec::writeIOPState(
       }
     }
     {
+      auto cursors = writer->scope("transferCursor");
+      const auto &words = system.spu2ControllerComponent.transferCursor;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto cursor = writer->element(core);
+        writer->writeFieldU32("value", words[core]);
+      }
+    }
+    {
       auto masks = writer->scope("voiceModeMasks");
       const auto &words = system.spu2ControllerComponent.voiceModeMasks;
       for (std::size_t index = 0; index < words.size(); ++index)
@@ -638,6 +647,17 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto cursors = reader->scope("transferCursor");
+      auto &words = system->spu2ControllerComponent.transferCursor;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto cursor = reader->element(core);
+        words[core] = reader->readFieldU32("value");
+        reader->requireField(words[core] < SPU2Controller::SOUND_RAM_HALFWORD_COUNT,
+          "SPU2 transfer cursor is outside sound RAM");
       }
     }
     {

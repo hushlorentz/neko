@@ -334,7 +334,7 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
 }
 
 TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
-  "[iop][spu2][spu2-mode][cache]")
+  "[iop][spu2][spu2-mode][spu2-pio][cache]")
 {
   for (IOPAddress physical : {
       0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
@@ -355,24 +355,26 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       0x1f90076cu, 0x1f90076eu, 0x1f90078cu, 0x1f90078eu,
       0x1f900790u, 0x1f900792u, 0x1f900794u, 0x1f900796u,
       0x1f90033cu, 0x1f90073cu,
-      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau})
+      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau,
+      0x1f9001acu, 0x1f9005acu})
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    const bool writeOnlyInitialization =
+    const bool writeOnlyRegister =
       physical == 0x1f9007b8 || physical == 0x1f9007ba ||
       physical == 0x1f9007bc || physical == 0x1f9007be ||
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
-      physical == 0x1f9005a4 || physical == 0x1f9005a6;
+      physical == 0x1f9005a4 || physical == 0x1f9005a6 ||
+      physical == 0x1f9001ac || physical == 0x1f9005ac;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const bool autoDMA = physical == 0x1f9001b0 || physical == 0x1f9005b0;
     const std::uint16_t value =
       autoDMA ? (physical == 0x1f9001b0 ? 1 : 2) :
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
+      writeOnlyRegister || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
       if (autoDMA)
@@ -406,7 +408,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     REQUIRE(cache.readWord(bank, bus, wordAddress).status == IOPBusStatus::Unmapped);
     requireUnchangedCache(cache, invalidated);
     const auto read = bus.read16(physical);
-    REQUIRE(read.status == (writeOnlyInitialization
+    REQUIRE(read.status == (writeOnlyRegister
       ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
     if (read.status == IOPBusStatus::Completed)
     {
@@ -421,7 +423,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
 }
 
 TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception ownership",
-  "[iop][spu2][spu2-mode][execution]")
+  "[iop][spu2][spu2-mode][spu2-pio][execution]")
 {
   for (IOPAddress physical : {
       0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
@@ -442,7 +444,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
       0x1f90076cu, 0x1f90076eu, 0x1f90078cu, 0x1f90078eu,
       0x1f900790u, 0x1f900792u, 0x1f900794u, 0x1f900796u,
       0x1f90033cu, 0x1f90073cu,
-      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau})
+      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau,
+      0x1f9001acu, 0x1f9005acu})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {
@@ -450,16 +453,17 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    const bool writeOnlyInitialization =
+    const bool writeOnlyRegister =
       physical == 0x1f9007b8 || physical == 0x1f9007ba ||
       physical == 0x1f9007bc || physical == 0x1f9007be ||
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
-      physical == 0x1f9005a4 || physical == 0x1f9005a6;
+      physical == 0x1f9005a4 || physical == 0x1f9005a6 ||
+      physical == 0x1f9001ac || physical == 0x1f9005ac;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ||
+      writeOnlyRegister || coreStatus ||
       physical == 0x1f9001b0 || physical == 0x1f9005b0
       ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
@@ -491,7 +495,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     REQUIRE(core.generalRegister(2) == 0xffff);
     REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
     const auto read = bus.read16(physical);
-    REQUIRE(read.status == (writeOnlyInitialization
+    REQUIRE(read.status == (writeOnlyRegister
       ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
     if (read.status == IOPBusStatus::Completed)
     {
@@ -783,6 +787,37 @@ TEST_CASE("IOP SPU DMA protected and misaligned halfwords retain delay-slot exce
     REQUIRE(core.generalRegister(2) == 0x12345678);
     REQUIRE(bus.read32(physical & ~IOPAddress{3}).value == 0x89abcdef);
     requireUnchangedCache(core.cache(), before);
+  }
+}
+
+TEST_CASE("SPU2 CPU data stores bypass cached payloads but not isolation",
+  "[iop][spu2][spu2-pio][cache]")
+{
+  for (IOPAddress physical : {0x1f9001acu, 0x1f9005acu})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    IOPBus bus;
+    SPU2Controller spu;
+    bus.attachSPU2(&spu);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto address = physical | segment;
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x12341234).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0x1234);
+    REQUIRE(spu.readSoundRAMHalfword(0) == 0);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.writeData16(address, 0x0707).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(spu.readSoundRAMHalfword(0) == 0x0707);
+    REQUIRE(core.writeData16(address, 0xabcd).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(spu.readSoundRAMHalfword(1) == 0xabcd);
+    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
   }
 }
 

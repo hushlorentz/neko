@@ -3840,8 +3840,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded contract with focused CPU/bus and
       lifecycle coverage, including persistence if affected; retain unsupported
       execution, neighboring accesses and transports.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Halfword Store at0x1f9001ac
+
+- [x] Research the originating IOP halfword store of `0x0707` and its
+      containing transfer-data family; identify the existing owner and gaps
+      in RAM-transfer, cursor, FIFO timing and IRQ evidence.
+- [x] Approve a bounded active-transfer contract for the paired CPU data
+      ports, including RAM mutation, cursor/readback, concurrency and timing
+      limits, before implementation.
+- [x] Implement the selected contract with focused red/green CPU/bus and
+      affected lifecycle coverage; include persistence if its contract changes
+      and preserve unsupported accesses and execution limits.
+- [x] Independently review and validate the capability.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical progress,
+      attributing the next originating dependency without a boot claim.
 
 ### Additional CD/DVD Command and Configuration Scope
 

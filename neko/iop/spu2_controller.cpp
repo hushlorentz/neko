@@ -41,6 +41,7 @@ void SPU2Controller::reset() noexcept
   effectInputVolumes.fill(0);
   effectEndAddressHigh.fill(0);
   transferStartAddress.fill(0);
+  transferCursor.fill(0);
   voiceModeMasks.fill(0);
   autoDMAWriteSelection.fill(0);
 }
@@ -364,6 +365,25 @@ void SPU2Controller::writeTransferStartAddress(
   std::size_t index, std::uint16_t value)
 {
   transferStartAddress.at(index) = value;
+  const auto core = index / 2;
+  transferCursor[core] =
+    ((std::uint32_t{transferStartAddress[core * 2]} & 0xf) << 16) |
+    transferStartAddress[core * 2 + 1];
+}
+
+bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
+{
+  auto &cursor = transferCursor.at(core);
+  for (std::size_t input = 0; input < CORE_COUNT; ++input)
+  {
+    if (!hasInactiveCoreStatus(input))
+    {
+      return false;
+    }
+  }
+  writeSoundRAMHalfword(cursor, value);
+  cursor = (cursor + 1) & static_cast<std::uint32_t>(SOUND_RAM_HALFWORD_COUNT - 1);
+  return true;
 }
 
 bool SPU2Controller::hasInactiveCoreStatus(std::size_t core) const

@@ -68,6 +68,9 @@ namespace
   constexpr std::array<std::uint16_t, 4> transferStartAddressValues = {{
     0x8001, 0x1357, 0xfedc, 0x2468
   }};
+  constexpr std::array<IOPAddress, 2> transferDataAddresses = {{
+    0x1f9001ac, 0x1f9005ac
+  }};
   constexpr std::array<IOPAddress, 2> unknownInitializationAddresses = {{
     0x1f900b60, 0x1f900b62
   }};
@@ -960,6 +963,251 @@ TEST_CASE("SPU2 transfer start addresses retain raw halfwords without transfers"
   }
 }
 
+TEST_CASE("SPU2 CPU data ports advance independent wrapping cursors in shared RAM",
+  "[iop][spu2][spu2-pio]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  auto &spu = system.spu2Controller();
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(bus.write16(transferStartAddressAddresses[core * 2], 0xffff).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(transferStartAddressAddresses[core * 2 + 1], 0xffff).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x0707).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0xfffff) == 0x0707);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0xabcd).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0) == 0xabcd);
+  REQUIRE(bus.write16(transferDataAddresses[1], 0x1234).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0xfffff) == 0x1234);
+  REQUIRE(spu.readSoundRAMHalfword(0) == 0xabcd);
+  REQUIRE(bus.write16(transferDataAddresses[1], 0xffff).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0) == 0xffff);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(1) == 0);
+  for (const auto address : transferStartAddressAddresses)
+  {
+    REQUIRE(bus.read16(address).value == 0xffff);
+  }
+  REQUIRE(bus.write16(transferStartAddressAddresses[0], 0x8000).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x5678).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0xffff) == 0x5678);
+  REQUIRE(bus.write16(transferStartAddressAddresses[1], 0x2800).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x0707).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0x2800) == 0x0707);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x0707).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0x2801) == 0x0707);
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x9abc).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0x2802) == 0x9abc);
+  REQUIRE(bus.read16(transferStartAddressAddresses[0]).value == 0x8000);
+  REQUIRE(bus.read16(transferStartAddressAddresses[1]).value == 0x2800);
+  spu.reset();
+  REQUIRE(spu.readSoundRAMHalfword(0x2802) == 0);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x4321).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0) == 0x4321);
+  system.reset();
+  REQUIRE(bus.write16(transferDataAddresses[1], 0x9876).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0) == 0x9876);
+  REQUIRE(spu.readSoundRAMHalfword(1) == 0);
+}
+
+TEST_CASE("SPU2 CPU data ports reject unsupported accesses without mutation",
+  "[iop][spu2][spu2-pio]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  const auto before = system.iopStateHash();
+  for (const auto address : transferDataAddresses)
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0xffff).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0xffffffff, mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    std::uint16_t value = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &value));
+    REQUIRE(value == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0xffff));
+    IOPBus unattached;
+    REQUIRE(unattached.write16(address, 0xffff).status == IOPBusStatus::Unmapped);
+    for (IOPAddress other : {address + 2, address + 0x800,
+        address | 0x80000000u, address | 0xa0000000u})
+    {
+      REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(other, 0xffff).status == IOPBusStatus::Unmapped);
+    }
+  }
+  REQUIRE(system.iopStateHash() == before);
+}
+
+TEST_CASE("SPU2 CPU data ports reject either selected input atomically",
+  "[iop][spu2][spu2-pio]")
+{
+  for (std::size_t selectedCore = 0; selectedCore < 2; ++selectedCore)
+  for (bool open : {false, true})
+  {
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(spu.writeAutoDMAWriteSelection(
+      selectedCore, autoDMAWriteSelections[selectedCore]));
+    if (!open)
+    {
+      spu.cancelInputWrite(selectedCore);
+    }
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
+    const auto before = system.iopStateHash();
+    for (const auto address : transferDataAddresses)
+    {
+      REQUIRE(system.iopBus().write16(address, 0x0707).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(spu.writeAutoDMAWriteSelection(selectedCore, 0));
+    for (const auto address : transferDataAddresses)
+    {
+      REQUIRE(system.iopBus().write16(address, 0x0707).status == IOPBusStatus::Completed);
+    }
+    REQUIRE(spu.readSoundRAMHalfword(0) == 0x0707);
+    REQUIRE(spu.readSoundRAMHalfword(1) == 0);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+  }
+}
+
+TEST_CASE("SPU2 CPU data stores retain alias and delay-slot retirement",
+  "[iop][spu2][spu2-pio][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  for (bool delaySlot : {false, true})
+  {
+    NekoSystem system;
+    REQUIRE(system.iopBus().write16(transferStartAddressAddresses[core * 2 + 1],
+      0x2800).status == IOPBusStatus::Completed);
+    const auto address = transferDataAddresses[core] | segment;
+    installInitializationStoreProgram(system, address, 0x0707);
+    if (!delaySlot)
+    {
+      REQUIRE(system.iopBus().write32(0xc, 0).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(0x14, 0).status == IOPBusStatus::Completed);
+    }
+    system.startTrace();
+    system.runMasterCycles(delaySlot ? 48 : 56);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().retiredInstructions() == (delaySlot ? 6 : 7));
+    REQUIRE(system.iopCore().programCounter() == 0xa000001c);
+    REQUIRE(system.iopCore().generalRegister(3) == 0x1234);
+    REQUIRE(system.spu2Controller().readSoundRAMHalfword(0x2800) == 0x0707);
+    IOPTraceTest::Events actual;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess && event.value0 == address)
+      {
+        actual.push_back(event);
+      }
+    }
+    namespace Memory = NekoIOPTraceMemory;
+    const auto metadata = nekoPackIOPMemoryTraceMetadata({
+      transferDataAddresses[core], 2, Memory::AccessKind::DataStore,
+      Memory::Outcome::Completed, segment == 0xa0000000
+        ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached, true, 3});
+    IOPTraceTest::requireEvents(actual, {
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0x0707, 0, metadata}
+    });
+  }
+}
+
+TEST_CASE("SPU2 CPU data cursors restore pending guest stores deterministically",
+  "[iop][spu2][spu2-pio][save-state][trace]")
+{
+  NekoSystem source;
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(source.iopBus().write16(transferStartAddressAddresses[core * 2 + 1],
+      static_cast<std::uint16_t>(0x2800 + core)).status == IOPBusStatus::Completed);
+    REQUIRE(source.iopBus().write16(transferDataAddresses[core], 0x1234).status ==
+      IOPBusStatus::Completed);
+  }
+  installInitializationStoreProgram(source, 0xbf9005ac, 0x0707);
+  source.runMasterCycles(32);
+  const auto saved = source.saveState();
+  const auto fields = inspectSaveState(saved);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto *cursor = fields.find(
+      "system.iop.spu2.transferCursor[" + std::to_string(core) + "].value");
+    REQUIRE(cursor != nullptr);
+    REQUIRE(cursor->scalarValue == 0x2801 + core);
+  }
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(16);
+  restored.runMasterCycles(16);
+  IOPTraceTest::requireEvents(restored.trace(), source.trace());
+  REQUIRE(restored.iopCore().retiredInstructions() == 6);
+  REQUIRE(restored.spu2Controller().readSoundRAMHalfword(0x2802) == 0x0707);
+  REQUIRE(restored.iopStateHash() == source.iopStateHash());
+  REQUIRE(restored.saveState() == source.saveState());
+  REQUIRE(restored.iopBus().write16(transferDataAddresses[0], 0xabcd).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(restored.spu2Controller().readSoundRAMHalfword(0x2801) == 0xabcd);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x2801) == 0x1234);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto path =
+      "system.iop.spu2.transferCursor[" + std::to_string(core) + "].value";
+    const auto before = restored.saveState();
+    for (std::uint32_t value : {0x100000u, 0xffffffffu})
+    {
+      SaveStateMutation invalid(saved);
+      invalid.writeScalar(path, value);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS_AS(restored.loadState(invalid), std::invalid_argument);
+      REQUIRE(restored.saveState() == before);
+    }
+    SaveStateMutation valid(saved);
+    valid.writeScalar(path, 0xfffff);
+    valid.refreshChecksum();
+    restored.loadState(valid);
+    REQUIRE(restored.iopStateHash() != source.iopStateHash());
+    REQUIRE(restored.iopBus().write16(transferDataAddresses[core], 0x9876).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(restored.spu2Controller().readSoundRAMHalfword(0xfffff) == 0x9876);
+  }
+}
+
 TEST_CASE("SPU2 effect end addresses retain raw high halfwords without active effects",
   "[iop][spu2][spu2-eea]")
 {
@@ -1545,7 +1793,7 @@ TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
     const auto coreBase = address & ~IOPAddress(0x3ff);
     for (IOPAddress offset : {0u, 2u, 0x19cu, 0x19eu,
-        0x1a0u, 0x1a2u, 0x1acu, 0x340u, 0x342u})
+        0x1a0u, 0x1a2u, 0x1aeu, 0x340u, 0x342u})
     {
       REQUIRE(bus.read16(coreBase + offset).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write16(coreBase + offset, 0xffff).status == IOPBusStatus::Unmapped);
@@ -2705,7 +2953,7 @@ TEST_CASE("SPU2 configuration excludes neighbors widths and non-CPU transports",
       0x1f90017eu, 0x1f90057eu,
       0x1f90019cu, 0x1f90019eu, 0x1f9001a0u, 0x1f9001a2u,
       0x1f90059cu, 0x1f90059eu, 0x1f9005a0u, 0x1f9005a2u,
-      0x1f9001acu, 0x1f9001aeu, 0x1f9005acu, 0x1f9005aeu})
+      0x1f9001aeu, 0x1f9005aeu})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Unmapped);
