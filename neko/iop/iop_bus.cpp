@@ -25,8 +25,8 @@ namespace
   constexpr IOPAddress sio2ReceiveOutput = 0x1f808264;
   constexpr IOPAddress sio2TransferStatusBase = 0x1f80826c;
   constexpr IOPAddress sio2InterruptStatus = 0x1f808280;
-  constexpr std::array<IOPAddress, 5> spu2UnknownInitializationAddresses = {{
-    0x1f9007b8, 0x1f9007ba, 0x1f9007bc, 0x1f900b60, 0x1f900b62
+  constexpr std::array<IOPAddress, 6> spu2UnknownInitializationAddresses = {{
+    0x1f9007b8, 0x1f9007ba, 0x1f9007bc, 0x1f9007be, 0x1f900b60, 0x1f900b62
   }};
   constexpr std::array<IOPAddress, 2> spu2CoreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a

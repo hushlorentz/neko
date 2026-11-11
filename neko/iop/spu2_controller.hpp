@@ -87,7 +87,7 @@ class SPU2Controller final
       std::size_t core, std::uint16_t value) noexcept;
     std::uint16_t readAutoDMAWriteSelection(std::size_t core) const;
     bool writeAutoDMAWriteSelection(std::size_t core, std::uint16_t value);
-    // Provisional 0x1f9007b8/7ba/7bc and 0x1f900b60/b62 zero writes; no state or effects.
+    // Provisional 0x1f9007b8/7ba/7bc/7be and 0x1f900b60/b62 zero writes; no state or effects.
     bool writeUnknownInitialization(std::uint16_t value) const noexcept;
 
   private:
