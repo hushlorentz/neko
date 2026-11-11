@@ -3823,10 +3823,10 @@ not requirements for exhaustive subsystem coverage.
 
 ### IOP SPU2 Halfword Programming at0x1f9007bc
 
-- [ ] Research the originating IOP halfword zero-store at0x1f9007bc and its
+- [x] Research the originating IOP halfword zero-store at0x1f9007bc and its
       containing unnamed range; reassess bounded semantics through the existing
       owner without assuming adjacent registers share a hardware function.
-- [ ] Implement the selected bounded contract with focused CPU/bus and
+- [x] Implement the selected bounded contract with focused CPU/bus and
       lifecycle coverage, including persistence if affected; retain unsupported
       execution, neighboring accesses and transports.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
