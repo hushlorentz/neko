@@ -3798,6 +3798,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement exact zero halfword writes through the existing SPU2 owner with
       focused CPU/bus and lifecycle coverage, including persistence if affected;
       preserve unsupported neighboring accesses and execution limits.
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress, identifying the next originating dependency without a boot claim.
+
+### IOP SPU2 Unnamed Halfword Zero Initialization at0x1f9007ba
+
+- [x] Research the originating IOP halfword zero-store at0x1f9007ba and its
+      containing unnamed range; reassess bounded semantics through the existing
+      owner without assuming adjacent registers share a hardware function.
+- [x] Implement the selected bounded contract with focused CPU/bus and
+      lifecycle coverage, including persistence if affected; retain unsupported
+      execution, neighboring accesses and transports.
 - [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress, identifying the next originating dependency without a boot claim.
 

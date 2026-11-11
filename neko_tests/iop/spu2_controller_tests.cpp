@@ -2112,7 +2112,8 @@ TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores
   "[iop][spu2][spu2-initialization]")
 {
   for (const auto address : {unknownInitializationAddresses[0],
-      unknownInitializationAddresses[1], IOPAddress(0x1f9007b8)})
+      unknownInitializationAddresses[1], IOPAddress(0x1f9007b8),
+      IOPAddress(0x1f9007ba)})
   {
     CAPTURE(address);
     NekoSystem system;
@@ -2161,6 +2162,7 @@ TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads an
 {
   for (const auto address : {unknownInitializationAddresses[0],
       unknownInitializationAddresses[1], IOPAddress(0x1f9007b8),
+      IOPAddress(0x1f9007ba),
       autoDMAAddresses[0], autoDMAAddresses[1]})
   {
     CAPTURE(address);
@@ -2203,8 +2205,9 @@ TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads an
       IOPBusStatus::Unmapped);
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
     for (IOPAddress other : {0x1f9007b0u, 0x1f9007b2u, 0x1f9007b4u,
-        0x1f9007b6u, 0x1f9007bau, 0x1f9007bcu, 0x1f9007beu,
+        0x1f9007b6u, 0x1f9007bcu, 0x1f9007beu,
         0x1f9003b8u, 0x1f900bb8u, 0x1f900fb8u,
+        0x1f9003bau, 0x1f900bbau, 0x1f900fbau,
         0x1f900b5eu, 0x1f900b64u,
         0x1f900360u, 0x1f900362u, 0x1f900f60u, 0x1f900f62u,
         0x1f9001aeu, 0x1f9001b2u, 0x1f9005aeu, 0x1f9005b2u,
@@ -2226,14 +2229,14 @@ TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads an
   }
 }
 
-TEST_CASE("SPU2 unnamed 7b8 initialization preserves guest store outcomes",
+TEST_CASE("SPU2 unnamed halfword initialization preserves guest store outcomes",
   "[iop][spu2][spu2-initialization][trace]")
 {
+  for (IOPAddress physical : {0x1f9007b8u, 0x1f9007bau})
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
   for (std::uint16_t value : {0, 1, 0xffff})
   for (bool delaySlot : {false, true})
   {
-    const IOPAddress physical = 0x1f9007b8;
     const auto address = physical | segment;
     CAPTURE(address);
     CAPTURE(value);
@@ -2295,7 +2298,7 @@ TEST_CASE("SPU2 unnamed 7b8 initialization preserves guest store outcomes",
       accepted ? Memory::Outcome::Completed : Memory::Outcome::Unmapped,
       segment == 0xa0000000 ? Memory::CacheRoute::Uncached :
         Memory::CacheRoute::Cached,
-      true, 3});
+      true, static_cast<std::uint8_t>(3u << (physical & 3))});
     IOPTraceTest::requireEvents(actual, {
       {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
         address, value, 0, metadata}

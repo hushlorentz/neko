@@ -341,7 +341,8 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900180u, 0x1f900182u, 0x1f900184u, 0x1f900186u,
       0x1f900580u, 0x1f900582u, 0x1f900584u, 0x1f900586u,
-      0x1f9007b8u, 0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
+      0x1f9007b8u, 0x1f9007bau, 0x1f900b60u, 0x1f900b62u,
+      0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
       0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u,
       0x1f900188u, 0x1f90018au, 0x1f90018cu, 0x1f90018eu,
@@ -360,7 +361,8 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
-      physical == 0x1f9007b8 || physical == 0x1f900b60 || physical == 0x1f900b62 ||
+      physical == 0x1f9007b8 || physical == 0x1f9007ba ||
+      physical == 0x1f900b60 || physical == 0x1f900b62 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
       physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
@@ -424,7 +426,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900180u, 0x1f900182u, 0x1f900184u, 0x1f900186u,
       0x1f900580u, 0x1f900582u, 0x1f900584u, 0x1f900586u,
-      0x1f9007b8u, 0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
+      0x1f9007b8u, 0x1f9007bau, 0x1f900b60u, 0x1f900b62u,
+      0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
       0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u,
       0x1f900188u, 0x1f90018au, 0x1f90018cu, 0x1f90018eu,
@@ -445,7 +448,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
-      physical == 0x1f9007b8 || physical == 0x1f900b60 || physical == 0x1f900b62 ||
+      physical == 0x1f9007b8 || physical == 0x1f9007ba ||
+      physical == 0x1f900b60 || physical == 0x1f900b62 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
       physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
@@ -782,7 +786,8 @@ TEST_CASE("SPU2 initialization and Auto DMA controls bypass cached payloads but 
   "[iop][spu2][spu2-initialization][spu2-autodma][cache]")
 {
   for (IOPAddress physical : {
-      0x1f9007b8u, 0x1f900b60u, 0x1f900b62u, 0x1f9001b0u, 0x1f9005b0u})
+      0x1f9007b8u, 0x1f9007bau, 0x1f900b60u, 0x1f900b62u,
+      0x1f9001b0u, 0x1f9005b0u})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
