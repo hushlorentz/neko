@@ -601,7 +601,7 @@ void NekoSaveStateCodec::readIOP(
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
         reader->requireField(SPU2Controller::isSupportedCoreAttribute(words[index]),
-          "SPU2 core attribute bits1-13 are unsupported");
+          "SPU2 core attribute is outside the bounded stop/I/O modes");
       }
     }
     {

@@ -283,7 +283,7 @@ bool SPU2Controller::writeMasterVolumeControl(
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
-  return (value & 0x3ffe) == 0;
+  return (value & 0x3fee) == 0;
 }
 
 std::uint16_t SPU2Controller::readCoreAttribute(std::size_t core) const
@@ -376,7 +376,7 @@ bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
   auto &cursor = transferCursor.at(core);
   for (std::size_t input = 0; input < CORE_COUNT; ++input)
   {
-    if (!hasInactiveCoreStatus(input))
+    if (!hasInactiveInput(input))
     {
       return false;
     }
@@ -387,6 +387,11 @@ bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 }
 
 bool SPU2Controller::hasInactiveCoreStatus(std::size_t core) const
+{
+  return hasInactiveInput(core) && (coreAttributes.at(core) & 0x30) == 0;
+}
+
+bool SPU2Controller::hasInactiveInput(std::size_t core) const
 {
   return autoDMAWriteSelection.at(core) == 0 && !inputStates.at(core).writeOpen;
 }

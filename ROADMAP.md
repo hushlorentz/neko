@@ -3855,8 +3855,22 @@ not requirements for exhaustive subsystem coverage.
       affected lifecycle coverage; include persistence if its contract changes
       and preserve unsupported accesses and execution limits.
 - [x] Independently review and validate the capability.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical progress,
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical progress,
       attributing the next originating dependency without a boot claim.
+
+### SPU2 Core Attribute `0x8010` Programming
+
+- [x] Research the originating halfword write to `0x1f90019a` and the
+      containing transfer-mode family; define RAM/cursor, status, timing,
+      IRQ and DMA boundaries through the existing SPU2 owner.
+- [x] Select the bounded transfer-mode contract, including effects on queued
+      data, cursor progress, status, IRQ and DMA execution.
+- [x] Implement the selected contract with focused red/green
+      CPU/bus and lifecycle coverage, preserving unsupported active behavior
+      and including persistence if its contract changes.
+- [ ] Independently review and verify fresh unchanged-input cold/restored
+      traced/plain and canonical progress, identifying the next originating
+      dependency without a boot claim.
 
 ### Additional CD/DVD Command and Configuration Scope
 

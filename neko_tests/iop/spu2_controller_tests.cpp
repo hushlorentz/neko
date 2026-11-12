@@ -2069,7 +2069,7 @@ TEST_CASE("SPU2 core attributes retain independent bit0 and bits14-15 images",
     REQUIRE(system.iopStateHash() == programmed);
     for (std::uint32_t value = 1; value <= 0xffff; ++value)
     {
-      if ((value & 0x3ffe) != 0 &&
+      if ((value & 0x3fee) != 0 &&
           (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
             IOPBusStatus::Unmapped ||
            system.spu2Controller().readCoreAttribute(selected) != 0xc001))
@@ -2130,6 +2130,164 @@ TEST_CASE("SPU2 core attributes retain independent bit0 and bits14-15 images",
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
     REQUIRE(bus.read16(address).value == 0);
+  }
+}
+
+TEST_CASE("SPU2 I/O mode retains attributes without rewinding or signaling",
+  "[iop][spu2][spu2-io-mode]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &spu = system.spu2Controller();
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
+    REQUIRE(bus.write16(transferStartAddressAddresses[core * 2 + 1], 0xffff).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(transferDataAddresses[core], 0x0707).status ==
+      IOPBusStatus::Completed);
+    std::uint32_t cursor = 0x10000;
+    for (const auto base : coreAttributeValues)
+    {
+      const auto mode = static_cast<std::uint16_t>(base | 0x10);
+      REQUIRE(bus.write16(coreAttributeAddresses[core], mode).status ==
+        IOPBusStatus::Completed);
+      const auto before = system.iopStateHash();
+      REQUIRE(bus.write16(coreAttributeAddresses[core], mode).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.read16(coreAttributeAddresses[core]).value == mode);
+      REQUIRE(bus.read16(coreAttributeAddresses[1 - core]).value == 0);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(coreStatusAddresses[1 - core]).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopStateHash() == before);
+      REQUIRE(bus.write16(transferDataAddresses[core], mode).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(spu.readSoundRAMHalfword(cursor++) == mode);
+      REQUIRE(bus.write16(coreAttributeAddresses[core], base).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0);
+    }
+    REQUIRE(spu.readSoundRAMHalfword(0xffff) == 0x0707);
+    REQUIRE(bus.read16(transferStartAddressAddresses[core * 2 + 1]).value == 0xffff);
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0x8010).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(coreAttributeAddresses[1 - core], 0x10).status ==
+      IOPBusStatus::Completed);
+    system.runMasterCycles(80);
+    bus.reset();
+    system.iopCore().reset();
+    REQUIRE(bus.read16(coreAttributeAddresses[core]).value == 0x8010);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(transferDataAddresses[core], 0xabcd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(spu.readSoundRAMHalfword(cursor) == 0xabcd);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+    spu.reset();
+    REQUIRE(bus.read16(coreAttributeAddresses[core]).value == 0);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+  }
+}
+
+TEST_CASE("SPU2 I/O mode preserves selected input and PIO exclusions",
+  "[iop][spu2][spu2-io-mode]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    SPU2InputTest::programProfile(system.spu2Controller());
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    const auto selected = system.iopStateHash();
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0xc011).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == selected);
+    REQUIRE(bus.write16(coreAttributeAddresses[1 - core], 0xc011).status ==
+      IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    for (const auto address : transferDataAddresses)
+    {
+      REQUIRE(bus.write16(address, 0x0707).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.write16(autoDMAAddresses[1 - core],
+      autoDMAWriteSelections[1 - core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+    const auto checkpoint = system.saveState();
+    SaveStateMutation invalid(checkpoint);
+    invalid.writeScalar(
+      "system.iop.spu2.coreAttributes[" + std::to_string(core) + "].value", 0xc011);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(system.loadState(invalid), std::invalid_argument);
+    REQUIRE(system.saveState() == checkpoint);
+  }
+}
+
+TEST_CASE("SPU2 I/O mode restores guest stores and cursor status boundaries",
+  "[iop][spu2][spu2-io-mode][save-state][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (unsigned cut : {32u, 40u})
+  {
+    CAPTURE(core);
+    CAPTURE(cut);
+    NekoSystem original;
+    REQUIRE(original.iopBus().write16(
+      transferStartAddressAddresses[core * 2 + 1], 0x2800).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(original.iopBus().write16(transferDataAddresses[core], 0x0707).status ==
+      IOPBusStatus::Completed);
+    installInitializationStoreProgram(original,
+      coreAttributeAddresses[core] | 0xa0000000u, 0x8010);
+    original.runMasterCycles(cut);
+    REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(48 - cut);
+    restored.runMasterCycles(48 - cut);
+    plain.runMasterCycles(48 - cut);
+    REQUIRE(original.iopCore().retiredInstructions() == 6);
+    REQUIRE(original.iopCore().generalRegister(3) == 0x1234);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    for (auto *system : {&original, &restored, &plain})
+    {
+      REQUIRE(system->iopBus().read16(coreAttributeAddresses[core]).value == 0x8010);
+      REQUIRE(system->iopBus().read16(coreStatusAddresses[core]).status ==
+        IOPBusStatus::Unmapped);
+      REQUIRE(system->iopBus().write16(transferDataAddresses[core], 0x1234).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system->spu2Controller().readSoundRAMHalfword(0x2800) == 0x0707);
+      REQUIRE(system->spu2Controller().readSoundRAMHalfword(0x2801) == 0x1234);
+    }
+    REQUIRE(restored.saveState() == original.saveState());
+    REQUIRE(plain.saveState() == original.saveState());
+    const auto before = restored.saveState();
+    SaveStateMutation previousVersion(before);
+    previousVersion.writeScalar("container.version", 109);
+    previousVersion.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(previousVersion), std::invalid_argument);
+    REQUIRE(restored.saveState() == before);
+    for (const auto value : {0x8020u, 0x8030u, 0x8012u})
+    {
+      SaveStateMutation invalid(before);
+      invalid.writeScalar(
+        "system.iop.spu2.coreAttributes[" + std::to_string(core) + "].value", value);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS_AS(restored.loadState(invalid), std::invalid_argument);
+      REQUIRE(restored.saveState() == before);
+    }
   }
 }
 
@@ -3597,7 +3755,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   }
   for (std::size_t core = 0; core < coreAttributeAddresses.size(); ++core)
   for (std::uint16_t value : {
-      2, 3, 0x40, 0x80, 0x4003, 0x8003, 0xc003, 0xc081, 0xffff})
+      2, 3, 0x20, 0x30, 0x40, 0x80, 0x4003, 0x8003, 0xc003, 0xc081, 0xffff})
   {
     CAPTURE(core);
     CAPTURE(value);

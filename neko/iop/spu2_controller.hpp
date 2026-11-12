@@ -62,7 +62,7 @@ class SPU2Controller final
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
-    // Retained bit0/bits14-15 ATTR; changes reject while this input is selected.
+    // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
@@ -80,7 +80,7 @@ class SPU2Controller final
     bool writeTransferData(std::size_t core, std::uint16_t value);
     std::uint16_t readVoiceModeMask(std::size_t index) const;
     void writeVoiceModeMask(std::size_t index, std::uint16_t value);
-    // Provisional STATX zero only while this core's input is deselected and closed.
+    // Provisional STATX zero only with mode00 and this core's input inactive.
     bool hasInactiveCoreStatus(std::size_t core) const;
     // Provisional KOFF effect; replace before voice source/envelope or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
@@ -122,6 +122,7 @@ class SPU2Controller final
     };
     bool hasSupportedInputProfile(std::size_t core) const noexcept;
     bool hasValidInputState() const noexcept;
+    bool hasInactiveInput(std::size_t core) const;
     std::vector<std::uint8_t> soundRAM;
     std::uint16_t inputClockPhase = 0;
     std::uint16_t inputReadPosition = 0;

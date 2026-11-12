@@ -646,7 +646,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 109 save-state layout is byte-stable", "[spu2-pio]")
+TEST_CASE("Version 110 save-state layout is byte-stable", "[spu2-pio][spu2-io-mode]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -661,7 +661,7 @@ TEST_CASE("Version 109 save-state layout is byte-stable", "[spu2-pio]")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 109);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 110);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
