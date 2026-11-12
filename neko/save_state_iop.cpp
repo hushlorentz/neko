@@ -300,6 +300,15 @@ void NekoSaveStateCodec::writeIOPState(
       }
     }
     {
+      auto addresses = writer->scope("voiceStartAddresses");
+      const auto &words = system.spu2ControllerComponent.voiceStartAddresses;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
+    {
       auto attributes = writer->scope("coreAttributes");
       const auto &words = system.spu2ControllerComponent.coreAttributes;
       for (std::size_t index = 0; index < words.size(); ++index)
@@ -647,6 +656,18 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto addresses = reader->scope("voiceStartAddresses");
+      auto &words = system->spu2ControllerComponent.voiceStartAddresses;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+        reader->requireField(
+          words[index] == (words[index] & SPU2Controller::voiceStartAddressMask(index)),
+          "SPU2 voice start-address halfword is not normalized");
       }
     }
     {

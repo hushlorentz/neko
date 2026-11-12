@@ -28,6 +28,8 @@ namespace
   constexpr IOPAddress spu2VoiceParameterBase = 0x1f900000;
   constexpr IOPAddress spu2CoreStride = 0x400;
   constexpr IOPAddress spu2VoiceStride = 0x10;
+  constexpr IOPAddress spu2VoiceAddressBase = 0x1f9001c0;
+  constexpr IOPAddress spu2VoiceAddressStride = 0xc;
   constexpr std::array<IOPAddress, 6> spu2UnknownInitializationAddresses = {{
     0x1f9007b8, 0x1f9007ba, 0x1f9007bc, 0x1f9007be, 0x1f900b60, 0x1f900b62
   }};
@@ -433,6 +435,20 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         return {IOPBusRegion::Mmio, index * 2 + (field - 6) / 2,
           Device::SPU2VoiceADSRControl};
       }
+    }
+  }
+  if (first >= spu2VoiceAddressBase &&
+      first < spu2VoiceAddressBase + SPU2Controller::CORE_COUNT * spu2CoreStride)
+  {
+    const auto offset = first - spu2VoiceAddressBase;
+    const auto core = offset / spu2CoreStride;
+    const auto voice = (offset % spu2CoreStride) / spu2VoiceAddressStride;
+    const auto field = (offset % spu2CoreStride) % spu2VoiceAddressStride;
+    if (voice < SPU2Controller::VOICE_COUNT_PER_CORE &&
+        (field == 0 || field == 2) && last < first + sizeof(std::uint16_t))
+    {
+      const auto index = core * SPU2Controller::VOICE_COUNT_PER_CORE + voice;
+      return {IOPBusRegion::Mmio, index * 2 + field / 2, Device::SPU2VoiceStartAddress};
     }
   }
   for (std::size_t core = 0; core < spu2CoreAttributeAddresses.size(); ++core)
@@ -937,6 +953,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readVoiceADSRControl(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoiceStartAddress:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceStartAddress(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1229,6 +1250,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       spu2->writeVoiceADSRControl(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2VoiceStartAddress:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeVoiceStartAddress(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&

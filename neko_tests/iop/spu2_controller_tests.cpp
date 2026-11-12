@@ -96,6 +96,31 @@ namespace
     }
   }
 
+  constexpr std::size_t voiceStartAddressCount = 96;
+
+  IOPAddress voiceStartAddress(std::size_t index)
+  {
+    return static_cast<IOPAddress>(
+      0x1f9001c0 + (index / 48) * 0x400 + ((index / 2) % 24) * 0xc +
+      (index % 2) * 2);
+  }
+
+  std::uint16_t voiceStartValue(std::size_t index)
+  {
+    return static_cast<std::uint16_t>(
+      index % 2 == 0 ? (index / 2) % 15 + 1 : 0x8000 | ((index + 1) * 0x108));
+  }
+
+  void programVoiceStartAddresses(NekoSystem &system)
+  {
+    for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+    {
+      REQUIRE(system.iopBus().write16(
+        voiceStartAddress(index), voiceStartValue(index)).status ==
+        IOPBusStatus::Completed);
+    }
+  }
+
   constexpr std::array<IOPAddress, 16> voiceMixAddresses = {{
     0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
     0x1f900190, 0x1f900192, 0x1f900194, 0x1f900196,
@@ -3874,6 +3899,333 @@ TEST_CASE("SPU2 voice-pitch canonical state retains upper bits and rejects corru
   REQUIRE(destination.traceEnabled());
 }
 
+TEST_CASE("SPU2 SSA originating zero store retires",
+  "[iop][spu2][spu2-ssa]")
+{
+  NekoSystem system;
+  REQUIRE(system.iopBus().write32(0, 0x3c07bf90).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write32(4, 0x34e705c0).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write32(8, 0xa4e00000).status == IOPBusStatus::Completed);
+  system.iopCore().startExecution(0xa0000000);
+  system.runMasterCycles(24);
+  REQUIRE(system.iopCore().retiredInstructions() == 3);
+  REQUIRE(system.iopCore().exception().kind == IOPException::None);
+  REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+  REQUIRE(system.iopBus().read16(0x1f9005c0).value == 0);
+}
+
+TEST_CASE("SPU2 SSA normalizes independent high and low address halves",
+  "[iop][spu2][spu2-ssa]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+  {
+    REQUIRE(bus.read16(voiceStartAddress(index)).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(voiceStartAddress(index)).value == 0);
+  }
+  programVoiceStartAddresses(system);
+  for (std::size_t selected = 0; selected < voiceStartAddressCount; ++selected)
+  {
+    CAPTURE(selected);
+    for (std::uint16_t value : {0, 1, 7, 8, 0xf, 0x10, 0xfff7, 0xfff8, 0xffff})
+    {
+      REQUIRE(bus.write16(voiceStartAddress(selected), value).status ==
+        IOPBusStatus::Completed);
+      const auto expected = value & (selected % 2 == 0 ? 0xf : 0xfff8);
+      for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+        REQUIRE(bus.read16(voiceStartAddress(index)).value ==
+          (index == selected ? expected : voiceStartValue(index)));
+    }
+    REQUIRE(bus.write16(voiceStartAddress(selected), voiceStartValue(selected)).status ==
+      IOPBusStatus::Completed);
+  }
+}
+
+TEST_CASE("SPU2 SSA owner normalizes direct writes and checks indices",
+  "[iop][spu2][spu2-ssa]")
+{
+  SPU2Controller spu;
+  for (std::size_t index : {0u, 1u, 94u, 95u})
+  {
+    spu.writeVoiceStartAddress(index, 0xffff);
+    REQUIRE(spu.readVoiceStartAddress(index) == (index % 2 == 0 ? 0xf : 0xfff8));
+  }
+  REQUIRE_THROWS_AS(spu.readVoiceStartAddress(96), std::out_of_range);
+  REQUIRE_THROWS_AS(spu.writeVoiceStartAddress(96, 0xffff), std::out_of_range);
+}
+
+TEST_CASE("SPU2 SSA excludes loop current fields widths and non-CPU transports",
+  "[iop][spu2][spu2-ssa]")
+{
+  NekoSystem system;
+  programVoiceStartAddresses(system);
+  auto &bus = system.iopBus();
+  IOPBus unattached;
+  const auto before = system.iopStateHash();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+  {
+    const auto address = voiceStartAddress(index);
+    const auto wordAddress = address & ~IOPAddress(3);
+    CAPTURE(address);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.read32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(wordAddress).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+      REQUIRE(bus.writeMasked32(wordAddress, 0, mask).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(wordAddress) == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    for (auto segment : {0x80000000u, 0xa0000000u})
+    {
+      REQUIRE(bus.read16(address | segment).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(address | segment, 0).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(unattached.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 0x800).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address + 0x800, 0).status == IOPBusStatus::Unmapped);
+    std::uint16_t value = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &value));
+    REQUIRE(value == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+    if (index % 2 == 0)
+    {
+      for (IOPAddress offset : {4u, 6u, 8u, 10u})
+      {
+        REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.write16(address + offset, 0).status == IOPBusStatus::Unmapped);
+      }
+    }
+    REQUIRE(bus.read16(address).value == voiceStartValue(index));
+  }
+  for (IOPAddress address : {0x1f9001beu, 0x1f9005beu,
+      0x1f9002e0u, 0x1f9002e2u, 0x1f9006e0u, 0x1f9006e2u,
+      0x1f801c00u, 0x1f801c06u})
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(system.iopStateHash() == before);
+}
+
+TEST_CASE("SPU2 SSA preserves PCM PIO programming and unstarted key-off lifecycle",
+  "[iop][spu2][spu2-ssa][save-state]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  auto &spu = system.spu2Controller();
+  programConfiguration(system);
+  programMasterVolumes(system);
+  programVoiceVolumes(system);
+  programVoicePitches(system);
+  programVoiceADSR(system);
+  programVoiceModes(system);
+  programVoiceMix(system);
+  programMainMix(system);
+  programEffectInputVolumes(system);
+  programEffectEndAddresses(system);
+  REQUIRE(bus.write16(transferStartAddressAddresses[1], 0x2800).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0x0707).status == IOPBusStatus::Completed);
+  SPU2InputTest::programProfile(spu);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(spu.writeInputWord(core, 0x12345678));
+  }
+  system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  system.iopDMAController().writeAuxiliaryControl(0x12345678);
+  const auto before = system.saveState();
+  programVoiceStartAddresses(system);
+  for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
+  for (auto address : addresses)
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+  {
+    REQUIRE(bus.read16(voiceStartAddress(index)).value == voiceStartValue(index));
+    REQUIRE(bus.write16(voiceStartAddress(index), 0).status == IOPBusStatus::Completed);
+  }
+  REQUIRE(system.saveState() == before);
+  programVoiceStartAddresses(system);
+  SPU2InputTest::advanceSamples(spu, 1);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(bus.write16(autoDMAAddresses[core], 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0x8010).status ==
+      IOPBusStatus::Completed);
+  }
+  programVoiceVolumes(system);
+  programVoicePitches(system);
+  programVoiceADSR(system);
+  REQUIRE(bus.write16(transferDataAddresses[0], 0xabcd).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readSoundRAMHalfword(0x2801) == 0xabcd);
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+    REQUIRE(bus.read16(voiceStartAddress(index)).value == voiceStartValue(index));
+  REQUIRE(system.iopInterruptController().status() == (1u << 9));
+  REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+  spu.reset();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+    REQUIRE(bus.read16(voiceStartAddress(index)).value == 0);
+  programVoiceStartAddresses(system);
+  system.reset();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+    REQUIRE(bus.read16(voiceStartAddress(index)).value == 0);
+}
+
+TEST_CASE("SPU2 SSA guests store raw values and load normalized delayed results",
+  "[iop][spu2][spu2-ssa][trace]")
+{
+  for (auto index : {0u, 1u, 46u, 47u, 48u, 49u, 94u, 95u})
+  for (auto segment : {0u, 0x80000000u, 0xa0000000u})
+  for (std::uint16_t value : {0, 0xffff})
+  {
+    CAPTURE(index);
+    CAPTURE(segment);
+    CAPTURE(value);
+    NekoSystem system;
+    const auto address = voiceStartAddress(index) | segment;
+    const IOPWord normalized = value & (index % 2 == 0 ? 0xf : 0xfff8);
+    const IOPWord signedValue =
+      (normalized & 0x8000) != 0 ? 0xffff0000u | normalized : normalized;
+    installConfigurationProgram(system, address, value);
+    system.startTrace();
+    system.runMasterCycles(96);
+    REQUIRE(system.iopCore().retiredInstructions() == 12);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().generalRegister(3) == signedValue);
+    REQUIRE(system.iopCore().generalRegister(4) == normalized);
+    REQUIRE(system.iopCore().generalRegister(5) == 0x1234);
+    REQUIRE(system.iopBus().read32(0x100).value == 0);
+    REQUIRE(system.iopBus().read32(0x104).value == signedValue);
+    REQUIRE(system.iopBus().read32(0x108).value == 0);
+    REQUIRE(system.iopBus().read32(0x10c).value == normalized);
+    unsigned accesses = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess && event.value0 == address)
+      {
+        REQUIRE(event.value1 == (accesses == 0 ? value : normalized));
+        REQUIRE(event.masterCycle == (accesses == 0 ? 33 : accesses == 1 ? 41 : 65));
+        ++accesses;
+      }
+    }
+    REQUIRE(accesses == 3);
+  }
+}
+
+TEST_CASE("SPU2 SSA restores pending guest stores and normalized loads",
+  "[iop][spu2][spu2-ssa][save-state][trace]")
+{
+  for (auto index : {0u, 1u, 94u, 95u})
+  for (unsigned cut : {32u, 48u, 72u})
+  {
+    NekoSystem original;
+    programVoiceStartAddresses(original);
+    installConfigurationProgram(original, voiceStartAddress(index) | 0xa0000000u, 0xffff);
+    original.runMasterCycles(cut);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(96 - cut);
+    restored.runMasterCycles(96 - cut);
+    plain.runMasterCycles(96 - cut);
+    REQUIRE(original.iopCore().retiredInstructions() == 12);
+    REQUIRE(original.iopBus().read32(0x104).value ==
+      (index % 2 == 0 ? 0xf : 0xfffffff8u));
+    REQUIRE(original.iopBus().read32(0x10c).value == (index % 2 == 0 ? 0xf : 0xfff8));
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+  }
+}
+
+TEST_CASE("SPU2 SSA canonical state retains normalized images and rejects invalid pairs",
+  "[iop][spu2][spu2-ssa][save-state]")
+{
+  NekoSystem source;
+  auto previous = source.iopStateHash();
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+  {
+    REQUIRE(source.iopBus().write16(voiceStartAddress(index), voiceStartValue(index)).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(source.iopStateHash() != previous);
+    previous = source.iopStateHash();
+  }
+  const auto candidate = source.saveState();
+  const auto fields = inspectSaveState(candidate);
+  for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
+  {
+    const auto *field = fields.find(
+      "system.iop.spu2.voiceStartAddresses[" + std::to_string(index) + "].value");
+    REQUIRE(field != nullptr);
+    REQUIRE(field->kind == SaveStateFieldKind::U16);
+    REQUIRE(field->size == 2);
+    REQUIRE(field->scalarValue == voiceStartValue(index));
+  }
+  NekoSystem destination;
+  SPU2Controller foreign;
+  destination.iopBus().attachSPU2(&foreign);
+  destination.loadState(candidate);
+  REQUIRE(destination.iopStateHash() == previous);
+  REQUIRE(destination.saveState() == candidate);
+  REQUIRE(destination.iopBus().write16(0x1f9006d6, 0xffff).status == IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().read16(0x1f9006d6).value == 0xfff8);
+  REQUIRE(source.iopBus().read16(0x1f9006d6).value == voiceStartValue(95));
+  IOPBus foreignBus;
+  foreignBus.attachSPU2(&foreign);
+  REQUIRE(foreignBus.read16(0x1f9006d6).value == 0);
+  destination.startTrace();
+  const auto before = destination.saveState();
+  for (auto index : {0u, 1u, 94u, 95u})
+  {
+    SaveStateMutation invalid(candidate);
+    invalid.writeScalar(
+      "system.iop.spu2.voiceStartAddresses[" + std::to_string(index) + "].value",
+      index % 2 == 0 ? 0x10 : 1);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+  SaveStateMutation badChecksum(candidate);
+  badChecksum.writeScalar("system.iop.spu2.voiceStartAddresses[95].value", 0);
+  REQUIRE_THROWS_AS(destination.loadState(badChecksum), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  SaveStateMutation lateInvalid(candidate);
+  lateInvalid.writeScalar("system.iop.timing.pixelPhase", 0xffff);
+  lateInvalid.refreshChecksum();
+  REQUIRE_THROWS_AS(destination.loadState(lateInvalid), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  for (auto version : {113u, 114u})
+  {
+    SaveStateMutation historical(candidate);
+    historical.writeScalar("container.version", version);
+    historical.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(historical), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+  REQUIRE(destination.traceEnabled());
+}
+
 TEST_CASE("SPU2 ADSR controls retain independent full programmed halfwords",
   "[iop][spu2][spu2-adsr]")
 {
@@ -3974,7 +4326,7 @@ TEST_CASE("SPU2 ADSR controls exclude current values widths and transports",
     }
   }
   for (IOPAddress address : {0x1f9001b4u, 0x1f9005b4u,
-      0x1f9001c0u, 0x1f9001c2u, 0x1f9005c0u, 0x1f9005c2u,
+      0x1f9001c4u, 0x1f9001c8u, 0x1f9005c4u, 0x1f9005c8u,
       0x1f801c06u, 0x1f801c08u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);

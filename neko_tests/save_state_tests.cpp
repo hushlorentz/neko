@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 114 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr]")
+TEST_CASE("Version 115 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,11 +662,11 @@ TEST_CASE("Version 114 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 114);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 115);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 504);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 696);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -721,7 +721,17 @@ TEST_CASE("Version 114 save-state layout is byte-stable",
     REQUIRE(adsr->containerOffset == lastMaster->containerOffset + 2 + 288 + index * 2);
     REQUIRE(adsr->scalarValue == 0);
   }
-  REQUIRE(core0->containerOffset == lastMaster->containerOffset + 2 + 480);
+  for (std::size_t index = 0; index < 96; ++index)
+  {
+    const auto *address = snapshot.find(
+      "system.iop.spu2.voiceStartAddresses[" + std::to_string(index) + "].value");
+    REQUIRE(address != nullptr);
+    REQUIRE(address->kind == SaveStateFieldKind::U16);
+    REQUIRE(address->size == 2);
+    REQUIRE(address->containerOffset == lastMaster->containerOffset + 2 + 480 + index * 2);
+    REQUIRE(address->scalarValue == 0);
+  }
+  REQUIRE(core0->containerOffset == lastMaster->containerOffset + 2 + 672);
   REQUIRE(core1->containerOffset == core0->containerOffset + 2);
   REQUIRE(core0->scalarValue == 0);
   REQUIRE(core1->scalarValue == 0);
@@ -896,7 +906,7 @@ TEST_CASE("Version 114 save-state layout is byte-stable",
   const auto version107Offset = [cursorOffset, core0](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
-      (offset >= core0->containerOffset ? 480 : 0);
+      (offset >= core0->containerOffset ? 672 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

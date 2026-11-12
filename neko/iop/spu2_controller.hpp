@@ -56,6 +56,8 @@ class SPU2Controller final
     static constexpr std::size_t VOICE_VOLUME_COUNT = CORE_COUNT * VOICE_COUNT_PER_CORE * 2;
     static constexpr std::size_t VOICE_PITCH_COUNT = CORE_COUNT * VOICE_COUNT_PER_CORE;
     static constexpr std::size_t VOICE_ADSR_COUNT = CORE_COUNT * VOICE_COUNT_PER_CORE * 2;
+    static constexpr std::size_t VOICE_START_ADDRESS_HALFWORD_COUNT =
+      CORE_COUNT * VOICE_COUNT_PER_CORE * 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     static constexpr std::size_t VOICE_MODE_HALFWORD_COUNT = 8;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
@@ -84,6 +86,8 @@ class SPU2Controller final
     void writeVoicePitchControl(std::size_t index, std::uint16_t value);
     std::uint16_t readVoiceADSRControl(std::size_t index) const;
     void writeVoiceADSRControl(std::size_t index, std::uint16_t value);
+    std::uint16_t readVoiceStartAddress(std::size_t index) const;
+    void writeVoiceStartAddress(std::size_t index, std::uint16_t value);
     // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
@@ -146,6 +150,7 @@ class SPU2Controller final
     bool hasValidInputState() const noexcept;
     bool hasInactiveInput(std::size_t core) const;
     bool hasInactiveInputs() const;
+    static std::uint16_t voiceStartAddressMask(std::size_t index) noexcept;
     std::vector<std::uint8_t> soundRAM;
     std::uint16_t inputClockPhase = 0;
     std::uint16_t inputReadPosition = 0;
@@ -160,6 +165,8 @@ class SPU2Controller final
     std::array<std::uint16_t, VOICE_PITCH_COUNT> voicePitchControls{};
     // Per core, voices 0-23 ADSR1/2; raw images, not live envelope state.
     std::array<std::uint16_t, VOICE_ADSR_COUNT> voiceADSRControls{};
+    // Per core, voices 0-23 high/low; normalized SSA, not a live decoder cursor.
+    std::array<std::uint16_t, VOICE_START_ADDRESS_HALFWORD_COUNT> voiceStartAddresses{};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
     // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
     // Passive raw halfwords, including unused upper bits; no live voice gates.
