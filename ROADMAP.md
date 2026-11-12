@@ -3868,9 +3868,20 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected contract with focused red/green
       CPU/bus and lifecycle coverage, preserving unsupported active behavior
       and including persistence if its contract changes.
-- [ ] Independently review and verify fresh unchanged-input cold/restored
+- [x] Independently review and verify fresh unchanged-input cold/restored
       traced/plain and canonical progress, identifying the next originating
       dependency without a boot claim.
+
+### SPU2 I/O Transfer Status
+
+- [x] Research the originating `LHU` from `0x1f900344` with ATTR mode01
+      selected; select bounded STATX readiness/completion semantics and
+      their RAM/cursor, timing, IRQ and DMA boundaries.
+- [x] Implement the selected contract through the existing SPU2 owner with
+      focused red/green CPU/bus, lifecycle and restored-state coverage,
+      preserving unsupported transfer modes and PCM exclusions.
+- [ ] Independently review and verify fresh unchanged-input cold/restored
+      traced/plain and canonical progress without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

@@ -519,13 +519,15 @@ TEST_CASE("SPU2 PCM starvation preserves partial targets and cancellation preser
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x1357);
   REQUIRE(spu.writeAutoDMAWriteSelection(0, 0));
   REQUIRE_FALSE(spu.inputWriteRequested(0));
-  REQUIRE(spu.hasInactiveCoreStatus(0));
+  REQUIRE(spu.readCoreStatus(0).status == SPU2AccessStatus::Accepted);
+  REQUIRE(spu.readCoreStatus(0).value == 0);
   SPU2InputTest::advanceSamples(spu, 256);
   REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
   REQUIRE(spu.writeInputWord(0, 0x76543210));
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x3210);
   spu.reset();
-  REQUIRE(spu.hasInactiveCoreStatus(0));
+  REQUIRE(spu.readCoreStatus(0).status == SPU2AccessStatus::Accepted);
+  REQUIRE(spu.readCoreStatus(0).value == 0);
   REQUIRE_FALSE(spu.inputWriteRequested(0));
   REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0);
 }
@@ -1869,13 +1871,19 @@ TEST_CASE("SPU2 inactive status excludes writes neighbors and non-CPU transports
   "[iop][spu2][spu2-statx]")
 {
   for (const auto address : coreStatusAddresses)
+  for (const auto attribute : {0x8000, 0x8010})
   {
     CAPTURE(address);
+    CAPTURE(attribute);
     NekoSystem system;
     auto &bus = system.iopBus();
     prepareInactiveInputs(system);
     programConfiguration(system);
     programMasterVolumes(system);
+    for (const auto target : coreAttributeAddresses)
+    {
+      REQUIRE(bus.write16(target, attribute).status == IOPBusStatus::Completed);
+    }
     const auto before = system.iopStateHash();
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
@@ -1920,6 +1928,7 @@ TEST_CASE("SPU2 inactive status excludes writes neighbors and non-CPU transports
     bus.attachSPU2(&system.spu2Controller());
     REQUIRE(system.iopStateHash() == before);
     REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == (attribute == 0x8010 ? 0x80 : 0));
   }
 }
 
@@ -1929,15 +1938,18 @@ TEST_CASE("SPU2 inactive status guests preserve aliases and branch load delays",
   for (const auto physical : coreStatusAddresses)
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
   for (IOPWord load : {0x84220000u, 0x94220000u})
+  for (const auto attribute : {0x8000, 0x8010})
   {
     const auto address = physical | segment;
     CAPTURE(address);
     CAPTURE(load);
+    CAPTURE(attribute);
+    const IOPWord expected = attribute == 0x8010 ? 0x80 : 0;
     NekoSystem system;
     prepareInactiveInputs(system);
-    REQUIRE(system.iopBus().write16(coreAttributeAddresses[0], 0x8000).status ==
+    REQUIRE(system.iopBus().write16(coreAttributeAddresses[0], attribute).status ==
       IOPBusStatus::Completed);
-    REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], 0x8000).status ==
+    REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], attribute).status ==
       IOPBusStatus::Completed);
     installHalfwordReadProgram(system, address, load);
     system.startTrace();
@@ -1946,9 +1958,9 @@ TEST_CASE("SPU2 inactive status guests preserve aliases and branch load delays",
     REQUIRE(system.iopCore().exception().kind == IOPException::None);
     REQUIRE(system.iopCore().retiredInstructions() == 8);
     REQUIRE(system.iopCore().programCounter() == 0xa0000024);
-    REQUIRE(system.iopCore().generalRegister(2) == 0);
+    REQUIRE(system.iopCore().generalRegister(2) == expected);
     REQUIRE(system.iopCore().generalRegister(3) == 0xffffffff);
-    REQUIRE(system.iopCore().generalRegister(4) == 0);
+    REQUIRE(system.iopCore().generalRegister(4) == expected);
     REQUIRE(system.iopCore().generalRegister(5) == 0x1234);
     REQUIRE_FALSE(system.iopCore().branchContinuation().active);
     REQUIRE(system.iopCore().delayedResultContinuation().source ==
@@ -1971,7 +1983,7 @@ TEST_CASE("SPU2 inactive status guests preserve aliases and branch load delays",
       Memory::Outcome::Completed, route, true, 0});
     IOPTraceTest::requireEvents(actual, {
       {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
-        address, 0, 0, metadata}
+        address, expected, 0, metadata}
     });
   }
 }
@@ -2018,6 +2030,159 @@ TEST_CASE("SPU2 inactive status loads restore across branch and load continuatio
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireMachine(plain, original);
+  }
+}
+
+TEST_CASE("SPU2 I/O status derives idle readiness without transfer side effects",
+  "[iop][spu2][spu2-statx][spu2-io-status]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &spu = system.spu2Controller();
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
+    REQUIRE(bus.write16(transferStartAddressAddresses[core * 2 + 1], 0xffff).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(transferDataAddresses[core], 0x0707).status ==
+      IOPBusStatus::Completed);
+    std::uint32_t cursor = 0x10000;
+    for (const auto base : coreAttributeValues)
+    {
+      REQUIRE(bus.write16(coreAttributeAddresses[core], base | 0x10).status ==
+        IOPBusStatus::Completed);
+      const auto before = system.iopStateHash();
+      for (unsigned repeat = 0; repeat < 3; ++repeat)
+      {
+        const auto status = bus.read16(coreStatusAddresses[core]);
+        REQUIRE(status.status == IOPBusStatus::Completed);
+        REQUIRE(status.value == 0x80);
+        REQUIRE(bus.read16(coreStatusAddresses[1 - core]).value == 0);
+      }
+      REQUIRE(system.iopStateHash() == before);
+      REQUIRE(bus.write16(transferDataAddresses[core], base).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(spu.readSoundRAMHalfword(cursor++) == base);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0x80);
+      REQUIRE(bus.write16(coreAttributeAddresses[core], base).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0);
+    }
+    REQUIRE(bus.write16(coreAttributeAddresses[0], 0x8010).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(coreAttributeAddresses[1], 0x10).status ==
+      IOPBusStatus::Completed);
+    system.runMasterCycles(80);
+    bus.reset();
+    system.iopCore().reset();
+    for (const auto address : coreStatusAddresses)
+    {
+      REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(address).value == 0x80);
+    }
+    REQUIRE(bus.write16(transferDataAddresses[core], 0xabcd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(spu.readSoundRAMHalfword(cursor) == 0xabcd);
+    REQUIRE(spu.readSoundRAMHalfword(0xffff) == 0x0707);
+    REQUIRE(bus.read16(transferStartAddressAddresses[core * 2 + 1]).value == 0xffff);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+    spu.reset();
+    REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0);
+    system.reset();
+    REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0);
+  }
+}
+
+TEST_CASE("SPU2 I/O status excludes peer PCM activity without changing mode00",
+  "[iop][spu2][spu2-statx][spu2-io-status][spu2-input]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &spu = system.spu2Controller();
+    const auto peer = 1 - core;
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0xc011).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(autoDMAAddresses[peer], autoDMAWriteSelections[peer]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(spu.writeInputWord(peer, 0x12345678));
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(coreStatusAddresses[peer]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(transferDataAddresses[core], 0x0707).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+    spu.cancelInputWrite(peer);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0xc001).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0);
+    REQUIRE(bus.write16(coreAttributeAddresses[core], 0xc011).status ==
+      IOPBusStatus::Completed);
+    bus.reset();
+    system.iopCore().reset();
+    system.runMasterCycles(80);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(autoDMAAddresses[peer], 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0x80);
+  }
+}
+
+TEST_CASE("SPU2 I/O status loads restore across branch and load continuations",
+  "[iop][spu2][spu2-statx][spu2-io-status][save-state][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (unsigned cut : {32u, 40u, 48u})
+  {
+    CAPTURE(core);
+    CAPTURE(cut);
+    NekoSystem original;
+    REQUIRE(original.iopBus().write16(coreAttributeAddresses[core], 0x8010).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(original.iopBus().write16(coreAttributeAddresses[1 - core], 0x10).status ==
+      IOPBusStatus::Completed);
+    original.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    original.iopDMAController().writeAuxiliaryControl(0x12345678);
+    installHalfwordReadProgram(
+      original, coreStatusAddresses[core] | 0xa0000000u, 0x94220000);
+    original.runMasterCycles(cut);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    const auto status = plain.iopBus().read16(coreStatusAddresses[core]);
+    REQUIRE(status.status == IOPBusStatus::Completed);
+    REQUIRE(status.value == 0x80);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(64 - cut);
+    restored.runMasterCycles(64 - cut);
+    plain.runMasterCycles(64 - cut);
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().retiredInstructions() == 8);
+    REQUIRE(original.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(original.iopCore().generalRegister(4) == 0x80);
+    REQUIRE(original.iopCore().generalRegister(5) == 0x1234);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    const auto before = restored.saveState();
+    SaveStateMutation oldVersion(before);
+    oldVersion.writeScalar("container.version", 110);
+    oldVersion.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(oldVersion), std::invalid_argument);
+    REQUIRE(restored.saveState() == before);
   }
 }
 
@@ -2159,7 +2324,8 @@ TEST_CASE("SPU2 I/O mode retains attributes without rewinding or signaling",
         IOPBusStatus::Completed);
       REQUIRE(bus.read16(coreAttributeAddresses[core]).value == mode);
       REQUIRE(bus.read16(coreAttributeAddresses[1 - core]).value == 0);
-      REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0x80);
       REQUIRE(bus.read16(coreStatusAddresses[1 - core]).status ==
         IOPBusStatus::Completed);
       REQUIRE(system.iopStateHash() == before);
@@ -2181,7 +2347,8 @@ TEST_CASE("SPU2 I/O mode retains attributes without rewinding or signaling",
     bus.reset();
     system.iopCore().reset();
     REQUIRE(bus.read16(coreAttributeAddresses[core]).value == 0x8010);
-    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(coreStatusAddresses[core]).value == 0x80);
     REQUIRE(bus.write16(transferDataAddresses[core], 0xabcd).status ==
       IOPBusStatus::Completed);
     REQUIRE(spu.readSoundRAMHalfword(cursor) == 0xabcd);
@@ -2265,7 +2432,8 @@ TEST_CASE("SPU2 I/O mode restores guest stores and cursor status boundaries",
     {
       REQUIRE(system->iopBus().read16(coreAttributeAddresses[core]).value == 0x8010);
       REQUIRE(system->iopBus().read16(coreStatusAddresses[core]).status ==
-        IOPBusStatus::Unmapped);
+        IOPBusStatus::Completed);
+      REQUIRE(system->iopBus().read16(coreStatusAddresses[core]).value == 0x80);
       REQUIRE(system->iopBus().write16(transferDataAddresses[core], 0x1234).status ==
         IOPBusStatus::Completed);
       REQUIRE(system->spu2Controller().readSoundRAMHalfword(0x2800) == 0x0707);

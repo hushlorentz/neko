@@ -374,26 +374,44 @@ void SPU2Controller::writeTransferStartAddress(
 bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 {
   auto &cursor = transferCursor.at(core);
-  for (std::size_t input = 0; input < CORE_COUNT; ++input)
+  if (!hasInactiveInputs())
   {
-    if (!hasInactiveInput(input))
-    {
-      return false;
-    }
+    return false;
   }
   writeSoundRAMHalfword(cursor, value);
   cursor = (cursor + 1) & static_cast<std::uint32_t>(SOUND_RAM_HALFWORD_COUNT - 1);
   return true;
 }
 
-bool SPU2Controller::hasInactiveCoreStatus(std::size_t core) const
+SPU2ReadResult SPU2Controller::readCoreStatus(std::size_t core) const
 {
-  return hasInactiveInput(core) && (coreAttributes.at(core) & 0x30) == 0;
+  const auto mode = coreAttributes.at(core) & 0x30;
+  if (mode == 0 && hasInactiveInput(core))
+  {
+    return {SPU2AccessStatus::Accepted, 0};
+  }
+  if (mode == 0x10 && hasInactiveInputs())
+  {
+    return {SPU2AccessStatus::Accepted, 0x80};
+  }
+  return {};
 }
 
 bool SPU2Controller::hasInactiveInput(std::size_t core) const
 {
   return autoDMAWriteSelection.at(core) == 0 && !inputStates.at(core).writeOpen;
+}
+
+bool SPU2Controller::hasInactiveInputs() const
+{
+  for (std::size_t core = 0; core < CORE_COUNT; ++core)
+  {
+    if (!hasInactiveInput(core))
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 void SPU2Controller::keyOffUnprogrammedVoices() const noexcept

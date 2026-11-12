@@ -8,6 +8,18 @@
 
 #include "observation_order.hpp"
 
+enum class SPU2AccessStatus : std::uint8_t
+{
+  Accepted,
+  Unsupported
+};
+
+struct SPU2ReadResult
+{
+  SPU2AccessStatus status = SPU2AccessStatus::Unsupported;
+  std::uint16_t value = 0;
+};
+
 struct SPU2InputWriteState
 {
   bool selected = false;
@@ -80,8 +92,8 @@ class SPU2Controller final
     bool writeTransferData(std::size_t core, std::uint16_t value);
     std::uint16_t readVoiceModeMask(std::size_t index) const;
     void writeVoiceModeMask(std::size_t index, std::uint16_t value);
-    // Provisional STATX zero only with mode00 and this core's input inactive.
-    bool hasInactiveCoreStatus(std::size_t core) const;
+    // Provisional idle STATX: mode00 zero; mode01 ready only with both inputs inactive.
+    SPU2ReadResult readCoreStatus(std::size_t core) const;
     // Provisional KOFF effect; replace before voice source/envelope or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
@@ -123,6 +135,7 @@ class SPU2Controller final
     bool hasSupportedInputProfile(std::size_t core) const noexcept;
     bool hasValidInputState() const noexcept;
     bool hasInactiveInput(std::size_t core) const;
+    bool hasInactiveInputs() const;
     std::vector<std::uint8_t> soundRAM;
     std::uint16_t inputClockPhase = 0;
     std::uint16_t inputReadPosition = 0;
