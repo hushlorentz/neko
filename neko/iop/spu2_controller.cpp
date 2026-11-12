@@ -36,6 +36,7 @@ void SPU2Controller::reset() noexcept
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
   voiceVolumeControls.fill(0);
+  voicePitchControls.fill(0);
   coreAttributes.fill(0);
   voiceMix.fill(0);
   mainMix.fill(0);
@@ -297,6 +298,16 @@ bool SPU2Controller::writeVoiceVolumeControl(
   }
   control = value;
   return true;
+}
+
+std::uint16_t SPU2Controller::readVoicePitchControl(std::size_t index) const
+{
+  return voicePitchControls.at(index);
+}
+
+void SPU2Controller::writeVoicePitchControl(std::size_t index, std::uint16_t value)
+{
+  voicePitchControls.at(index) = value;
 }
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept

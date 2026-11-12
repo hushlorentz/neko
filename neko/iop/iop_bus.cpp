@@ -417,11 +417,17 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     const auto voice = (offset % spu2CoreStride) / spu2VoiceStride;
     const auto field = offset % spu2VoiceStride;
     if (voice < SPU2Controller::VOICE_COUNT_PER_CORE &&
-        (field == 0 || field == 2) && last < first + sizeof(std::uint16_t))
+        last < first + sizeof(std::uint16_t))
     {
-      const auto index = (core * SPU2Controller::VOICE_COUNT_PER_CORE + voice) * 2 +
-        field / 2;
-      return {IOPBusRegion::Mmio, index, Device::SPU2VoiceVolumeControl};
+      const auto index = core * SPU2Controller::VOICE_COUNT_PER_CORE + voice;
+      if (field == 0 || field == 2)
+      {
+        return {IOPBusRegion::Mmio, index * 2 + field / 2, Device::SPU2VoiceVolumeControl};
+      }
+      if (field == 4)
+      {
+        return {IOPBusRegion::Mmio, index, Device::SPU2VoicePitchControl};
+      }
     }
   }
   for (std::size_t core = 0; core < spu2CoreAttributeAddresses.size(); ++core)
@@ -916,6 +922,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readVoiceVolumeControl(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoicePitchControl:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoicePitchControl(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1194,6 +1205,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       {
         return {};
       }
+      return {IOPBusStatus::Completed};
+    case Device::SPU2VoicePitchControl:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeVoicePitchControl(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&

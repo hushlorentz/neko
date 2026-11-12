@@ -159,6 +159,7 @@ class IOPBus final
       SPU2SPDIFConfiguration,
       SPU2MasterVolumeControl,
       SPU2VoiceVolumeControl,
+      SPU2VoicePitchControl,
       SPU2CoreAttribute,
       SPU2VoiceMix,
       SPU2VoiceModeMask,
