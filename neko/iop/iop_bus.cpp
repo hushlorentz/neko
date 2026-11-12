@@ -428,6 +428,11 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       {
         return {IOPBusRegion::Mmio, index, Device::SPU2VoicePitchControl};
       }
+      if (field == 6 || field == 8)
+      {
+        return {IOPBusRegion::Mmio, index * 2 + (field - 6) / 2,
+          Device::SPU2VoiceADSRControl};
+      }
     }
   }
   for (std::size_t core = 0; core < spu2CoreAttributeAddresses.size(); ++core)
@@ -927,6 +932,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readVoicePitchControl(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoiceADSRControl:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceADSRControl(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1212,6 +1222,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       spu2->writeVoicePitchControl(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2VoiceADSRControl:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeVoiceADSRControl(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&

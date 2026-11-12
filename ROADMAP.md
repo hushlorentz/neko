@@ -3901,6 +3901,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement passive pitch programming for both cores/all24voices through
       the existing SPU2 owner, with focused red/green CPU/bus, lifecycle and
       persistence coverage.
+- [x] Independently review and verify fresh unchanged-input cold/restored
+      traced/plain and canonical progress without claiming completed boot.
+
+### SPU2 Per-Voice ADSR Parameter Programming
+
+- [x] Research the originating zero halfword store to `0x1f900406` and its
+      containing register family; select a bounded contract through the
+      existing SPU2 owner, including reset, readback and active-effect limits.
+- [x] Implement passive ADSR1/2 programming for both cores/all24voices through
+      the existing SPU2 owner, with focused red/green CPU/bus, lifecycle and
+      persistence coverage; keep envelope execution and current values separate.
 - [ ] Independently review and verify fresh unchanged-input cold/restored
       traced/plain and canonical progress without claiming completed boot.
 

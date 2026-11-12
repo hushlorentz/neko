@@ -37,6 +37,7 @@ void SPU2Controller::reset() noexcept
   masterVolumeControls.fill(0);
   voiceVolumeControls.fill(0);
   voicePitchControls.fill(0);
+  voiceADSRControls.fill(0);
   coreAttributes.fill(0);
   voiceMix.fill(0);
   mainMix.fill(0);
@@ -310,6 +311,16 @@ void SPU2Controller::writeVoicePitchControl(std::size_t index, std::uint16_t val
   voicePitchControls.at(index) = value;
 }
 
+std::uint16_t SPU2Controller::readVoiceADSRControl(std::size_t index) const
+{
+  return voiceADSRControls.at(index);
+}
+
+void SPU2Controller::writeVoiceADSRControl(std::size_t index, std::uint16_t value)
+{
+  voiceADSRControls.at(index) = value;
+}
+
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
   return (value & 0x3fee) == 0;
@@ -445,7 +456,7 @@ bool SPU2Controller::hasInactiveInputs() const
 
 void SPU2Controller::keyOffUnstartedVoices() const noexcept
 {
-  // Volume images do not configure sources/envelopes or start a voice.
+  // Programmed volume/pitch/ADSR images do not start a voice or advance an envelope.
   // Every selected voice is unstarted; no release or pending command exists.
 }
 

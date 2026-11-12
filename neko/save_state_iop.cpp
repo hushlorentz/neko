@@ -291,6 +291,15 @@ void NekoSaveStateCodec::writeIOPState(
       }
     }
     {
+      auto controls = writer->scope("voiceADSRControls");
+      const auto &words = system.spu2ControllerComponent.voiceADSRControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
+    {
       auto attributes = writer->scope("coreAttributes");
       const auto &words = system.spu2ControllerComponent.coreAttributes;
       for (std::size_t index = 0; index < words.size(); ++index)
@@ -625,6 +634,15 @@ void NekoSaveStateCodec::readIOP(
     {
       auto controls = reader->scope("voicePitchControls");
       auto &words = system->spu2ControllerComponent.voicePitchControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto controls = reader->scope("voiceADSRControls");
+      auto &words = system->spu2ControllerComponent.voiceADSRControls;
       for (std::size_t index = 0; index < words.size(); ++index)
       {
         auto word = reader->element(index);
