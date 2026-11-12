@@ -52,6 +52,8 @@ class SPU2Controller final
     static constexpr std::size_t SPDIF_CONFIGURATION_COUNT = 5;
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
+    static constexpr std::size_t VOICE_COUNT_PER_CORE = 24;
+    static constexpr std::size_t VOICE_VOLUME_COUNT = CORE_COUNT * VOICE_COUNT_PER_CORE * 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     static constexpr std::size_t VOICE_MODE_HALFWORD_COUNT = 8;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
@@ -71,9 +73,11 @@ class SPU2Controller final
     bool writeInputWord(std::size_t core, std::uint32_t value);
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
     bool writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
-    static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
+    static bool isFixedVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
+    std::uint16_t readVoiceVolumeControl(std::size_t index) const;
+    bool writeVoiceVolumeControl(std::size_t index, std::uint16_t value);
     // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
@@ -94,8 +98,8 @@ class SPU2Controller final
     void writeVoiceModeMask(std::size_t index, std::uint16_t value);
     // Provisional idle STATX: mode00 zero; mode01 ready only with both inputs inactive.
     SPU2ReadResult readCoreStatus(std::size_t core) const;
-    // Provisional KOFF effect; replace before voice source/envelope or key-on.
-    void keyOffUnprogrammedVoices() const noexcept;
+    // Passive volume programming does not start voices; revisit before source/envelope or KON.
+    void keyOffUnstartedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
       std::size_t core, std::uint16_t value) noexcept;
@@ -144,6 +148,8 @@ class SPU2Controller final
     std::array<std::uint16_t, SPDIF_CONFIGURATION_COUNT> spdifConfiguration{};
     // Core 0 left/right, core 1 left/right; programmed controls, not current gain.
     std::array<std::uint16_t, MASTER_VOLUME_COUNT> masterVolumeControls{};
+    // Per core, voices 0-23 left/right; programmed controls, not current gain.
+    std::array<std::uint16_t, VOICE_VOLUME_COUNT> voiceVolumeControls{};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
     // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
     // Passive raw halfwords, including unused upper bits; no live voice gates.

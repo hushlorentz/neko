@@ -273,6 +273,15 @@ void NekoSaveStateCodec::writeIOPState(
       }
     }
     {
+      auto controls = writer->scope("voiceVolumeControls");
+      const auto &words = system.spu2ControllerComponent.voiceVolumeControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
+    {
       auto attributes = writer->scope("coreAttributes");
       const auto &words = system.spu2ControllerComponent.coreAttributes;
       for (std::size_t index = 0; index < words.size(); ++index)
@@ -589,8 +598,19 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
-        reader->requireField(SPU2Controller::isFixedMasterVolumeControl(words[index]),
+        reader->requireField(SPU2Controller::isFixedVolumeControl(words[index]),
           "SPU2 master-volume sweep modes are unsupported");
+      }
+    }
+    {
+      auto controls = reader->scope("voiceVolumeControls");
+      auto &words = system->spu2ControllerComponent.voiceVolumeControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+        reader->requireField(SPU2Controller::isFixedVolumeControl(words[index]),
+          "SPU2 voice-volume sweep modes are unsupported");
       }
     }
     {

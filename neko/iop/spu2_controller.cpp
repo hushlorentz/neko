@@ -35,6 +35,7 @@ void SPU2Controller::reset() noexcept
   inputStates = {};
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
+  voiceVolumeControls.fill(0);
   coreAttributes.fill(0);
   voiceMix.fill(0);
   mainMix.fill(0);
@@ -259,7 +260,7 @@ bool SPU2Controller::writeSPDIFConfiguration(
   return true;
 }
 
-bool SPU2Controller::isFixedMasterVolumeControl(std::uint16_t value) noexcept
+bool SPU2Controller::isFixedVolumeControl(std::uint16_t value) noexcept
 {
   return (value & 0x8000) == 0;
 }
@@ -273,7 +274,24 @@ bool SPU2Controller::writeMasterVolumeControl(
   std::size_t index, std::uint16_t value)
 {
   auto &control = masterVolumeControls.at(index);
-  if (!isFixedMasterVolumeControl(value))
+  if (!isFixedVolumeControl(value))
+  {
+    return false;
+  }
+  control = value;
+  return true;
+}
+
+std::uint16_t SPU2Controller::readVoiceVolumeControl(std::size_t index) const
+{
+  return voiceVolumeControls.at(index);
+}
+
+bool SPU2Controller::writeVoiceVolumeControl(
+  std::size_t index, std::uint16_t value)
+{
+  auto &control = voiceVolumeControls.at(index);
+  if (!isFixedVolumeControl(value))
   {
     return false;
   }
@@ -414,9 +432,10 @@ bool SPU2Controller::hasInactiveInputs() const
   return true;
 }
 
-void SPU2Controller::keyOffUnprogrammedVoices() const noexcept
+void SPU2Controller::keyOffUnstartedVoices() const noexcept
 {
-  // Every selected voice is unprogrammed; no release or pending command exists.
+  // Volume images do not configure sources/envelopes or start a voice.
+  // Every selected voice is unstarted; no release or pending command exists.
 }
 
 bool SPU2Controller::isSupportedAutoDMAWriteSelection(
