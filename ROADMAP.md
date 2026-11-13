@@ -3939,7 +3939,7 @@ not requirements for exhaustive subsystem coverage.
       admitting key-on rather than silently substituting another filter.
 - [x] Implement focused ADPCM, interpolation and fixed-gain arithmetic with
       authored clipping, rounding, fractional-pitch and raw-header coverage.
-- [ ] Implement ADSR rates and transitions with key-off release, retrigger
+- [x] Implement ADSR rates and transitions with key-off release, retrigger
       initialization and explicit live-parameter/timing boundaries.
 - [ ] Integrate fixed-capacity waveform source state, prefetch, pitch,
       looping/endpoints and current addresses into the existing SPU2 sample
