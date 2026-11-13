@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 115 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa]")
+TEST_CASE("Version 116 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,11 +662,11 @@ TEST_CASE("Version 115 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 115);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 116);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 696);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 696 + 4424);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -888,7 +888,22 @@ TEST_CASE("Version 115 save-state layout is byte-stable",
   REQUIRE(cdvdResult != nullptr);
   REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
   REQUIRE(cdvdResult->size == 16);
+  const auto *endMasks = snapshot.find("system.iop.spu2.voiceEndMasks[0].value");
+  REQUIRE(endMasks != nullptr);
+  const auto voiceStateOffset = endMasks->containerOffset;
+  for (std::size_t index = 0; index < 48; ++index)
+  {
+    const auto path = "system.iop.spu2.voices[" + std::to_string(index) + "].";
+    const auto *phase = snapshot.find(path + "envelopePhase");
+    const auto *tail = snapshot.find(path + "fifo[31].value");
+    REQUIRE(phase != nullptr);
+    REQUIRE(tail != nullptr);
+    REQUIRE(phase->containerOffset == voiceStateOffset + 8 + index * 92);
+    REQUIRE(tail->containerOffset + tail->size == phase->containerOffset + 92);
+  }
   auto previousVersion = state;
+  previousVersion.erase(previousVersion.begin() + voiceStateOffset,
+    previousVersion.begin() + voiceStateOffset + 4424);
   previousVersion.erase(previousVersion.begin() + cursorOffset,
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
@@ -903,10 +918,11 @@ TEST_CASE("Version 115 save-state layout is byte-stable",
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
-  const auto version107Offset = [cursorOffset, core0](std::size_t offset)
+  const auto version107Offset = [cursorOffset, core0, voiceStateOffset](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
-      (offset >= core0->containerOffset ? 672 : 0);
+      (offset >= core0->containerOffset ? 672 : 0) -
+      (offset >= voiceStateOffset + 4424 ? 4424 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

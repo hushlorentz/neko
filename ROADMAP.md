@@ -3941,7 +3941,7 @@ not requirements for exhaustive subsystem coverage.
       authored clipping, rounding, fractional-pitch and raw-header coverage.
 - [x] Implement ADSR rates and transitions with key-off release, retrigger
       initialization and explicit live-parameter/timing boundaries.
-- [ ] Integrate fixed-capacity waveform source state, prefetch, pitch,
+- [x] Integrate fixed-capacity waveform source state, prefetch, pitch,
       looping/endpoints and current addresses into the existing SPU2 sample
       clock and canonical state; keep guest key-on rejected.
 - [ ] Integrate voice capture, dry/wet mix captures and core0-to-core1 output

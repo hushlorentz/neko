@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "observation_order.hpp"
+#include "spu2_envelope.hpp"
 
 enum class SPU2AccessStatus : std::uint8_t
 {
@@ -43,7 +44,7 @@ struct SPU2InputTick
   std::array<SPU2InputSample, 2> samples{};
 };
 
-// Bounded SPU2 programming and input transfers; no audio engine or volume sweeps.
+// Bounded SPU2 programming, waveform sources and input transfers; no host audio.
 class SPU2Controller final
 {
   public:
@@ -69,7 +70,7 @@ class SPU2Controller final
     void reset() noexcept;
     std::uint16_t readSoundRAMHalfword(std::uint32_t halfwordAddress) const;
     void writeSoundRAMHalfword(std::uint32_t halfwordAddress, std::uint16_t value);
-    SPU2InputTick advanceInputClock() noexcept;
+    SPU2InputTick advanceSampleClock() noexcept;
     bool inputWriteRequested(std::size_t core) const;
     SPU2InputWriteState inputWriteState(std::size_t core) const;
     bool beginInputWrite(std::size_t core);
@@ -87,7 +88,7 @@ class SPU2Controller final
     std::uint16_t readVoiceADSRControl(std::size_t index) const;
     void writeVoiceADSRControl(std::size_t index, std::uint16_t value);
     std::uint16_t readVoiceStartAddress(std::size_t index) const;
-    void writeVoiceStartAddress(std::size_t index, std::uint16_t value);
+    bool writeVoiceStartAddress(std::size_t index, std::uint16_t value);
     // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
@@ -105,11 +106,11 @@ class SPU2Controller final
     // Provisional synchronous PIO, only while both PCM inputs are inactive.
     bool writeTransferData(std::size_t core, std::uint16_t value);
     std::uint16_t readVoiceModeMask(std::size_t index) const;
-    void writeVoiceModeMask(std::size_t index, std::uint16_t value);
+    bool writeVoiceModeMask(std::size_t index, std::uint16_t value);
     // Provisional idle STATX: mode00 zero; mode01 ready only with both inputs inactive.
     SPU2ReadResult readCoreStatus(std::size_t core) const;
     // Passive parameter images do not start voices; revisit before envelope execution or KON.
-    void keyOffUnstartedVoices() const noexcept;
+    bool keyOffUnstartedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
       std::size_t core, std::uint16_t value) noexcept;
@@ -123,6 +124,31 @@ class SPU2Controller final
     friend class IOPDMAController;
     friend class NekoSystem;
     friend struct SPU2ObservationTestAccess;
+    friend struct SPU2VoiceTestAccess;
+    struct VoiceState
+    {
+      SPU2Envelope::State envelope;
+      std::uint8_t age = 0;
+      std::uint16_t fraction = 0;
+      std::int16_t history1 = 0;
+      std::int16_t history2 = 0;
+      std::uint32_t nextAddress = 0;
+      std::uint32_t loopAddress = 0;
+      bool loopOverride = false;
+      std::uint16_t header = 0;
+      bool headerValid = false;
+      std::uint8_t fifoHead = 0;
+      std::uint8_t fifoCount = 0;
+      std::array<std::int16_t, 32> fifo{};
+    };
+    bool startVoice(std::size_t index) noexcept;
+    void stopVoice(VoiceState &voice) noexcept;
+    void writeVoiceLoopAddress(std::size_t index, std::uint32_t address) noexcept;
+    void refillVoice(std::size_t index) noexcept;
+    std::int16_t advanceVoice(std::size_t index) noexcept;
+    bool hasLiveVoices() const noexcept;
+    bool hasSupportedVoiceMode(std::size_t index) const noexcept;
+    bool hasValidVoiceState() const noexcept;
     struct Observation
     {
       std::uint8_t core = 0;
@@ -167,6 +193,8 @@ class SPU2Controller final
     std::array<std::uint16_t, VOICE_ADSR_COUNT> voiceADSRControls{};
     // Per core, voices 0-23 high/low; normalized SSA, not a live decoder cursor.
     std::array<std::uint16_t, VOICE_START_ADDRESS_HALFWORD_COUNT> voiceStartAddresses{};
+    std::array<VoiceState, VOICE_PITCH_COUNT> voices{};
+    std::array<std::uint32_t, CORE_COUNT> voiceEndMasks{{0xffffff, 0xffffff}};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
     // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
     // Passive raw halfwords, including unused upper bits; no live voice gates.

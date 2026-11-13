@@ -112,6 +112,7 @@ add_library(neko_core
     neko/iop/spu2_controller.cpp
     neko/iop/spu2_numeric.cpp
     neko/iop/spu2_envelope.cpp
+    neko/iop/spu2_voice.cpp
     neko/iop/iop_bus.cpp
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
@@ -349,6 +350,7 @@ add_executable(neko_tests
     neko_tests/iop/spu2_controller_tests.cpp
     neko_tests/iop/spu2_numeric_tests.cpp
     neko_tests/iop/spu2_envelope_tests.cpp
+    neko_tests/iop/spu2_voice_tests.cpp
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp

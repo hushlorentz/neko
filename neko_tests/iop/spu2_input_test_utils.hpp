@@ -28,7 +28,7 @@ namespace SPU2InputTest
     for (unsigned pulse = 0;
          pulse < samples * SPU2Controller::INPUT_CLOCK_PERIOD; ++pulse)
     {
-      result = spu.advanceInputClock();
+      result = spu.advanceSampleClock();
     }
     return result;
   }

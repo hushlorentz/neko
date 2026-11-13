@@ -39,6 +39,8 @@ void SPU2Controller::reset() noexcept
   voicePitchControls.fill(0);
   voiceADSRControls.fill(0);
   voiceStartAddresses.fill(0);
+  voices = {};
+  voiceEndMasks.fill(0xffffff);
   coreAttributes.fill(0);
   voiceMix.fill(0);
   mainMix.fill(0);
@@ -71,7 +73,7 @@ std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
   return spdifConfiguration.at(index);
 }
 
-SPU2InputTick SPU2Controller::advanceInputClock() noexcept
+SPU2InputTick SPU2Controller::advanceSampleClock() noexcept
 {
   SPU2InputTick result;
   if (++inputClockPhase != INPUT_CLOCK_PERIOD)
@@ -97,6 +99,10 @@ SPU2InputTick SPU2Controller::advanceInputClock() noexcept
       sample.left = readSoundRAMHalfword(address);
       sample.right = readSoundRAMHalfword(address + 0x200);
     }
+  }
+  for (std::size_t index = 0; index < voices.size(); ++index)
+  {
+    advanceVoice(index);
   }
   inputReadPosition = (inputReadPosition + 1) % INPUT_SAMPLE_COUNT;
   for (auto &state : inputStates)
@@ -320,6 +326,7 @@ std::uint16_t SPU2Controller::readVoiceADSRControl(std::size_t index) const
 void SPU2Controller::writeVoiceADSRControl(std::size_t index, std::uint16_t value)
 {
   voiceADSRControls.at(index) = value;
+  SPU2Envelope::parametersWritten(voices[index / 2].envelope);
 }
 
 std::uint16_t SPU2Controller::voiceStartAddressMask(std::size_t index) noexcept
@@ -332,10 +339,13 @@ std::uint16_t SPU2Controller::readVoiceStartAddress(std::size_t index) const
   return voiceStartAddresses.at(index);
 }
 
-void SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t value)
+bool SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t value)
 {
-  voiceStartAddresses.at(index) =
-    static_cast<std::uint16_t>(value & voiceStartAddressMask(index));
+  auto &address = voiceStartAddresses.at(index);
+  if (voices[index / 2].envelope.phase != SPU2Envelope::Phase::Stopped)
+    return false;
+  address = static_cast<std::uint16_t>(value & voiceStartAddressMask(index));
+  return true;
 }
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
@@ -366,9 +376,20 @@ std::uint16_t SPU2Controller::readVoiceModeMask(std::size_t index) const
   return voiceModeMasks.at(index);
 }
 
-void SPU2Controller::writeVoiceModeMask(std::size_t index, std::uint16_t value)
+bool SPU2Controller::writeVoiceModeMask(std::size_t index, std::uint16_t value)
 {
-  voiceModeMasks.at(index) = value;
+  auto &mask = voiceModeMasks.at(index);
+  const auto core = index / 4;
+  const auto first = (index % 2) * 16;
+  for (std::size_t voice = first; voice < std::min(first + 16, VOICE_COUNT_PER_CORE); ++voice)
+  {
+    if ((value & (1u << (voice - first))) != 0 &&
+        voices[core * VOICE_COUNT_PER_CORE + voice].envelope.phase !=
+          SPU2Envelope::Phase::Stopped && !(index % 4 == 0 && voice == 0))
+      return false;
+  }
+  mask = value;
+  return true;
 }
 
 std::uint16_t SPU2Controller::readVoiceMix(std::size_t index) const
@@ -443,6 +464,8 @@ bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 SPU2ReadResult SPU2Controller::readCoreStatus(std::size_t core) const
 {
   const auto mode = coreAttributes.at(core) & 0x30;
+  if (hasLiveVoices())
+    return {};
   if (mode == 0 && hasInactiveInput(core))
   {
     return {SPU2AccessStatus::Accepted, 0};
@@ -471,10 +494,10 @@ bool SPU2Controller::hasInactiveInputs() const
   return true;
 }
 
-void SPU2Controller::keyOffUnstartedVoices() const noexcept
+bool SPU2Controller::keyOffUnstartedVoices() const noexcept
 {
-  // Programmed volume/pitch/ADSR/SSA images do not start a voice or advance an envelope.
-  // Every selected voice is unstarted; no release or pending command exists.
+  // Command consumption is not admitted until capture/mixing integration passes.
+  return !hasLiveVoices();
 }
 
 bool SPU2Controller::isSupportedAutoDMAWriteSelection(

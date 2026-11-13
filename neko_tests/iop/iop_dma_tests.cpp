@@ -2127,7 +2127,7 @@ namespace
       REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) == 0);
 
       SPU2InputTest::advanceSamples(spu, 254);
-      while (!spu.advanceInputClock().sampleTick) {}
+      while (!spu.advanceSampleClock().sampleTick) {}
       system.runMasterCycles(6144);
       const auto released = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
       REQUIRE(released.size() == 5);

@@ -1200,11 +1200,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       spu2->writeMainMix(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2VoiceModeMask:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
+          !spu2->writeVoiceModeMask(location.offset, static_cast<std::uint16_t>(value)))
       {
         return {};
       }
-      spu2->writeVoiceModeMask(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2VoiceMix:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
@@ -1252,22 +1252,22 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       spu2->writeVoiceADSRControl(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2VoiceStartAddress:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
+          !spu2->writeVoiceStartAddress(location.offset, static_cast<std::uint16_t>(value)))
       {
         return {};
       }
-      spu2->writeVoiceStartAddress(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeCoreAttribute(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2UnstartedKeyOff:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
+          !spu2->keyOffUnstartedVoices())
       {
         return {};
       }
-      spu2->keyOffUnstartedVoices();
       return {IOPBusStatus::Completed};
     case Device::SPU2AutoDMAWriteSelection:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&

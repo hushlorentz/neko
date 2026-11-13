@@ -409,7 +409,7 @@ TEST_CASE("SPU sample half release precedes the same pulse DMA grant",
     REQUIRE(dma.clockSPU(0, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Accepted);
   SPU2InputTest::advanceSamples(spu, 255);
   for (unsigned pulse = 0; pulse < SPU2Controller::INPUT_CLOCK_PERIOD - 1; ++pulse)
-    REQUIRE_FALSE(spu.advanceInputClock().sampleTick);
+    REQUIRE_FALSE(spu.advanceSampleClock().sampleTick);
   REQUIRE_FALSE(spu.inputWriteRequested(0));
   REQUIRE(dma.inspectSPU(0, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Wait);
   system.clockMasterCycle();

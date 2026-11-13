@@ -9,6 +9,11 @@ namespace
   using PS2Clock::IOP_CLOCK_PERIOD;
   using PS2Clock::IOP_CLOCK_PHASE;
 
+  std::int16_t signedHalfword(std::uint16_t value)
+  {
+    return static_cast<std::int16_t>(
+      value < 0x8000 ? std::int32_t{value} : std::int32_t{value} - 0x10000);
+  }
 }
 
 std::uint64_t NekoSystem::iopStateHash() const
@@ -394,15 +399,53 @@ void NekoSaveStateCodec::writeIOPState(
     const auto &spu = system.spu2ControllerComponent;
     writer->writeFieldU16("inputClockPhase", spu.inputClockPhase);
     writer->writeFieldU16("inputReadPosition", spu.inputReadPosition);
-    auto inputs = writer->scope("inputStates");
-    for (std::size_t core = 0; core < spu.inputStates.size(); ++core)
     {
-      auto input = writer->element(core);
-      const auto &state = spu.inputStates[core];
-      writer->writeFieldBool("everSelected", state.everSelected);
-      writer->writeFieldBool("writeOpen", state.writeOpen);
-      writer->writeFieldU8("fillHalf", state.fillHalf);
-      writer->writeFieldU16("fillWords", state.fillWords);
+      auto inputs = writer->scope("inputStates");
+      for (std::size_t core = 0; core < spu.inputStates.size(); ++core)
+      {
+        auto input = writer->element(core);
+        const auto &state = spu.inputStates[core];
+        writer->writeFieldBool("everSelected", state.everSelected);
+        writer->writeFieldBool("writeOpen", state.writeOpen);
+        writer->writeFieldU8("fillHalf", state.fillHalf);
+        writer->writeFieldU16("fillWords", state.fillWords);
+      }
+    }
+    {
+      auto masks = writer->scope("voiceEndMasks");
+      for (std::size_t core = 0; core < spu.voiceEndMasks.size(); ++core)
+      {
+        auto mask = writer->element(core);
+        writer->writeFieldU32("value", spu.voiceEndMasks[core]);
+      }
+    }
+    {
+      auto voices = writer->scope("voices");
+      for (std::size_t index = 0; index < spu.voices.size(); ++index)
+      {
+        auto element = writer->element(index);
+        const auto &voice = spu.voices[index];
+        writer->writeFieldU8("envelopePhase", static_cast<std::uint8_t>(voice.envelope.phase));
+        writer->writeFieldU16("envelopeLevel", voice.envelope.level);
+        writer->writeFieldU32("envelopeCounter", voice.envelope.counter);
+        writer->writeFieldU8("age", voice.age);
+        writer->writeFieldU16("fraction", voice.fraction);
+        writer->writeFieldU16("history1", static_cast<std::uint16_t>(voice.history1));
+        writer->writeFieldU16("history2", static_cast<std::uint16_t>(voice.history2));
+        writer->writeFieldU32("nextAddress", voice.nextAddress);
+        writer->writeFieldU32("loopAddress", voice.loopAddress);
+        writer->writeFieldBool("loopOverride", voice.loopOverride);
+        writer->writeFieldU16("header", voice.header);
+        writer->writeFieldBool("headerValid", voice.headerValid);
+        writer->writeFieldU8("fifoHead", voice.fifoHead);
+        writer->writeFieldU8("fifoCount", voice.fifoCount);
+        auto fifo = writer->scope("fifo");
+        for (std::size_t slot = 0; slot < voice.fifo.size(); ++slot)
+        {
+          auto sample = writer->element(slot);
+          writer->writeFieldU16("value", static_cast<std::uint16_t>(voice.fifo[slot]));
+        }
+      }
     }
   }
   {
@@ -777,6 +820,45 @@ void NekoSaveStateCodec::readIOP(
     }
     reader->requireField(spu.hasValidInputState(),
       "SPU2 PCM input state is outside the bounded profile");
+    {
+      auto masks = reader->scope("voiceEndMasks");
+      for (std::size_t core = 0; core < spu.voiceEndMasks.size(); ++core)
+      {
+        auto mask = reader->element(core);
+        spu.voiceEndMasks[core] = reader->readFieldU32("value");
+      }
+    }
+    {
+      auto voices = reader->scope("voices");
+      for (std::size_t index = 0; index < spu.voices.size(); ++index)
+      {
+        auto element = reader->element(index);
+        auto &voice = spu.voices[index];
+        voice.envelope.phase = static_cast<SPU2Envelope::Phase>(
+          reader->readFieldU8("envelopePhase"));
+        voice.envelope.level = reader->readFieldU16("envelopeLevel");
+        voice.envelope.counter = reader->readFieldU32("envelopeCounter");
+        voice.age = reader->readFieldU8("age");
+        voice.fraction = reader->readFieldU16("fraction");
+        voice.history1 = signedHalfword(reader->readFieldU16("history1"));
+        voice.history2 = signedHalfword(reader->readFieldU16("history2"));
+        voice.nextAddress = reader->readFieldU32("nextAddress");
+        voice.loopAddress = reader->readFieldU32("loopAddress");
+        voice.loopOverride = reader->readFieldBool("loopOverride");
+        voice.header = reader->readFieldU16("header");
+        voice.headerValid = reader->readFieldBool("headerValid");
+        voice.fifoHead = reader->readFieldU8("fifoHead");
+        voice.fifoCount = reader->readFieldU8("fifoCount");
+        auto fifo = reader->scope("fifo");
+        for (std::size_t slot = 0; slot < voice.fifo.size(); ++slot)
+        {
+          auto sample = reader->element(slot);
+          voice.fifo[slot] = signedHalfword(reader->readFieldU16("value"));
+        }
+      }
+    }
+    reader->requireField(spu.hasValidVoiceState(),
+      "SPU2 waveform source state is outside the bounded profile");
   }
   {
     auto scope = reader->scope("cdvd");
