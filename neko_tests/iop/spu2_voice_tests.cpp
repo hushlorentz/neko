@@ -49,6 +49,19 @@ namespace
     SPU2InputTest::advanceSamples(spu, count);
     REQUIRE(SPU2VoiceTestAccess::valid(spu));
   }
+
+  void constantVoice(SPU2Controller &spu, std::size_t index)
+  {
+    const auto address = static_cast<std::uint32_t>(0x4000 + index * 8);
+    block(spu, address, 0, 0x1111);
+    program(spu, index, address, 0);
+    spu.writeVoiceADSRControl(index * 2 + 1, 0x1fc0);
+    REQUIRE(spu.writeVoiceVolumeControl(index * 2, 0x3fff));
+    REQUIRE(spu.writeVoiceVolumeControl(index * 2 + 1, 0x3fff));
+    REQUIRE(SPU2VoiceTestAccess::start(spu, index));
+    SPU2VoiceTestAccess::voice(spu, index).envelope =
+      {SPU2Envelope::Phase::Sustain, 0x7fff, 0};
+  }
 }
 
 TEST_CASE("SPU2 waveform source reset state is canonical without admitting guest KON",
@@ -409,4 +422,299 @@ TEST_CASE("SPU2 waveform missing mid-block header rejects after startup age satu
   const auto before = destination.saveState();
   REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("SPU2 capture rings write stopped zeros from reset and wrap together",
+          "[iop][spu2][spu2-mix]")
+{
+  SPU2Controller spu;
+  const std::array<std::uint32_t, 14> bases = {{
+    0x400, 0x600, 0x800, 0xa00, 0xc00, 0xe00,
+    0x1000, 0x1200, 0x1400, 0x1600, 0x1800, 0x1a00, 0x1c00, 0x1e00
+  }};
+  for (const auto base : bases)
+  {
+    spu.writeSoundRAMHalfword(base, 0xaaaa);
+    spu.writeSoundRAMHalfword(base + 511, 0xbbbb);
+  }
+  samples(spu, 511);
+  for (const auto base : bases)
+  {
+    REQUIRE(spu.readSoundRAMHalfword(base) == 0);
+    REQUIRE(spu.readSoundRAMHalfword(base + 511) == 0xbbbb);
+  }
+  samples(spu, 1);
+  for (const auto base : bases)
+  {
+    REQUIRE(spu.readSoundRAMHalfword(base + 511) == 0);
+    spu.writeSoundRAMHalfword(base, 0xcccc);
+  }
+  samples(spu, 1);
+  for (const auto base : bases)
+    REQUIRE(spu.readSoundRAMHalfword(base) == 0);
+}
+
+TEST_CASE("SPU2 voice captures precede gain routing and final output mute",
+          "[iop][spu2][spu2-mix]")
+{
+  SPU2Controller spu;
+  constantVoice(spu, 1);
+  REQUIRE(spu.writeVoiceVolumeControl(3, 0x4000));
+  for (const auto lane : {0u, 2u, 4u, 6u})
+    spu.writeVoiceMix(lane, 2);
+  spu.writeMainMix(0, 0xfc0f);
+  REQUIRE(spu.writeMasterVolumeControl(0, 0x3fff));
+  REQUIRE(spu.writeMasterVolumeControl(1, 0x3fff));
+  unsigned position = 0;
+  for (const auto attribute : {0x4000u, 0x4001u, 0xc001u, 0x8001u, 0u, 0x4000u})
+  {
+    REQUIRE(spu.writeCoreAttribute(0, attribute));
+    const auto tick = SPU2InputTest::advanceSamples(spu, 1);
+    REQUIRE(tick.sampleTick);
+    REQUIRE(spu.readSoundRAMHalfword(0x400 + position) == 4076);
+    REQUIRE(spu.readSoundRAMHalfword(0x1000 + position) == 4075);
+    REQUIRE(spu.readSoundRAMHalfword(0x1200 + position) ==
+      static_cast<std::uint16_t>(-4076));
+    REQUIRE(spu.readSoundRAMHalfword(0x1400 + position) == 4075);
+    REQUIRE(spu.readSoundRAMHalfword(0x1600 + position) ==
+      static_cast<std::uint16_t>(-4076));
+    REQUIRE(tick.outputs[0].left == ((attribute & 0x4000) ? 4074 : 0));
+    REQUIRE(tick.outputs[0].right == ((attribute & 0x4000) ? -4076 : 0));
+    REQUIRE(spu.readSoundRAMHalfword(0x800 + position) ==
+      static_cast<std::uint16_t>(tick.outputs[0].left));
+    REQUIRE(spu.readSoundRAMHalfword(0xa00 + position) ==
+      static_cast<std::uint16_t>(tick.outputs[0].right));
+    ++position;
+  }
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 1).age == 4);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+  REQUIRE_FALSE(spu.writeVoiceVolumeControl(2, 0x8000));
+  REQUIRE(spu.readVoiceVolumeControl(2) == 0x3fff);
+  REQUIRE_FALSE(spu.writeMasterVolumeControl(0, 0x8000));
+  REQUIRE_FALSE(spu.writeCoreAttribute(0, 0x4040));
+  REQUIRE(spu.readCoreAttribute(0) == 0x4000);
+}
+
+TEST_CASE("SPU2 mix lanes sum wide before clipping and decode both voice mask halves",
+          "[iop][spu2][spu2-mix]")
+{
+  SPU2Controller spu;
+  for (std::size_t voice = 0; voice < 24; ++voice)
+  {
+    constantVoice(spu, voice);
+    if (voice >= 12)
+      REQUIRE(spu.writeVoiceVolumeControl(voice * 2, 0x4000));
+    REQUIRE(spu.writeVoiceVolumeControl(voice * 2 + 1, 0x4000));
+  }
+  spu.writeVoiceMix(0, 0xffff);
+  spu.writeVoiceMix(1, 0xffff);
+  spu.writeVoiceMix(2, 0x0fff);
+  spu.writeVoiceMix(4, 0xffff);
+  spu.writeVoiceMix(5, 0xffff);
+  spu.writeVoiceMix(6, 0xffff);
+  spu.writeVoiceMix(7, 0xffff);
+  REQUIRE(spu.writeCoreAttribute(0, 0x4000));
+  spu.writeMainMix(0, 0xc00);
+  REQUIRE(spu.writeMasterVolumeControl(0, 0x3fff));
+  REQUIRE(spu.writeMasterVolumeControl(1, 0x3fff));
+  const auto tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(spu.readSoundRAMHalfword(0x1000) == static_cast<std::uint16_t>(-12));
+  REQUIRE(spu.readSoundRAMHalfword(0x1200) == 0x8000);
+  REQUIRE(spu.readSoundRAMHalfword(0x1400) == 0x7fff);
+  REQUIRE(spu.readSoundRAMHalfword(0x1600) == 0x8000);
+  REQUIRE(tick.outputs[0].left == -12);
+  REQUIRE(tick.outputs[0].right == -32766);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 PCM and external gains are signed and core linkage uses current shared RAM",
+          "[iop][spu2][spu2-mix]")
+{
+  SPU2Controller spu;
+  SPU2InputTest::programProfile(spu);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  spu.writeSoundRAMHalfword(0x2000, 16000);
+  spu.writeSoundRAMHalfword(0x2200, 0x8000);
+  spu.writeEffectInputVolume(4, 0x4000);
+  spu.writeEffectInputVolume(5, 0x8000);
+  spu.writeEffectInputVolume(2, 0xffff);
+  spu.writeEffectInputVolume(3, 0xffff);
+  spu.writeEffectInputVolume(8, 0x4000);
+  spu.writeEffectInputVolume(9, 0x4000);
+  spu.writeMainMix(0, 0x00ff);
+  spu.writeMainMix(1, 0x000c);
+  for (std::size_t index = 0; index < 4; ++index)
+    REQUIRE(spu.writeMasterVolumeControl(index, 0x3fff));
+  spu.writeSoundRAMHalfword(0x800, 0xdead);
+  spu.writeSoundRAMHalfword(0xa00, 0xbeef);
+  const auto tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(tick.samples[0].consumed);
+  REQUIRE(tick.samples[0].left == 16000);
+  REQUIRE(tick.samples[0].right == 0x8000);
+  REQUIRE_FALSE(tick.samples[1].consumed);
+  REQUIRE(tick.outputs[0].left == 7999);
+  REQUIRE(tick.outputs[0].right == 32765);
+  REQUIRE(tick.outputs[1].left == 3998);
+  REQUIRE(tick.outputs[1].right == 16381);
+  REQUIRE(spu.readSoundRAMHalfword(0x800) == 7999);
+  REQUIRE(spu.readSoundRAMHalfword(0xa00) == 32765);
+  REQUIRE(spu.readSoundRAMHalfword(0x1000) == 0);
+  REQUIRE(spu.readSoundRAMHalfword(0x1800) == 0);
+  REQUIRE_FALSE(spu.writeCoreAttribute(0, 0x8001));
+  REQUIRE(spu.readCoreAttribute(0) == 0xc001);
+}
+
+TEST_CASE("SPU2 final dry mix clips before master gain and wet paths stay effects-disabled",
+          "[iop][spu2][spu2-mix]")
+{
+  SPU2Controller spu;
+  SPU2InputTest::programProfile(spu);
+  for (std::size_t voice = 0; voice < 24; ++voice)
+    constantVoice(spu, voice);
+  spu.writeVoiceMix(0, 0xffff);
+  spu.writeVoiceMix(1, 0x00ff);
+  spu.writeVoiceMix(2, 0xffff);
+  spu.writeVoiceMix(3, 0x00ff);
+  spu.writeMainMix(0, 0x0880);
+  REQUIRE(spu.writeMasterVolumeControl(0, 0x2000));
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  spu.writeEffectInputVolume(4, 0x7fff);
+  spu.writeSoundRAMHalfword(0x2000, 16000);
+  auto tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(spu.readSoundRAMHalfword(0x1000) == 0x7fff);
+  REQUIRE(spu.readSoundRAMHalfword(0x1400) == 0x7fff);
+  REQUIRE(tick.outputs[0].left == 16383);
+
+  spu.writeMainMix(0, 0x0333);
+  spu.writeEffectInputVolume(0, 0x7fff);
+  spu.writeEffectInputVolume(1, 0x8000);
+  tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(tick.outputs[0].left == 0);
+  REQUIRE(tick.outputs[0].right == 0);
+  REQUIRE(spu.readSoundRAMHalfword(0x1401) == 0x7fff);
+}
+
+TEST_CASE("SPU2 voice capture aliases are observed by later refills but not buffered samples",
+          "[iop][spu2][spu2-mix]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+    for (const auto captureVoice : {1u, 3u})
+    {
+      SPU2Controller spu;
+      const auto address = static_cast<std::uint32_t>(
+        0x400 + core * 0x800 + (captureVoice == 3 ? 0x200 : 0));
+      block(spu, address, 0x000c, 0x1111);
+      const auto earlier = core * 24 + captureVoice - 1;
+      const auto later = core * 24 + captureVoice + 1;
+      for (const auto index : {earlier, later})
+      {
+        program(spu, index, address, 0);
+        REQUIRE(SPU2VoiceTestAccess::start(spu, index));
+      }
+      samples(spu, 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, earlier).history1 == 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, later).history1 == 4096);
+      REQUIRE(spu.readSoundRAMHalfword(address) == 0);
+      samples(spu, 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, earlier).fifo[0] == 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, later).fifo[0] == 4096);
+    }
+}
+
+TEST_CASE("SPU2 core mix and link captures precede core1 source fetches",
+          "[iop][spu2][spu2-mix]")
+{
+  for (const auto address : {0x800u, 0xa00u, 0x1000u, 0x1200u, 0x1400u, 0x1600u})
+  {
+    SPU2Controller spu;
+    block(spu, address, 0x000c, 0x1111);
+    for (const auto index : {23u, 24u})
+    {
+      program(spu, index, address, 0);
+      REQUIRE(SPU2VoiceTestAccess::start(spu, index));
+    }
+    samples(spu, 1);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, 23).history1 == 1);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, 24).history1 == 4096);
+    REQUIRE(spu.readSoundRAMHalfword(address) == 0);
+  }
+}
+
+TEST_CASE("SPU2 waveform and capture tick precedes a coincident accepted PCM DMA beat",
+          "[iop][spu2][spu2-mix]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  auto &bus = system.iopBus();
+  SPU2InputTest::programProfile(spu);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  block(spu, 0x2100, 0x000c, 0x1111);
+  program(spu, 0, 0x2100, 0);
+  system.runMasterCycles(6136);
+  REQUIRE(SPU2VoiceTestAccess::start(spu, 0));
+  REQUIRE(bus.write32(0x1000, 0x22220000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f8010c0, 0x1000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f8010c4, 0x00100010).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f8010c8, 0x01000201).status == IOPBusStatus::Completed);
+  system.iopDMAController().writePriority(IOPDMABank::Primary, 0x80000);
+  system.startTrace();
+  system.runMasterCycles(1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).history1 == 1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).fifo[0] == 1);
+  REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0);
+  REQUIRE(spu.readSoundRAMHalfword(0x2101) == 0x2222);
+  const auto events = IOPTraceTest::subsystemEvents(
+    system, static_cast<NekoTraceSubsystem>(16));
+  REQUIRE(events.size() == 1);
+  REQUIRE(events[0].masterCycle == 6137);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 mix captures and final samples restore across ring wrap without output caches",
+          "[iop][spu2][spu2-mix][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  constantVoice(spu, 1);
+  constantVoice(spu, 47);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(spu.writeCoreAttribute(core, 0x4000));
+    for (std::size_t lane = 0; lane < 4; ++lane)
+      spu.writeVoiceMix(core * 8 + lane * 2 + (core == 1 ? 1 : 0),
+        core == 0 ? 2 : 0x80);
+    spu.writeMainMix(core, core == 0 ? 0xc00 : 0xc0c);
+    REQUIRE(spu.writeMasterVolumeControl(core * 2, 0x3fff));
+    REQUIRE(spu.writeMasterVolumeControl(core * 2 + 1, 0x3fff));
+  }
+  spu.writeEffectInputVolume(8, 0x7fff);
+  spu.writeEffectInputVolume(9, 0x8000);
+  samples(spu, 511);
+  const auto saved = source.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  for (unsigned tick = 0; tick < 3; ++tick)
+  {
+    const auto cold = SPU2InputTest::advanceSamples(spu, 1);
+    const auto loaded = SPU2InputTest::advanceSamples(restored.spu2Controller(), 1);
+    for (std::size_t core = 0; core < 2; ++core)
+    {
+      REQUIRE(cold.outputs[core].left == loaded.outputs[core].left);
+      REQUIRE(cold.outputs[core].right == loaded.outputs[core].right);
+      REQUIRE(cold.outputs[core].left != 0);
+    }
+    REQUIRE(restored.iopStateHash() == source.iopStateHash());
+    REQUIRE(restored.saveState() == source.saveState());
+  }
+  source.startTrace();
+  source.runMasterCycles(6200);
+  restored.runMasterCycles(6200);
+  REQUIRE(restored.saveState() == source.saveState());
+  auto previous = saved;
+  previous[8] = 116;
+  const auto before = restored.saveState();
+  REQUIRE_THROWS_AS(inspectSaveState(previous), std::invalid_argument);
+  REQUIRE_THROWS_AS(restored.loadState(previous), std::invalid_argument);
+  REQUIRE(restored.saveState() == before);
 }

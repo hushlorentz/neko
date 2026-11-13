@@ -22,9 +22,9 @@ namespace SPU2InputTest
     }
   }
 
-  inline SPU2InputTick advanceSamples(SPU2Controller &spu, unsigned samples)
+  inline SPU2SampleTick advanceSamples(SPU2Controller &spu, unsigned samples)
   {
-    SPU2InputTick result;
+    SPU2SampleTick result;
     for (unsigned pulse = 0;
          pulse < samples * SPU2Controller::INPUT_CLOCK_PERIOD; ++pulse)
     {

@@ -16,16 +16,22 @@ namespace
   {
     return value / divisor - (value % divisor < 0 ? 1 : 0);
   }
+}
 
+namespace SPU2Numeric
+{
   std::int16_t clipSample(std::int64_t value) noexcept
   {
     return static_cast<std::int16_t>(
       std::max<std::int64_t>(-32768, std::min<std::int64_t>(32767, value)));
   }
-}
 
-namespace SPU2Numeric
-{
+  std::int16_t signedSample(std::uint16_t value) noexcept
+  {
+    return static_cast<std::int16_t>(
+      value < 0x8000 ? std::int32_t{value} : std::int32_t{value} - 0x10000);
+  }
+
   ADPCMHeader decodeADPCMHeader(std::uint16_t raw) noexcept
   {
     const auto predictor = static_cast<std::uint8_t>((raw >> 4) & 0x0f);

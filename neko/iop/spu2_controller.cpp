@@ -73,9 +73,9 @@ std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
   return spdifConfiguration.at(index);
 }
 
-SPU2InputTick SPU2Controller::advanceSampleClock() noexcept
+SPU2SampleTick SPU2Controller::advanceSampleClock() noexcept
 {
-  SPU2InputTick result;
+  SPU2SampleTick result;
   if (++inputClockPhase != INPUT_CLOCK_PERIOD)
   {
     return result;
@@ -100,9 +100,18 @@ SPU2InputTick SPU2Controller::advanceSampleClock() noexcept
       sample.right = readSoundRAMHalfword(address + 0x200);
     }
   }
-  for (std::size_t index = 0; index < voices.size(); ++index)
+  for (std::size_t core = 0; core < CORE_COUNT; ++core)
   {
-    advanceVoice(index);
+    const auto mix = renderVoiceMix(core);
+    const auto output = renderCoreOutput(core, mix, result.samples[core]);
+    result.outputs[core] = output;
+    if (core == 0)
+    {
+      writeSoundRAMHalfword(0x800 + inputReadPosition,
+        static_cast<std::uint16_t>(output.left));
+      writeSoundRAMHalfword(0xa00 + inputReadPosition,
+        static_cast<std::uint16_t>(output.right));
+    }
   }
   inputReadPosition = (inputReadPosition + 1) % INPUT_SAMPLE_COUNT;
   for (auto &state : inputStates)

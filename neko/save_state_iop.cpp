@@ -3,17 +3,14 @@
 #include <type_traits>
 #include <utility>
 
+#include "spu2_numeric.hpp"
+
 namespace
 {
   constexpr std::uint32_t IOP_CACHE_PROFILE = 1;
   using PS2Clock::IOP_CLOCK_PERIOD;
   using PS2Clock::IOP_CLOCK_PHASE;
 
-  std::int16_t signedHalfword(std::uint16_t value)
-  {
-    return static_cast<std::int16_t>(
-      value < 0x8000 ? std::int32_t{value} : std::int32_t{value} - 0x10000);
-  }
 }
 
 std::uint64_t NekoSystem::iopStateHash() const
@@ -840,8 +837,8 @@ void NekoSaveStateCodec::readIOP(
         voice.envelope.counter = reader->readFieldU32("envelopeCounter");
         voice.age = reader->readFieldU8("age");
         voice.fraction = reader->readFieldU16("fraction");
-        voice.history1 = signedHalfword(reader->readFieldU16("history1"));
-        voice.history2 = signedHalfword(reader->readFieldU16("history2"));
+        voice.history1 = SPU2Numeric::signedSample(reader->readFieldU16("history1"));
+        voice.history2 = SPU2Numeric::signedSample(reader->readFieldU16("history2"));
         voice.nextAddress = reader->readFieldU32("nextAddress");
         voice.loopAddress = reader->readFieldU32("loopAddress");
         voice.loopOverride = reader->readFieldBool("loopOverride");
@@ -853,7 +850,7 @@ void NekoSaveStateCodec::readIOP(
         for (std::size_t slot = 0; slot < voice.fifo.size(); ++slot)
         {
           auto sample = reader->element(slot);
-          voice.fifo[slot] = signedHalfword(reader->readFieldU16("value"));
+          voice.fifo[slot] = SPU2Numeric::signedSample(reader->readFieldU16("value"));
         }
       }
     }

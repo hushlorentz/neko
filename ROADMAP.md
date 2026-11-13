@@ -3944,7 +3944,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Integrate fixed-capacity waveform source state, prefetch, pitch,
       looping/endpoints and current addresses into the existing SPU2 sample
       clock and canonical state; keep guest key-on rejected.
-- [ ] Integrate voice capture, dry/wet mix captures and core0-to-core1 output
+- [x] Integrate voice capture, dry/wet mix captures and core0-to-core1 output
       through shared sound RAM; cover live-control admission, existing PCM/DMA
       ordering and restored continuation without adding host audio.
 - [ ] Admit approved KON/KOFF, supported live-register accesses and sparse

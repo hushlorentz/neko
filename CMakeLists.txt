@@ -113,6 +113,7 @@ add_library(neko_core
     neko/iop/spu2_numeric.cpp
     neko/iop/spu2_envelope.cpp
     neko/iop/spu2_voice.cpp
+    neko/iop/spu2_mix.cpp
     neko/iop/iop_bus.cpp
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp

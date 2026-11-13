@@ -38,10 +38,17 @@ struct SPU2InputSample
   std::uint16_t right = 0;
 };
 
-struct SPU2InputTick
+struct SPU2StereoSample
+{
+  std::int16_t left = 0;
+  std::int16_t right = 0;
+};
+
+struct SPU2SampleTick
 {
   bool sampleTick = false;
   std::array<SPU2InputSample, 2> samples{};
+  std::array<SPU2StereoSample, 2> outputs{};
 };
 
 // Bounded SPU2 programming, waveform sources and input transfers; no host audio.
@@ -70,7 +77,7 @@ class SPU2Controller final
     void reset() noexcept;
     std::uint16_t readSoundRAMHalfword(std::uint32_t halfwordAddress) const;
     void writeSoundRAMHalfword(std::uint32_t halfwordAddress, std::uint16_t value);
-    SPU2InputTick advanceSampleClock() noexcept;
+    SPU2SampleTick advanceSampleClock() noexcept;
     bool inputWriteRequested(std::size_t core) const;
     SPU2InputWriteState inputWriteState(std::size_t core) const;
     bool beginInputWrite(std::size_t core);
@@ -146,6 +153,9 @@ class SPU2Controller final
     void writeVoiceLoopAddress(std::size_t index, std::uint32_t address) noexcept;
     void refillVoice(std::size_t index) noexcept;
     std::int16_t advanceVoice(std::size_t index) noexcept;
+    std::array<std::int16_t, 4> renderVoiceMix(std::size_t core) noexcept;
+    SPU2StereoSample renderCoreOutput(std::size_t core,
+      const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input) const noexcept;
     bool hasLiveVoices() const noexcept;
     bool hasSupportedVoiceMode(std::size_t index) const noexcept;
     bool hasValidVoiceState() const noexcept;
@@ -197,9 +207,9 @@ class SPU2Controller final
     std::array<std::uint32_t, CORE_COUNT> voiceEndMasks{{0xffffff, 0xffffff}};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
     // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
-    // Passive raw halfwords, including unused upper bits; no live voice gates.
+    // Raw halfwords, including unused upper bits; gates decode only voices 0-23.
     std::array<std::uint16_t, VOICE_MIX_HALFWORD_COUNT> voiceMix{};
-    // Passive raw MMIX images, including unused bits; no live source gates.
+    // Raw MMIX images; core0 external and unsupported wet gates have no output source.
     std::array<std::uint16_t, CORE_COUNT> mainMix{};
     // Per core: EVOLL/R, AVOLL/R, BVOLL/R; core0 AVOL has no input function.
     std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
