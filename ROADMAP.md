@@ -3937,7 +3937,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Establish independently authored ADPCM/envelope vectors and usable
       Gaussian-coefficient provenance; pin interpolation arithmetic before
       admitting key-on rather than silently substituting another filter.
-- [ ] Implement focused ADPCM, interpolation and fixed-gain arithmetic with
+- [x] Implement focused ADPCM, interpolation and fixed-gain arithmetic with
       authored clipping, rounding, fractional-pitch and raw-header coverage.
 - [ ] Implement ADSR rates and transitions with key-off release, retrigger
       initialization and explicit live-parameter/timing boundaries.

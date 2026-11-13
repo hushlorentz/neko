@@ -110,6 +110,7 @@ add_library(neko_core
     neko/iop/cdvd_controller.cpp
     neko/iop/sio2_controller.cpp
     neko/iop/spu2_controller.cpp
+    neko/iop/spu2_numeric.cpp
     neko/iop/iop_bus.cpp
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
@@ -345,6 +346,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_bus_tests.cpp
     neko_tests/iop/sio2_controller_tests.cpp
     neko_tests/iop/spu2_controller_tests.cpp
+    neko_tests/iop/spu2_numeric_tests.cpp
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp
