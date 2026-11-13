@@ -319,7 +319,8 @@ of `values[0]`, physical source in `values[1]`, remaining-before/after in the
 low/high 32 bits of `values[2]`, and target half/word in the low byte and bits
 8..23 of `values[3]`. Use `nekoDecodeSPUDMABeat` for the typed C++ view.
 
-SPU2 event 1 (`StateChanged`) adds `spu_input` with `channel`, `core`, and
+SPU2 event 1 (`StateChanged`) with `values[0]` bit32 clear adds `spu_input`
+with `channel`, `core`, and
 `before`/`after` snapshots. Each snapshot contains `selected`, `write_open`,
 `requested`, `fill_half`, `read_half`, and `fill_words`. These observe
 selection, opening/cancellation, full-half request changes and reader-half
@@ -330,13 +331,35 @@ bits 0/1/2 are write-open/selected/requested, fill/read half occupy successive
 bytes beginning at bits 8/16, and fill-word count occupies bits 32..47.
 Use `nekoDecodeSPUInput`, not a second packed-field decoder.
 
+SPU2 event24 (`CommandCompleted`) adds `spu_command`: `core`, `command`
+(`koff`/`kon`), consumed24-bit `mask`, and `sample_position` (the old shared
+ring index0..511). Raw values are core | command<<8 (KOFF0/KON1), mask,
+position, zero. This means consumption, not the earlier CPU command write.
+
+SPU2 event1 with `values[0]` bit32 set adds `spu_voice`: `core`, `voice`
+(0..23), `reason`, `phase_before`/`phase_after`, `level_before`/`level_after`,
+and `sample_position`. Reasons are `kon`, `koff`, `endpoint`,
+`envelope_phase`, and `envelope_zero` (raw0..4); phases are stopped, attack,
+decay, sustain, release (raw0..4); levels are0..32767. Raw values are
+bit32 | core | voice<<8 | reason<<16, before phase | level<<8, after
+phase | level<<8, position. Use `nekoDecodeSPUCommand`/`nekoDecodeSPUVoice`.
+Retrigger and repeated live KOFF emit even without a phase change. Repeating
+endpoints emit; a nonrepeat endpoint stop emits no duplicate envelope-zero
+event. Ordinary per-sample level changes are intentionally not logged.
+
 The existing shared observation sequence orders a source beat before its
 resulting input transitions, then completion interrupt and CPU observations.
-Transient journals hold at most eight SPU input transitions and seven common
-DMA attempts (two EE and five IOP candidates) per scheduled master cycle.
+Sample-edge command/lifecycle events precede DMA and CPU work. The SPU
+journal's conservative bound is204: four events per voice (KOFF, KON,
+endpoint, envelope transition) across48voices, four command consumptions and
+eight existing input transitions. Overflow is a fatal invariant violation,
+not dropped evidence. Seven common DMA attempts (two EE and five IOP
+candidates) retain their separate journal per scheduled master cycle.
 They are enabled only for trace/failure-probe observation, with no canonical
-state or save-format change. Host setup outside scheduled observation does
-not produce these events.
+diagnostic state. Host setup outside scheduled observation does not produce
+these events. Failure-only probes retain the originating failure rather than
+the preceding successful lifecycle events; full traces/captures retain those
+events subject to their existing limits.
 
 An identical blocked beat emits only its first wait in an observation
 session. Changed position or a newly available request rearms it; starting

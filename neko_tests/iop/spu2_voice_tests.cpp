@@ -22,7 +22,15 @@ struct SPU2VoiceTestAccess
   {
     return spu.voiceEndMasks.at(core);
   }
-  static bool valid(const SPU2Controller &spu) { return spu.hasValidVoiceState(); }
+  static bool valid(const SPU2Controller &spu)
+  {
+    return spu.hasValidVoiceState() && spu.hasValidCommandState();
+  }
+  static void sampleEdge(SPU2Controller &spu, std::uint16_t position)
+  {
+    spu.inputClockPhase = SPU2Controller::INPUT_CLOCK_PERIOD - 1;
+    spu.inputReadPosition = position;
+  }
 };
 
 namespace
@@ -64,7 +72,499 @@ namespace
   }
 }
 
-TEST_CASE("SPU2 waveform source reset state is canonical without admitting guest KON",
+TEST_CASE("SPU2 guest commands retain images and start all voices only at the next tick",
+          "[iop][spu2][spu2-command]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  for (std::size_t index = 0; index < 48; ++index)
+  {
+    const auto address = static_cast<std::uint32_t>(0x4000 + index * 8);
+    block(spu, address, 0x000c, 0x1111);
+    program(spu, index, address, 0);
+  }
+  for (const auto address : {0x1f9001a0u, 0x1f9001a2u, 0x1f9005a0u, 0x1f9005a2u})
+  {
+    REQUIRE(system.iopBus().read16(address).value == 0);
+    REQUIRE(system.iopBus().write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read16(address).value == 0xffff);
+  }
+  system.runMasterCycles(6136);
+  for (std::size_t index = 0; index < 48; ++index)
+  {
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, index).envelope.phase ==
+      SPU2Envelope::Phase::Stopped);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress == 0);
+  }
+  system.runMasterCycles(1);
+  for (std::size_t index = 0; index < 48; ++index)
+  {
+    const auto &voice = SPU2VoiceTestAccess::voice(spu, index);
+    REQUIRE(voice.envelope.phase == SPU2Envelope::Phase::Attack);
+    REQUIRE(voice.age == 1);
+    REQUIRE(voice.nextAddress == 0x4002 + index * 8);
+    REQUIRE(voice.fifoCount == 4);
+  }
+  for (const auto address : {0x1f9001a0u, 0x1f9001a2u, 0x1f9005a0u, 0x1f9005a2u})
+    REQUIRE(system.iopBus().read16(address).value == 0xffff);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 pending command halves replace independently and zero cancels only pending work",
+          "[iop][spu2][spu2-command]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    auto &bus = system.iopBus();
+    const auto kon = static_cast<IOPAddress>(0x1f9001a0 + core * 0x400);
+    for (const auto voice : {0u, 1u, 16u, 23u})
+      program(spu, core * 24 + voice, 0x4000, 0);
+    REQUIRE(bus.write16(kon, 3).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 2, 0xff81).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon, 2).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 2, 0xff80).status == IOPBusStatus::Completed);
+    samples(spu, 1);
+    for (const auto voice : {0u, 1u, 16u, 23u})
+      REQUIRE((SPU2VoiceTestAccess::voice(spu, core * 24 + voice).age == 1) ==
+        (voice == 1 || voice == 23));
+    REQUIRE(bus.read16(kon + 2).value == 0xff80);
+    REQUIRE(bus.read16(kon + 0x1a0).value == 0xfffd);
+    REQUIRE(bus.read16(kon + 0x1a2).value == 0x7f);
+    REQUIRE(bus.write16(kon, 1).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 4, 3).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 4, 1).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 6, 0x80).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(kon + 6, 0xff00).status == IOPBusStatus::Completed);
+    samples(spu, 1);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, core * 24).age == 0);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, core * 24 + 1).age == 2);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, core * 24 + 1).envelope.phase ==
+      SPU2Envelope::Phase::Attack);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, core * 24 + 23).age == 2);
+    REQUIRE(bus.read16(kon + 6).value == 0xff00);
+  }
+}
+
+TEST_CASE("SPU2 KOFF restarts release counters and overlapping KON retriggers afterward",
+          "[iop][spu2][spu2-command]")
+{
+  SPU2Controller spu;
+  constantVoice(spu, 0);
+  samples(spu, 4);
+  spu.writeVoiceADSRControl(1, 0x1f);
+  auto &voice = SPU2VoiceTestAccess::voice(spu, 0);
+  spu.writeKeyOff(0, 1);
+  samples(spu, 2);
+  REQUIRE(voice.envelope.phase == SPU2Envelope::Phase::Release);
+  REQUIRE(voice.envelope.level == 0x7fff);
+  REQUIRE(voice.envelope.counter == 2);
+  spu.writeKeyOff(0, 1);
+  samples(spu, 1);
+  REQUIRE(voice.envelope.counter == 1);
+  REQUIRE(voice.envelope.level == 0x7fff);
+  REQUIRE(spu.writeKeyOn(0, 1));
+  spu.writeKeyOff(0, 1);
+  samples(spu, 1);
+  REQUIRE(voice.envelope.phase == SPU2Envelope::Phase::Attack);
+  REQUIRE(voice.envelope.level == 0);
+  REQUIRE(voice.envelope.counter == 1);
+  REQUIRE(voice.age == 1);
+  REQUIRE(voice.fraction == 0);
+  REQUIRE(voice.nextAddress == 0x4002);
+  REQUIRE(voice.fifoCount == 4);
+  samples(spu, 1);
+  REQUIRE(voice.age == 2);
+  REQUIRE(voice.envelope.counter == 2);
+  REQUIRE(spu.readKeyOn(0) == 1);
+  REQUIRE(spu.readKeyOff(0) == 1);
+}
+
+TEST_CASE("SPU2 KON admission and pending mode guards are atomic",
+          "[iop][spu2][spu2-command]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  auto &bus = system.iopBus();
+  REQUIRE(spu.writeVoiceModeMask(2, 2));
+  const auto before = system.iopStateHash();
+  REQUIRE(bus.write16(0x1f9001a0, 3).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == before);
+  REQUIRE(bus.read16(0x1f9001a0).value == 0);
+  samples(spu, 1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).age == 0);
+  REQUIRE(spu.writeVoiceModeMask(2, 0));
+  REQUIRE(spu.writeVoiceModeMask(0, 1)); // Voice zero ignores PMON.
+  REQUIRE(bus.write16(0x1f9001a0, 1).status == IOPBusStatus::Completed);
+  const auto pending = system.iopStateHash();
+  REQUIRE(bus.write16(0x1f9001c0, 1).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write16(0x1f900184, 1).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == pending);
+  REQUIRE(spu.writeKeyOn(0, 0));
+  REQUIRE(spu.writeVoiceStartAddress(0, 1));
+  REQUIRE(spu.writeVoiceModeMask(2, 1));
+  REQUIRE(spu.writeVoiceModeMask(1, 0xff80));
+  REQUIRE_FALSE(spu.writeKeyOn(1, 0xff80));
+  REQUIRE(spu.readKeyOn(1) == 0);
+  REQUIRE(spu.writeKeyOn(1, 0xff00));
+  REQUIRE(spu.readKeyOn(1) == 0xff00);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 live register halfwords qualify LSAX NAX ENVX and read-only ENDX",
+          "[iop][spu2][spu2-command]")
+{
+  for (const auto index : {0u, 23u, 24u, 47u})
+  {
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    auto &bus = system.iopBus();
+    const auto core = index / 24;
+    const auto voice = index % 24;
+    const auto base = 0x1f9001c0 + core * 0x400 + voice * 12;
+    const auto envx = 0x1f90000a + core * 0x400 + voice * 16;
+    block(spu, 0xf1238, 0, 0x1111);
+    program(spu, index, 0xf1238, 0);
+    spu.writeVoiceADSRControl(index * 2, 0);
+    REQUIRE(bus.write16(base + 4, 0xfff1).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 6, 0x234f).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 4).value == 1);
+    REQUIRE(bus.read16(base + 6).value == 0x2348);
+    REQUIRE(bus.read16(base + 8).value == 0);
+    REQUIRE(spu.writeKeyOn(core * 2 + voice / 16, 1u << (voice % 16)));
+    samples(spu, 1);
+    for (unsigned age = 1; age < 4; ++age)
+    {
+      REQUIRE(bus.read16(base + 8).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(base + 10).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(base + 4, 3).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write16(base + 6, 0xfff7).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(base + 4).value == 1);
+      REQUIRE(bus.read16(base + 6).value == 0x2348);
+      samples(spu, 1);
+    }
+    REQUIRE(bus.read16(base + 8).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 8).value == 0xf);
+    REQUIRE(bus.read16(base + 10).value == 0x123d);
+    REQUIRE(bus.read16(envx).value == SPU2VoiceTestAccess::voice(spu, index).envelope.level);
+    REQUIRE(bus.read16(envx).value > 0);
+    REQUIRE(bus.write16(base + 4, 3).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 6, 0xfff7).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 4).value == 3);
+    REQUIRE(bus.read16(base + 6).value == 0xfff0);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, index).loopOverride);
+    for (const auto address : {base + 8, base + 10, envx,
+                              0x1f900340 + core * 0x400,
+                              0x1f900342 + core * 0x400})
+      REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+}
+
+TEST_CASE("SPU2 pending commands and images restore with canonical traced and plain continuation",
+          "[iop][spu2][spu2-command][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  for (const auto index : {0u, 1u, 47u})
+  {
+    block(spu, 0x4000 + index * 8, 0x070c, 0x1111);
+    program(spu, index, 0x4000 + index * 8, 0x1000);
+  }
+  source.runMasterCycles(6136);
+  REQUIRE(spu.writeKeyOn(0, 3));
+  REQUIRE(spu.writeKeyOn(3, 0xff80));
+  spu.writeKeyOff(0, 3);
+  spu.writeKeyOff(3, 0xff80);
+  const auto saved = source.saveState();
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(50000);
+  restored.runMasterCycles(50000);
+  plain.runMasterCycles(50000);
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  REQUIRE(source.saveState() == restored.saveState());
+  REQUIRE(source.saveState() == plain.saveState());
+  REQUIRE(source.iopStateHash() == plain.iopStateHash());
+  const auto commands = IOPTraceTest::subsystemEvents(source, NekoTraceSubsystem::SPU2);
+  REQUIRE(commands.size() >= 7);
+  REQUIRE(commands.front().type == NekoTraceEventType::CommandCompleted);
+  NekoSystem destination;
+  const auto before = destination.saveState();
+  struct Invalid { const char *path; std::uint64_t value; };
+  for (const auto invalid : {
+    Invalid{"commands[0].pendingKeyOn", 1},
+    Invalid{"commands[0].pendingKeyOn", 0x1000000},
+    Invalid{"commands[0].keyOnLow", 1},
+    Invalid{"commands[1].pendingKeyOff", 0x400000},
+    Invalid{"voiceModeMasks[2].value", 2}})
+  {
+    INFO(invalid.path);
+    SaveStateMutation mutation(saved);
+    mutation.writeScalar(std::string("system.iop.spu2.") + invalid.path, invalid.value);
+    mutation.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(mutation), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+  auto previous = saved;
+  previous[8] = 117;
+  REQUIRE_THROWS_AS(destination.loadState(previous), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("SPU2 CPU command store on a sample pulse waits until the following tick",
+          "[iop][spu2][spu2-command]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  auto &spu = system.spu2Controller();
+  program(spu, 0, 0x4000, 0);
+  REQUIRE(bus.write32(0, 0x3c011f90).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(4, 0x24020001).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(8, 0xa42201a0).status == IOPBusStatus::Completed);
+  system.iopCore().startExecution(0xa0000000);
+  system.runMasterCycles(9);
+  REQUIRE(system.iopCore().generalRegister(1) == 0x1f900000);
+  REQUIRE(system.iopCore().generalRegister(2) == 1);
+  system.iopCore().haltExecution();
+  system.runMasterCycles(6127);
+  system.iopCore().startExecution(0xa0000008);
+  system.startTrace();
+  system.runMasterCycles(1);
+  REQUIRE(bus.read16(0x1f9001a0).value == 1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).age == 0);
+  system.runMasterCycles(6143);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).age == 0);
+  system.runMasterCycles(1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).age == 1);
+  const auto events = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+  REQUIRE(events.size() == 2);
+  REQUIRE(events[0].masterCycle == 12281);
+  REQUIRE(events[0].type == NekoTraceEventType::CommandCompleted);
+}
+
+TEST_CASE("SPU2 simultaneous lifecycle observations preserve all voices input edges and failure probes",
+          "[iop][spu2][spu2-command][save-state]")
+{
+  for (const bool retrigger : {false, true})
+  {
+    CAPTURE(retrigger);
+    NekoSystem source;
+    auto &spu = source.spu2Controller();
+    SPU2InputTest::programProfile(spu);
+    for (std::size_t core = 0; core < 2; ++core)
+      REQUIRE(spu.writeAutoDMAWriteSelection(core, 1u << core));
+    for (std::size_t index = 0; index < 48; ++index)
+      constantVoice(spu, index);
+    samples(spu, 4);
+    for (std::size_t index = 0; index < 48; ++index)
+    {
+      if (!retrigger)
+      {
+        auto &voice = SPU2VoiceTestAccess::voice(spu, index);
+        voice.envelope = {SPU2Envelope::Phase::Sustain, 1, 0};
+        voice.nextAddress = 0x4007 + static_cast<std::uint32_t>(index) * 8;
+        voice.loopAddress = voice.nextAddress & 0xffff8;
+        voice.header = 0x0300;
+        voice.headerValid = true;
+        voice.fifo.fill(0);
+        voice.fifoHead = 0;
+        voice.fifoCount = 0;
+        spu.writeVoiceADSRControl(index * 2 + 1, 0);
+      }
+    }
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      spu.writeKeyOff(index, 0xffff);
+      if (retrigger)
+        REQUIRE(spu.writeKeyOn(index, 0xffff));
+    }
+    SPU2VoiceTestAccess::sampleEdge(spu, 255);
+    REQUIRE(SPU2VoiceTestAccess::valid(spu));
+    REQUIRE(source.iopBus().write32(0, 0xa7a001ae).status == IOPBusStatus::Completed);
+    source.iopCore().prepareFreshExecution(0xa0000000, 0x1f900000, 0);
+    source.iopCore().startExecution(0xa0000000);
+    const auto saved = source.saveState();
+    source.startTrace();
+    source.runMasterCycles(1);
+    REQUIRE(source.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    const auto events = IOPTraceTest::subsystemEvents(source, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == (retrigger ? 102 : 148));
+    std::array<unsigned, 5> reasons{};
+    unsigned commands = 0;
+    unsigned inputs = 0;
+    for (const auto &event : events)
+    {
+      if (event.type == NekoTraceEventType::CommandCompleted)
+      {
+        const auto command = nekoDecodeSPUCommand(event);
+        REQUIRE(command.mask == 0xffffff);
+        REQUIRE(command.samplePosition == 255);
+        ++commands;
+      }
+      else if ((event.value0 & NekoSPUTrace::VOICE_TRANSITION) != 0)
+      {
+        const auto transition = nekoDecodeSPUVoice(event);
+        REQUIRE(transition.samplePosition == 255);
+        ++reasons[static_cast<std::uint8_t>(transition.reason)];
+      }
+      else
+      {
+        const auto input = nekoDecodeSPUInput(event);
+        REQUIRE(input.before.readHalf == 0);
+        REQUIRE(input.after.readHalf == 1);
+        ++inputs;
+      }
+    }
+    REQUIRE(commands == (retrigger ? 4 : 2));
+    REQUIRE(inputs == 2);
+    REQUIRE(reasons[0] == (retrigger ? 48 : 0));
+    REQUIRE(reasons[1] == 48);
+    REQUIRE(reasons[2] == (retrigger ? 0 : 48));
+    REQUIRE(reasons[3] == 0);
+    REQUIRE(reasons[4] == (retrigger ? 0 : 48));
+    REQUIRE(nekoDecodeSPUCommand(events[0]).kind == NekoSPUTrace::CommandKind::KeyOff);
+    if (retrigger)
+      REQUIRE(nekoDecodeSPUCommand(events[25]).kind == NekoSPUTrace::CommandKind::KeyOn);
+    const auto firstFailure = [](const NekoSystem &system)
+    {
+      IOPTraceTest::Events failures;
+      for (const auto &event : system.trace())
+        if (nekoTraceFailureKind(event) != NekoTraceFailureKind::None)
+        {
+          failures.push_back(event);
+          break;
+        }
+      return failures;
+    };
+    const auto expectedFailure = firstFailure(source);
+    REQUIRE(expectedFailure.size() == 1);
+    for (const bool probe : {false, true})
+    {
+      NekoSystem restored;
+      restored.loadState(saved);
+      if (probe)
+        restored.startFailureProbe();
+      restored.runMasterCycles(1);
+      IOPTraceTest::requireMachine(restored, source);
+      if (probe)
+      {
+        REQUIRE(IOPTraceTest::subsystemEvents(restored, NekoTraceSubsystem::SPU2).empty());
+        IOPTraceTest::requireEvents(firstFailure(restored), expectedFailure);
+      }
+    }
+  }
+}
+
+TEST_CASE("SPU2 live and command registers reject other widths and transports without mutation",
+          "[iop][spu2][spu2-command]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  const auto before = system.iopStateHash();
+  for (const auto address : {
+    0x1f9001a0u, 0x1f9001a2u, 0x1f9001a4u, 0x1f9001a6u,
+    0x1f9005a0u, 0x1f9005a2u, 0x1f9005a4u, 0x1f9005a6u,
+    0x1f9001c4u, 0x1f9002d8u, 0x1f9005c4u, 0x1f9006d8u,
+    0x1f9001c8u, 0x1f9002dcu, 0x1f9005c8u, 0x1f9006dcu,
+    0x1f90000au, 0x1f90017au, 0x1f90040au, 0x1f90057au,
+    0x1f900340u, 0x1f900342u, 0x1f900740u, 0x1f900742u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    for (const auto byte : {address, address + 1})
+    {
+      REQUIRE(bus.read8(byte).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(byte, 0xff).status == IOPBusStatus::Unmapped);
+    }
+    const auto word = address & ~IOPAddress{3};
+    REQUIRE(bus.read32(word).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(word, 0xffffffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(word).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(word).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(word, 0xffffffff).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+      REQUIRE(bus.writeMasked32(word, 0xffffffff, mask).status == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes{{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    for (const auto segment : {0x80000000u, 0xa0000000u})
+    {
+      REQUIRE(bus.read16(address | segment).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(address | segment, 0xffff).status == IOPBusStatus::Unmapped);
+    }
+    std::uint16_t value = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &value));
+    REQUIRE(value == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0xffff));
+  }
+  REQUIRE(system.iopStateHash() == before);
+}
+
+TEST_CASE("SPU2 lifecycle traces omit level ticks and distinguish release from source termination",
+          "[iop][spu2][spu2-command]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  constantVoice(spu, 0);
+  samples(spu, 4);
+  auto &voice = SPU2VoiceTestAccess::voice(spu, 0);
+  SECTION("Envelope phases and repeated release are sparse")
+  {
+    voice.envelope = {SPU2Envelope::Phase::Attack, 0, 0};
+    spu.writeVoiceADSRControl(0, 0);
+    system.startTrace();
+    system.runMasterCycles(8 * 6144);
+    auto events = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == 2);
+    for (const auto &event : events)
+      REQUIRE(nekoDecodeSPUVoice(event).reason == NekoSPUTrace::VoiceReason::EnvelopePhase);
+    REQUIRE(nekoDecodeSPUVoice(events[0]).afterPhase == 2);
+    REQUIRE(nekoDecodeSPUVoice(events[1]).afterPhase == 3);
+    system.clearTrace();
+    spu.writeVoiceADSRControl(1, 0x1f);
+    spu.writeKeyOff(0, 1);
+    system.runMasterCycles(2 * 6144);
+    spu.writeKeyOff(0, 1);
+    system.runMasterCycles(6144);
+    events = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == 4);
+    const auto release = nekoDecodeSPUVoice(events[3]);
+    REQUIRE(release.reason == NekoSPUTrace::VoiceReason::KeyOff);
+    REQUIRE(release.beforePhase == 4);
+    REQUIRE(release.afterPhase == 4);
+    REQUIRE(release.beforeLevel == release.afterLevel);
+  }
+  SECTION("A nonrepeat endpoint emits only the source stop")
+  {
+    voice.nextAddress = 0x4007;
+    voice.header = 0x0100;
+    voice.headerValid = true;
+    voice.fifo.fill(0);
+    voice.fifoHead = 0;
+    voice.fifoCount = 0;
+    system.startTrace();
+    system.runMasterCycles(2 * 6144);
+    const auto events = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == 1);
+    const auto endpoint = nekoDecodeSPUVoice(events[0]);
+    REQUIRE(endpoint.reason == NekoSPUTrace::VoiceReason::Endpoint);
+    REQUIRE(endpoint.beforePhase == 3);
+    REQUIRE(endpoint.afterPhase == 0);
+    REQUIRE(endpoint.afterLevel == 0);
+    REQUIRE(SPU2VoiceTestAccess::valid(spu));
+  }
+}
+
+TEST_CASE("SPU2 waveform source reset state is canonical",
           "[iop][spu2][spu2-source][save-state]")
 {
   NekoSystem system;
@@ -80,8 +580,8 @@ TEST_CASE("SPU2 waveform source reset state is canonical without admitting guest
   }
   for (const auto address : {0x1f9001a0u, 0x1f9001a2u, 0x1f9005a0u, 0x1f9005a2u})
   {
-    REQUIRE(system.iopBus().write16(address, 0xffff).status != IOPBusStatus::Completed);
-    REQUIRE(system.iopBus().read16(address).status != IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write16(address, 0).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read16(address).status == IOPBusStatus::Completed);
   }
   for (std::size_t core = 0; core < 2; ++core)
     REQUIRE(SPU2VoiceTestAccess::endMask(system.spu2Controller(), core) == 0xffffff);
@@ -289,7 +789,8 @@ TEST_CASE("SPU2 waveform live controls cannot fabricate idle or unsupported exec
   REQUIRE(spu.readVoiceStartAddress(0) == 0);
   REQUIRE(bus.read16(0x1f900344).status != IOPBusStatus::Completed);
   REQUIRE(bus.read16(0x1f900744).status != IOPBusStatus::Completed);
-  REQUIRE(bus.write16(0x1f9001a4, 1).status != IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001a4, 1).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001a4, 0).status == IOPBusStatus::Completed);
   REQUIRE(spu.writeVoiceModeMask(0, 1));
   REQUIRE_FALSE(spu.writeVoiceModeMask(0, 3));
   REQUIRE(spu.readVoiceModeMask(0) == 1);

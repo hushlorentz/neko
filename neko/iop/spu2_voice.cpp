@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <exception>
 
 #include "spu2_numeric.hpp"
 
@@ -9,6 +10,111 @@ namespace
 {
   constexpr std::uint32_t addressMask = 0xfffff;
   using Phase = SPU2Envelope::Phase;
+
+  std::uint32_t commandHalf(std::size_t index, std::uint16_t value) noexcept
+  {
+    return index % 2 == 0 ? value : std::uint32_t{value & 0xffu} << 16;
+  }
+
+  void replacePendingHalf(std::uint32_t &pending, std::size_t index,
+                          std::uint16_t value) noexcept
+  {
+    const auto mask = index % 2 == 0 ? 0xffffu : 0xff0000u;
+    pending = (pending & ~mask) | commandHalf(index, value);
+  }
+}
+
+std::uint16_t SPU2Controller::readKeyOn(std::size_t index) const
+{
+  return keyOnImages.at(index);
+}
+
+bool SPU2Controller::writeKeyOn(std::size_t index, std::uint16_t value)
+{
+  auto &image = keyOnImages.at(index);
+  const auto core = index / 2;
+  const auto mask = commandHalf(index, value);
+  for (std::size_t voice = 0; voice < VOICE_COUNT_PER_CORE; ++voice)
+    if ((mask & (std::uint32_t{1} << voice)) != 0 &&
+        !hasSupportedVoiceMode(core * VOICE_COUNT_PER_CORE + voice))
+      return false;
+  image = value;
+  replacePendingHalf(pendingKeyOn[core], index, value);
+  return true;
+}
+
+std::uint16_t SPU2Controller::readKeyOff(std::size_t index) const
+{
+  return keyOffImages.at(index);
+}
+
+void SPU2Controller::writeKeyOff(std::size_t index, std::uint16_t value)
+{
+  keyOffImages.at(index) = value;
+  replacePendingHalf(pendingKeyOff[index / 2], index, value);
+}
+
+void SPU2Controller::consumeCommands(std::size_t core) noexcept
+{
+  const auto off = pendingKeyOff[core];
+  const auto on = pendingKeyOn[core];
+  pendingKeyOff[core] = 0;
+  pendingKeyOn[core] = 0;
+  recordCommand(Observation::Kind::KeyOffConsumed, core, off);
+  for (std::size_t voice = 0; voice < VOICE_COUNT_PER_CORE; ++voice)
+    if ((off & (std::uint32_t{1} << voice)) != 0)
+    {
+      const auto index = core * VOICE_COUNT_PER_CORE + voice;
+      auto &envelope = voices[index].envelope;
+      const auto before = envelope;
+      SPU2Envelope::keyOff(envelope);
+      if (before.phase != Phase::Stopped)
+        recordVoice(Observation::Kind::KeyOff, index, before);
+    }
+  recordCommand(Observation::Kind::KeyOnConsumed, core, on);
+  for (std::size_t voice = 0; voice < VOICE_COUNT_PER_CORE; ++voice)
+    if ((on & (std::uint32_t{1} << voice)) != 0)
+    {
+      const auto started = startVoice(core * VOICE_COUNT_PER_CORE + voice);
+      assert(started);
+      if (!started)
+        std::terminate();
+    }
+}
+
+std::uint16_t SPU2Controller::readVoiceLoopAddress(std::size_t index) const
+{
+  return static_cast<std::uint16_t>(voices.at(index / 2).loopAddress >>
+    (index % 2 == 0 ? 16 : 0));
+}
+
+void SPU2Controller::writeVoiceLoopAddressHalfword(std::size_t index, std::uint16_t value)
+{
+  const auto old = voices.at(index / 2).loopAddress;
+  const auto address = index % 2 == 0
+    ? (old & 0xffff) | (std::uint32_t{value & 0xfu} << 16)
+    : (old & 0xf0000) | (value & 0xfff8u);
+  writeVoiceLoopAddress(index / 2, address);
+}
+
+SPU2ReadResult SPU2Controller::readVoiceNextAddress(std::size_t index) const
+{
+  const auto &voice = voices.at(index / 2);
+  if (voice.envelope.phase != Phase::Stopped && voice.age < 4)
+    return {};
+  return {SPU2AccessStatus::Accepted, static_cast<std::uint16_t>(
+    voice.nextAddress >> (index % 2 == 0 ? 16 : 0))};
+}
+
+std::uint16_t SPU2Controller::readVoiceEnvelope(std::size_t index) const
+{
+  return voices.at(index).envelope.level;
+}
+
+std::uint16_t SPU2Controller::readVoiceEndMask(std::size_t index) const
+{
+  return static_cast<std::uint16_t>(voiceEndMasks.at(index / 2) >>
+    ((index % 2) * 16));
 }
 
 bool SPU2Controller::startVoice(std::size_t index) noexcept
@@ -17,6 +123,7 @@ bool SPU2Controller::startVoice(std::size_t index) noexcept
   if (!hasSupportedVoiceMode(index))
     return false;
   auto &voice = voices[index];
+  const auto before = voice.envelope;
   const auto loop = voice.loopAddress;
   voice = {};
   voice.loopAddress = loop;
@@ -25,6 +132,7 @@ bool SPU2Controller::startVoice(std::size_t index) noexcept
   SPU2Envelope::keyOn(voice.envelope);
   voiceEndMasks[index / VOICE_COUNT_PER_CORE] &=
     ~(std::uint32_t{1} << (index % VOICE_COUNT_PER_CORE));
+  recordVoice(Observation::Kind::KeyOn, index, before);
   return true;
 }
 
@@ -83,10 +191,12 @@ void SPU2Controller::refillVoice(std::size_t index) noexcept
   voice.headerValid = false;
   if (endpoint)
   {
+    const auto before = voice.envelope;
     voiceEndMasks[index / VOICE_COUNT_PER_CORE] |=
       std::uint32_t{1} << (index % VOICE_COUNT_PER_CORE);
     if ((header.flags & 2) == 0)
       stopVoice(voice);
+    recordVoice(Observation::Kind::Endpoint, index, before);
   }
 }
 
@@ -106,8 +216,12 @@ std::int16_t SPU2Controller::advanceVoice(std::size_t index) noexcept
   for (std::size_t tap = 0; tap < taps.size(); ++tap)
     taps[tap] = voice.fifo[(voice.fifoHead + tap) % voice.fifo.size()];
   const auto source = SPU2Numeric::interpolate(taps, voice.fraction);
+  const auto before = voice.envelope;
   SPU2Envelope::advance(voice.envelope,
     voiceADSRControls[index * 2], voiceADSRControls[index * 2 + 1]);
+  if (before.phase != voice.envelope.phase)
+    recordVoice(voice.envelope.phase == Phase::Stopped
+      ? Observation::Kind::EnvelopeZero : Observation::Kind::EnvelopePhase, index, before);
   if (voice.envelope.phase == Phase::Stopped)
   {
     stopVoice(voice);
@@ -127,11 +241,45 @@ std::int16_t SPU2Controller::advanceVoice(std::size_t index) noexcept
   return sample;
 }
 
-bool SPU2Controller::hasLiveVoices() const noexcept
+bool SPU2Controller::isVoiceActive(std::size_t index) const noexcept
 {
+  return voices[index].envelope.phase != Phase::Stopped ||
+    (pendingKeyOn[index / VOICE_COUNT_PER_CORE] &
+      (std::uint32_t{1} << (index % VOICE_COUNT_PER_CORE))) != 0;
+}
+
+bool SPU2Controller::hasActiveVoices() const noexcept
+{
+  for (const auto pending : pendingKeyOn)
+    if (pending != 0)
+      return true;
   return std::any_of(voices.begin(), voices.end(), [](const VoiceState &voice) {
     return voice.envelope.phase != Phase::Stopped;
   });
+}
+
+bool SPU2Controller::hasValidCommandState() const noexcept
+{
+  for (std::size_t core = 0; core < CORE_COUNT; ++core)
+  {
+    if (pendingKeyOn[core] > 0xffffff || pendingKeyOff[core] > 0xffffff)
+      return false;
+    for (std::size_t half = 0; half < 2; ++half)
+    {
+      const auto index = core * 2 + half;
+      const auto mask = half == 0 ? 0xffffu : 0xff0000u;
+      const auto on = pendingKeyOn[core] & mask;
+      const auto off = pendingKeyOff[core] & mask;
+      if ((on != 0 && on != commandHalf(index, keyOnImages[index])) ||
+          (off != 0 && off != commandHalf(index, keyOffImages[index])))
+        return false;
+    }
+    for (std::size_t voice = 0; voice < VOICE_COUNT_PER_CORE; ++voice)
+      if ((pendingKeyOn[core] & (std::uint32_t{1} << voice)) != 0 &&
+          !hasSupportedVoiceMode(core * VOICE_COUNT_PER_CORE + voice))
+        return false;
+  }
+  return true;
 }
 
 bool SPU2Controller::hasSupportedVoiceMode(std::size_t index) const noexcept

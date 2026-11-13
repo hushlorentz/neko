@@ -91,7 +91,38 @@ def reject_constant(value):
 
 def validate_spu_event(record):
     beat_event = record["subsystem"] == 16 and record["event_type"] == 20
-    input_event = record["subsystem"] == 16 and record["event_type"] == 1
+    state_event = record["subsystem"] == 16 and record["event_type"] == 1
+    voice_event = state_event and bool(record["values"][0] & (1 << 32))
+    input_event = state_event and not voice_event
+    command_event = record["subsystem"] == 16 and record["event_type"] == 24
+    for key, expected in (("spu_command", command_event), ("spu_voice", voice_event)):
+        if not expected:
+            if key in record:
+                raise ValueError(f"{key} requires its SPU2 event identity")
+            continue
+        decoded = require(record, key, dict)
+        if uint(decoded.get("core"), f"{key}.core", 8) > 1:
+            raise ValueError(f"{key} has invalid core")
+        if uint(decoded.get("sample_position"), f"{key}.sample_position", 16) >= 512:
+            raise ValueError(f"{key} has invalid sample position")
+        if key == "spu_command":
+            if (decoded.keys() != {"core", "command", "mask", "sample_position"} or
+                    decoded["command"] not in ("kon", "koff") or
+                    uint(decoded["mask"], "spu_command.mask", 24) == 0):
+                raise ValueError("spu_command has invalid fields")
+        else:
+            if decoded.keys() != {"core", "voice", "reason", "phase_before",
+                                  "phase_after", "level_before", "level_after",
+                                  "sample_position"}:
+                raise ValueError("spu_voice has invalid fields")
+            if (uint(decoded["voice"], "spu_voice.voice", 8) >= 24 or
+                    decoded["reason"] not in ("kon", "koff", "endpoint",
+                                              "envelope_phase", "envelope_zero")):
+                raise ValueError("spu_voice has invalid voice or reason")
+            for side in ("before", "after"):
+                if uint(decoded[f"phase_{side}"], f"spu_voice.phase_{side}", 8) > 4:
+                    raise ValueError("spu_voice has invalid envelope phase")
+                uint(decoded[f"level_{side}"], f"spu_voice.level_{side}", 15)
     for key, expected in (("spu_dma", beat_event), ("spu_input", input_event)):
         if not expected:
             if key in record:
@@ -490,7 +521,10 @@ def describe_event(index, event):
         if event["event_type"] == 20:
             row["spu_dma"] = readable(event["spu_dma"])
         elif event["event_type"] == 1:
-            row["spu_input"] = event["spu_input"]
+            key = "spu_voice" if event["values"][0] & (1 << 32) else "spu_input"
+            row[key] = event[key]
+        elif event["event_type"] == 24:
+            row["spu_command"] = event["spu_command"]
     if event["subsystem"] == 17:
         row["subsystem_name"] = "sio2"
         if event["event_type"] == 20:

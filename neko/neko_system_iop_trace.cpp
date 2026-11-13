@@ -84,7 +84,7 @@ void NekoSystem::publishFailureProbe(
       ? spu2ControllerComponent.observations[spu].sequence : absent;
     if (spuSequence < cpuSequence && spuSequence < transferSequence)
     {
-      publishSPUInputTrace(cycle, spu2ControllerComponent.observations[spu++]);
+      publishSPUTrace(cycle, spu2ControllerComponent.observations[spu++]);
     }
     else if (cpuSequence < transferSequence)
     {
@@ -138,7 +138,7 @@ void NekoSystem::publishIOPDeviceTrace(
         spuSequence < interruptSequence && spuSequence < sifSequence &&
         spuSequence < dmaSequence && spuSequence < cdvdSequence)
     {
-      publishSPUInputTrace(cycle, spu2ControllerComponent.observations[spuIndex++]);
+      publishSPUTrace(cycle, spu2ControllerComponent.observations[spuIndex++]);
     }
     else if (cdvdSequence < cpuSequence && cdvdSequence < timerSequence &&
         cdvdSequence < interruptSequence && cdvdSequence < sifSequence &&
@@ -174,20 +174,52 @@ void NekoSystem::publishIOPDeviceTrace(
   }
 }
 
-void NekoSystem::publishSPUInputTrace(
+void NekoSystem::publishSPUTrace(
   std::uint64_t cycle, const SPU2Controller::Observation &observation)
 {
-  const auto state = [](const SPU2InputWriteState &value)
+  using Kind = SPU2Controller::Observation::Kind;
+  NekoTraceEvent event;
+  if (observation.kind == Kind::KeyOffConsumed || observation.kind == Kind::KeyOnConsumed)
   {
-    return NekoSPUTrace::InputState{value.selected, value.writeOpen, value.requested,
-      value.fillHalf, value.readHalf, value.fillWords};
-  };
-  NekoSPUTrace::InputTransition transition;
-  transition.core = observation.core;
-  transition.channel = observation.core == 0 ? 4 : 7;
-  transition.before = state(observation.before);
-  transition.after = state(observation.after);
-  const auto event = nekoSPUInputEvent(transition);
+    event = nekoSPUCommandEvent({observation.core,
+      observation.kind == Kind::KeyOffConsumed ? NekoSPUTrace::CommandKind::KeyOff
+        : NekoSPUTrace::CommandKind::KeyOn,
+      observation.mask, observation.samplePosition});
+  }
+  else if (observation.kind != Kind::Input)
+  {
+    using Reason = NekoSPUTrace::VoiceReason;
+    const auto reason = [&]()
+    {
+      switch (observation.kind)
+      {
+        case Kind::KeyOn: return Reason::KeyOn;
+        case Kind::KeyOff: return Reason::KeyOff;
+        case Kind::Endpoint: return Reason::Endpoint;
+        case Kind::EnvelopePhase: return Reason::EnvelopePhase;
+        case Kind::EnvelopeZero: return Reason::EnvelopeZero;
+        default: throw std::logic_error("Unknown SPU2 voice transition.");
+      }
+    };
+    event = nekoSPUVoiceEvent({observation.core, observation.voice, reason(),
+      static_cast<std::uint8_t>(observation.beforePhase),
+      static_cast<std::uint8_t>(observation.afterPhase),
+      observation.beforeLevel, observation.afterLevel, observation.samplePosition});
+  }
+  else
+  {
+    const auto state = [](const SPU2InputWriteState &value)
+    {
+      return NekoSPUTrace::InputState{value.selected, value.writeOpen, value.requested,
+        value.fillHalf, value.readHalf, value.fillWords};
+    };
+    NekoSPUTrace::InputTransition transition;
+    transition.core = observation.core;
+    transition.channel = observation.core == 0 ? 4 : 7;
+    transition.before = state(observation.before);
+    transition.after = state(observation.after);
+    event = nekoSPUInputEvent(transition);
+  }
   appendTrace(cycle, event.subsystem, event.type,
     event.value0, event.value1, event.value2, event.value3);
 }

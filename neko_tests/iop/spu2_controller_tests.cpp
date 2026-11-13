@@ -191,6 +191,14 @@ namespace
   constexpr std::array<IOPAddress, 2> keyOffHighAddresses = {{
     0x1f9001a6, 0x1f9005a6
   }};
+
+  void writeAndCancelKeyOff(IOPBus &bus, IOPAddress address)
+  {
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0xffff);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+  }
   struct HalfwordProgramming
   {
     IOPAddress address;
@@ -1360,7 +1368,7 @@ TEST_CASE("SPU2 effect end addresses retain raw high halfwords without active ef
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   }
   for (const auto address : autoDMAAddresses)
   {
@@ -1465,7 +1473,7 @@ TEST_CASE("SPU2 effect and input volumes retain full halfwords without active ef
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   }
   for (const auto address : autoDMAAddresses)
   {
@@ -1564,7 +1572,7 @@ TEST_CASE("SPU2 main mix retains independent raw halfwords without active effect
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   }
   for (const auto address : autoDMAAddresses)
   {
@@ -1665,7 +1673,7 @@ TEST_CASE("SPU2 voice mix retains independent raw halfwords without active effec
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   }
   for (const auto address : autoDMAAddresses)
   {
@@ -1766,7 +1774,7 @@ TEST_CASE("SPU2 voice modes retain raw masks without input or voice effects",
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   }
   REQUIRE(system.iopStateHash() == inactive);
   system.runMasterCycles(80);
@@ -1789,7 +1797,7 @@ TEST_CASE("SPU2 voice modes retain raw masks without input or voice effects",
   }
 }
 
-TEST_CASE("SPU2 inactive key-off accepts all masks without programming or signals",
+TEST_CASE("SPU2 inactive key-off retains every mask without changing other programming or signals",
   "[iop][spu2][spu2-koff]")
 {
   NekoSystem system;
@@ -1814,13 +1822,15 @@ TEST_CASE("SPU2 inactive key-off accepts all masks without programming or signal
       for (std::uint32_t value = 0; value <= 0xffff; ++value)
       {
         if (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
-            IOPBusStatus::Completed)
+            IOPBusStatus::Completed || bus.read16(address).value != value)
         {
           FAIL("Inactive key-off mask rejected: " << value);
         }
       }
       REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
-      REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(address).value == 0xffff);
+      REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
       REQUIRE(system.iopStateHash() == before);
     }
     for (const auto address : coreStatusAddresses)
@@ -1845,11 +1855,12 @@ TEST_CASE("SPU2 inactive key-off accepts all masks without programming or signal
   for (const auto address : addresses)
   {
     REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
-    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0xffff);
   }
 }
 
-TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports",
+TEST_CASE("SPU2 key-off rejects unsupported neighbors widths and other transports",
   "[iop][spu2][spu2-koff]")
 {
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
@@ -1861,9 +1872,10 @@ TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports
     programConfiguration(system);
     programMasterVolumes(system);
     programTransferStartAddresses(system);
-    const auto before = system.iopStateHash();
     REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
-    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0xffff);
+    const auto before = system.iopStateHash();
     for (const auto byteAddress : {address, address + 1})
     {
       REQUIRE(bus.read8(byteAddress).status == IOPBusStatus::Unmapped);
@@ -1890,8 +1902,7 @@ TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports
       IOPBusStatus::Unmapped);
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
     const auto coreBase = address & ~IOPAddress(0x3ff);
-    for (IOPAddress offset : {0xau, 0xcu, 0x19cu, 0x19eu,
-        0x1a0u, 0x1a2u, 0x1aeu, 0x340u, 0x342u})
+    for (IOPAddress offset : {0xcu, 0x19cu, 0x19eu, 0x1aeu})
     {
       REQUIRE(bus.read16(coreBase + offset).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write16(coreBase + offset, 0xffff).status == IOPBusStatus::Unmapped);
@@ -2007,7 +2018,7 @@ TEST_CASE("SPU2 inactive status excludes writes neighbors and non-CPU transports
     REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
       IOPBusStatus::Unmapped);
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
-    for (IOPAddress other : {address - 0x10, address - 4, address - 2,
+    for (IOPAddress other : {address - 0x10,
         address + 2, address + 0x800,
         address | 0x80000000u, address | 0xa0000000u})
     {
@@ -3219,8 +3230,7 @@ TEST_CASE("SPU2 output control retains every image without signals or other prog
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   {
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
-    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    writeAndCancelKeyOff(bus, address);
   }
   REQUIRE(system.iopStateHash() == before);
   system.runMasterCycles(80);
@@ -3393,15 +3403,15 @@ TEST_CASE("SPU2 fixed voice volumes exclude other fields widths and transports",
     REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
     if (index % 2 == 0)
     {
-      for (IOPAddress offset = 0xa; offset < 0x10; offset += 2)
+      for (IOPAddress offset = 0xc; offset < 0x10; offset += 2)
       {
         REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
         REQUIRE(bus.write16(address + offset, 0).status == IOPBusStatus::Unmapped);
       }
     }
   }
-  for (IOPAddress address : {0x1f90017cu, 0x1f90017au, 0x1f90057cu,
-      0x1f90057au, 0x1f801c00u, 0x1f801c02u})
+  for (IOPAddress address : {0x1f90017cu, 0x1f90057cu,
+      0x1f801c00u, 0x1f801c02u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
@@ -3432,13 +3442,14 @@ TEST_CASE("SPU2 fixed voice volumes preserve PCM PIO key-off and pending signals
   programVoiceVolumes(system);
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (auto address : addresses)
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   for (std::size_t index = 0; index < voiceVolumeCount; ++index)
   {
     REQUIRE(bus.read16(voiceVolumeAddress(index)).value == voiceVolumeValue(index));
     REQUIRE(bus.write16(voiceVolumeAddress(index), 0).status == IOPBusStatus::Completed);
   }
-  REQUIRE(system.saveState() == before);
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
   programVoiceVolumes(system);
   SPU2InputTest::advanceSamples(spu, 1);
   for (std::size_t core = 0; core < 2; ++core)
@@ -3691,7 +3702,8 @@ TEST_CASE("SPU2 voice pitches exclude other fields widths and transports",
     REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
     for (IOPAddress offset = 6; offset < 0xc; offset += 2)
     {
-      REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(address + offset).status ==
+        (offset == 6 ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
       REQUIRE(bus.write16(address + offset, 0).status == IOPBusStatus::Unmapped);
     }
   }
@@ -3733,13 +3745,14 @@ TEST_CASE("SPU2 voice pitches preserve programming PCM PIO key-off and pending s
   programVoicePitches(system);
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (auto address : addresses)
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   for (std::size_t index = 0; index < voicePitchCount; ++index)
   {
     REQUIRE(bus.read16(voicePitchAddress(index)).value == voicePitchValue(index));
     REQUIRE(bus.write16(voicePitchAddress(index), 0).status == IOPBusStatus::Completed);
   }
-  REQUIRE(system.saveState() == before);
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
   programVoicePitches(system);
   SPU2InputTest::advanceSamples(spu, 1);
   for (std::size_t core = 0; core < 2; ++core)
@@ -4001,9 +4014,9 @@ TEST_CASE("SPU2 SSA excludes loop current fields widths and non-CPU transports",
     REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
     if (index % 2 == 0)
     {
-      for (IOPAddress offset : {4u, 6u, 8u, 10u})
+      for (IOPAddress offset : {8u, 10u})
       {
-        REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Completed);
         REQUIRE(bus.write16(address + offset, 0).status == IOPBusStatus::Unmapped);
       }
     }
@@ -4051,13 +4064,14 @@ TEST_CASE("SPU2 SSA preserves PCM PIO programming and unstarted key-off lifecycl
   programVoiceStartAddresses(system);
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (auto address : addresses)
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   for (std::size_t index = 0; index < voiceStartAddressCount; ++index)
   {
     REQUIRE(bus.read16(voiceStartAddress(index)).value == voiceStartValue(index));
     REQUIRE(bus.write16(voiceStartAddress(index), 0).status == IOPBusStatus::Completed);
   }
-  REQUIRE(system.saveState() == before);
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
   programVoiceStartAddresses(system);
   SPU2InputTest::advanceSamples(spu, 1);
   for (std::size_t core = 0; core < 2; ++core)
@@ -4320,13 +4334,13 @@ TEST_CASE("SPU2 ADSR controls exclude current values widths and transports",
     {
       for (IOPAddress offset : {2u, 4u, 6u})
       {
-        REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.read16(address + offset).status ==
+          (offset == 2 ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
         REQUIRE(bus.write16(address + offset, 0).status == IOPBusStatus::Unmapped);
       }
     }
   }
   for (IOPAddress address : {0x1f9001b4u, 0x1f9005b4u,
-      0x1f9001c4u, 0x1f9001c8u, 0x1f9005c4u, 0x1f9005c8u,
       0x1f801c06u, 0x1f801c08u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
@@ -4366,13 +4380,14 @@ TEST_CASE("SPU2 ADSR programming preserves PCM PIO key-off and pending signals",
   programVoiceADSR(system);
   for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
   for (auto address : addresses)
-    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    writeAndCancelKeyOff(bus, address);
   for (std::size_t index = 0; index < voiceADSRCount; ++index)
   {
     REQUIRE(bus.read16(voiceADSRAddress(index)).value == voiceADSRValue(index));
     REQUIRE(bus.write16(voiceADSRAddress(index), 0).status == IOPBusStatus::Completed);
   }
-  REQUIRE(system.saveState() == before);
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
   programVoiceADSR(system);
   SPU2InputTest::advanceSamples(spu, 1);
   for (std::size_t core = 0; core < 2; ++core)
@@ -4606,12 +4621,12 @@ TEST_CASE("SPU2 configuration excludes neighbors widths and non-CPU transports",
       0x1f9007ceu, 0x1f9007d0u, 0x1f9003c6u, 0x1f90075eu,
       0x1f900770u, 0x1f900772u, 0x1f900774u, 0x1f900786u,
       0x1f900798u, 0x1f90079au, 0x1f90079cu,
-      0x1f90033au, 0x1f90033eu, 0x1f900340u, 0x1f900342u,
-      0x1f90073au, 0x1f90073eu, 0x1f900740u, 0x1f900742u,
+      0x1f90033au, 0x1f90033eu,
+      0x1f90073au, 0x1f90073eu,
       0x1f9002e0u, 0x1f9002e2u, 0x1f9006e0u, 0x1f9006e2u,
       0x1f90017eu, 0x1f90057eu,
-      0x1f90019cu, 0x1f90019eu, 0x1f9001a0u, 0x1f9001a2u,
-      0x1f90059cu, 0x1f90059eu, 0x1f9005a0u, 0x1f9005a2u,
+      0x1f90019cu, 0x1f90019eu,
+      0x1f90059cu, 0x1f90059eu,
       0x1f9001aeu, 0x1f9005aeu})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);

@@ -3947,7 +3947,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Integrate voice capture, dry/wet mix captures and core0-to-core1 output
       through shared sound RAM; cover live-control admission, existing PCM/DMA
       ordering and restored continuation without adding host audio.
-- [ ] Admit approved KON/KOFF, supported live-register accesses and sparse
+- [x] Admit approved KON/KOFF, supported live-register accesses and sparse
       lifecycle tracing only after execution dependencies pass; replace inactive-only
       key-off, separate command images/pending work and reject unsupported modes.
 - [ ] Complete authored CPU/bus, sample-boundary, reset and persistence

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <exception>
 #include <stdexcept>
 
 namespace
@@ -41,6 +42,10 @@ void SPU2Controller::reset() noexcept
   voiceStartAddresses.fill(0);
   voices = {};
   voiceEndMasks.fill(0xffffff);
+  keyOnImages.fill(0);
+  keyOffImages.fill(0);
+  pendingKeyOn.fill(0);
+  pendingKeyOff.fill(0);
   coreAttributes.fill(0);
   voiceMix.fill(0);
   mainMix.fill(0);
@@ -102,6 +107,7 @@ SPU2SampleTick SPU2Controller::advanceSampleClock() noexcept
   }
   for (std::size_t core = 0; core < CORE_COUNT; ++core)
   {
+    consumeCommands(core);
     const auto mix = renderVoiceMix(core);
     const auto output = renderCoreOutput(core, mix, result.samples[core]);
     result.outputs[core] = output;
@@ -158,6 +164,42 @@ void SPU2Controller::clearObservations() noexcept
   observationCount = 0;
 }
 
+SPU2Controller::Observation &SPU2Controller::appendObservation(
+  Observation::Kind kind, std::size_t core) noexcept
+{
+  assert(observationsEnabled && observationCount < observations.size());
+  if (!observationsEnabled || observationCount >= observations.size())
+    std::terminate();
+  auto &event = observations[observationCount];
+  event = {};
+  event.kind = kind;
+  event.core = static_cast<std::uint8_t>(core);
+  event.samplePosition = inputReadPosition;
+  event.sequence = observationOrder != nullptr ? observationOrder->next++ : observationCount;
+  ++observationCount;
+  return event;
+}
+
+void SPU2Controller::recordCommand(
+  Observation::Kind kind, std::size_t core, std::uint32_t mask) noexcept
+{
+  if (observationsEnabled && mask != 0)
+    appendObservation(kind, core).mask = mask;
+}
+
+void SPU2Controller::recordVoice(Observation::Kind kind, std::size_t index,
+  const SPU2Envelope::State &before) noexcept
+{
+  if (!observationsEnabled)
+    return;
+  auto &event = appendObservation(kind, index / VOICE_COUNT_PER_CORE);
+  event.voice = static_cast<std::uint8_t>(index % VOICE_COUNT_PER_CORE);
+  event.beforePhase = before.phase;
+  event.beforeLevel = before.level;
+  event.afterPhase = voices[index].envelope.phase;
+  event.afterLevel = voices[index].envelope.level;
+}
+
 void SPU2Controller::recordInputState(
   std::size_t core, const SPU2InputWriteState &before) noexcept
 {
@@ -173,11 +215,9 @@ void SPU2Controller::recordInputState(
   {
     return;
   }
-  assert(observationCount < observations.size());
-  auto &event = observations[observationCount];
-  event = {static_cast<std::uint8_t>(core), before, after,
-    observationOrder != nullptr ? observationOrder->next++ : observationCount};
-  ++observationCount;
+  auto &event = appendObservation(Observation::Kind::Input, core);
+  event.before = before;
+  event.after = after;
 }
 
 bool SPU2Controller::inputWriteRequested(std::size_t core) const
@@ -351,7 +391,7 @@ std::uint16_t SPU2Controller::readVoiceStartAddress(std::size_t index) const
 bool SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t value)
 {
   auto &address = voiceStartAddresses.at(index);
-  if (voices[index / 2].envelope.phase != SPU2Envelope::Phase::Stopped)
+  if (isVoiceActive(index / 2))
     return false;
   address = static_cast<std::uint16_t>(value & voiceStartAddressMask(index));
   return true;
@@ -393,8 +433,8 @@ bool SPU2Controller::writeVoiceModeMask(std::size_t index, std::uint16_t value)
   for (std::size_t voice = first; voice < std::min(first + 16, VOICE_COUNT_PER_CORE); ++voice)
   {
     if ((value & (1u << (voice - first))) != 0 &&
-        voices[core * VOICE_COUNT_PER_CORE + voice].envelope.phase !=
-          SPU2Envelope::Phase::Stopped && !(index % 4 == 0 && voice == 0))
+        isVoiceActive(core * VOICE_COUNT_PER_CORE + voice) &&
+        !(index % 4 == 0 && voice == 0))
       return false;
   }
   mask = value;
@@ -473,7 +513,7 @@ bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 SPU2ReadResult SPU2Controller::readCoreStatus(std::size_t core) const
 {
   const auto mode = coreAttributes.at(core) & 0x30;
-  if (hasLiveVoices())
+  if (hasActiveVoices())
     return {};
   if (mode == 0 && hasInactiveInput(core))
   {
@@ -501,12 +541,6 @@ bool SPU2Controller::hasInactiveInputs() const
     }
   }
   return true;
-}
-
-bool SPU2Controller::keyOffUnstartedVoices() const noexcept
-{
-  // Command consumption is not admitted until capture/mixing integration passes.
-  return !hasLiveVoices();
 }
 
 bool SPU2Controller::isSupportedAutoDMAWriteSelection(

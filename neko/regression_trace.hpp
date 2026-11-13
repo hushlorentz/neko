@@ -157,6 +157,28 @@ namespace NekoSPUTrace
     InputState before;
     InputState after;
   };
+  enum class CommandKind : std::uint8_t { KeyOff, KeyOn };
+  enum class VoiceReason : std::uint8_t { KeyOn, KeyOff, Endpoint, EnvelopePhase, EnvelopeZero };
+  struct Command
+  {
+    std::uint8_t core = 0;
+    CommandKind kind = CommandKind::KeyOff;
+    std::uint32_t mask = 0;
+    std::uint16_t samplePosition = 0;
+  };
+  struct VoiceTransition
+  {
+    std::uint8_t core = 0;
+    std::uint8_t voice = 0;
+    VoiceReason reason = VoiceReason::KeyOn;
+    // SPU2 envelope phases: stopped0, attack1, decay2, sustain3, release4.
+    std::uint8_t beforePhase = 0;
+    std::uint8_t afterPhase = 0;
+    std::uint16_t beforeLevel = 0;
+    std::uint16_t afterLevel = 0;
+    std::uint16_t samplePosition = 0;
+  };
+  constexpr std::uint64_t VOICE_TRANSITION = UINT64_C(1) << 32;
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
 }
 
@@ -576,13 +598,24 @@ class NekoTraceObserver
 //   Only active enabled candidates are observed. Identical waits are suppressed
 //   within an observation session; a new session may report an already-blocked
 //   candidate once. Inspection/host setup emits nothing.
-// SPU2/StateChanged: channel | core << 8, before/after input snapshots, zero.
+// SPU2/StateChanged with value0 bit32 clear: channel | core << 8,
+//   before/after input snapshots, zero. This original input encoding is unchanged.
 //   Snapshot: writeOpen bit0, selected bit1, requested bit2, fillHalf << 8,
 //   readHalf << 16, fillWords << 32. Only selection/open/request/buffer changes
 //   emit, not individual samples or ordinary partial-fill words. Input changes
 //   share the IOP mutation sequence; beat reservations precede their resulting
 //   buffer/completion changes, and both precede resulting INTC/CPU records.
 //   Observation journals and wait suppression are not saved hardware state.
+// SPU2/CommandCompleted: core | command << 8 (KOFF0/KON1), consumed24 mask,
+//   old shared sample-ring position (0..511), zero. Nonempty KOFF is consumed
+//   before KON, per core, before that core's source/capture work.
+// SPU2/StateChanged with value0 bit32 set: bit32 | core | voice << 8 |
+//   reason << 16, before phase | level << 8, after phase | level << 8,
+//   old shared sample-ring position. Phases: stopped/attack/decay/sustain/
+//   release=0..4; reasons: KON/KOFF/endpoint/envelope-phase/envelope-zero=0..4.
+//   KON/retrigger and live KOFF (including repeated release) always emit.
+//   Endpoints emit even when repeating; nonrepeat stop emits no extra
+//   envelope-zero event. Ordinary per-sample level changes do not emit.
 //
 // SIO2/DMABeat: channel (11) | outcome << 8 | source bus status << 16,
 //   physical source address low32 | actual source word high32,
@@ -613,6 +646,10 @@ NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event);
 NekoTraceEvent nekoSPUInputEvent(
   const NekoSPUTrace::InputTransition &transition) noexcept;
 NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event);
+NekoTraceEvent nekoSPUCommandEvent(const NekoSPUTrace::Command &command) noexcept;
+NekoSPUTrace::Command nekoDecodeSPUCommand(const NekoTraceEvent &event);
+NekoTraceEvent nekoSPUVoiceEvent(const NekoSPUTrace::VoiceTransition &transition) noexcept;
+NekoSPUTrace::VoiceTransition nekoDecodeSPUVoice(const NekoTraceEvent &event);
 NekoTraceEvent nekoSIO2DMABeatEvent(const NekoSIO2Trace::Beat &beat) noexcept;
 NekoSIO2Trace::Beat nekoDecodeSIO2DMABeat(const NekoTraceEvent &event);
 

@@ -589,8 +589,12 @@ void writeStartupTraceEventFields(
      event.type == NekoTraceEventType::CommandCompleted);
   const bool spuBeat = event.subsystem == NekoTraceSubsystem::SPU2 &&
     event.type == NekoTraceEventType::DMABeat;
-  const bool spuInput = event.subsystem == NekoTraceSubsystem::SPU2 &&
+  const bool spuState = event.subsystem == NekoTraceSubsystem::SPU2 &&
     event.type == NekoTraceEventType::StateChanged;
+  const bool spuVoice = spuState && (event.value0 & NekoSPUTrace::VOICE_TRANSITION) != 0;
+  const bool spuInput = spuState && !spuVoice;
+  const bool spuCommand = event.subsystem == NekoTraceSubsystem::SPU2 &&
+    event.type == NekoTraceEventType::CommandCompleted;
   const bool sio2Beat = event.subsystem == NekoTraceSubsystem::SIO2 &&
     event.type == NekoTraceEventType::DMABeat;
   NekoSIO2Trace::Beat sio2;
@@ -602,6 +606,12 @@ void writeStartupTraceEventFields(
     beat = nekoDecodeSPUDMABeat(event);
   if (spuInput)
     transition = nekoDecodeSPUInput(event);
+  NekoSPUTrace::VoiceTransition voice;
+  NekoSPUTrace::Command spu;
+  if (spuVoice)
+    voice = nekoDecodeSPUVoice(event);
+  if (spuCommand)
+    spu = nekoDecodeSPUCommand(event);
   NekoCDVDTrace::Command command;
   const char *transport = nullptr;
   const char *before = nullptr;
@@ -666,6 +676,24 @@ void writeStartupTraceEventFields(
     output << ",\"after\":";
     state(transition.after);
     output << '}';
+  }
+  if (spuCommand)
+  {
+    output << ",\"spu_command\":{\"core\":" << static_cast<unsigned>(spu.core)
+      << ",\"command\":\"" << (spu.kind == NekoSPUTrace::CommandKind::KeyOn ? "kon" : "koff")
+      << "\",\"mask\":" << spu.mask << ",\"sample_position\":" << spu.samplePosition << '}';
+  }
+  if (spuVoice)
+  {
+    const char *const reasons[] = {"kon", "koff", "endpoint", "envelope_phase", "envelope_zero"};
+    output << ",\"spu_voice\":{\"core\":" << static_cast<unsigned>(voice.core)
+      << ",\"voice\":" << static_cast<unsigned>(voice.voice)
+      << ",\"reason\":\"" << reasons[static_cast<std::uint8_t>(voice.reason)]
+      << "\",\"phase_before\":" << static_cast<unsigned>(voice.beforePhase)
+      << ",\"phase_after\":" << static_cast<unsigned>(voice.afterPhase)
+      << ",\"level_before\":" << voice.beforeLevel
+      << ",\"level_after\":" << voice.afterLevel
+      << ",\"sample_position\":" << voice.samplePosition << '}';
   }
 }
 

@@ -376,7 +376,7 @@ class NekoSystem
     void publishFailureProbe(std::uint64_t cycle, const DMAObservations &dma);
     void publishIOPDeviceTrace(
       std::uint64_t cycle, const DMAObservations &dma);
-    void publishSPUInputTrace(
+    void publishSPUTrace(
       std::uint64_t cycle, const SPU2Controller::Observation &event);
     void publishCDVDTrace(
       std::uint64_t cycle, const CDVDController::Observation &event);

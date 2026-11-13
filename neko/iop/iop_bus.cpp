@@ -78,6 +78,12 @@ namespace
   constexpr std::array<IOPAddress, 4> spu2KeyOffAddresses = {{
     0x1f9001a4, 0x1f9001a6, 0x1f9005a4, 0x1f9005a6
   }};
+  constexpr std::array<IOPAddress, 4> spu2KeyOnAddresses = {{
+    0x1f9001a0, 0x1f9001a2, 0x1f9005a0, 0x1f9005a2
+  }};
+  constexpr std::array<IOPAddress, 4> spu2EndAddresses = {{
+    0x1f900340, 0x1f900342, 0x1f900740, 0x1f900742
+  }};
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca, 0x1f9007c0
@@ -435,6 +441,8 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         return {IOPBusRegion::Mmio, index * 2 + (field - 6) / 2,
           Device::SPU2VoiceADSRControl};
       }
+      if (field == 0xa)
+        return {IOPBusRegion::Mmio, index, Device::SPU2VoiceEnvelope};
     }
   }
   if (first >= spu2VoiceAddressBase &&
@@ -445,10 +453,12 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     const auto voice = (offset % spu2CoreStride) / spu2VoiceAddressStride;
     const auto field = (offset % spu2CoreStride) % spu2VoiceAddressStride;
     if (voice < SPU2Controller::VOICE_COUNT_PER_CORE &&
-        (field == 0 || field == 2) && last < first + sizeof(std::uint16_t))
+        field % 2 == 0 && last < first + sizeof(std::uint16_t))
     {
       const auto index = core * SPU2Controller::VOICE_COUNT_PER_CORE + voice;
-      return {IOPBusRegion::Mmio, index * 2 + field / 2, Device::SPU2VoiceStartAddress};
+      const auto device = field < 4 ? Device::SPU2VoiceStartAddress :
+        field < 8 ? Device::SPU2VoiceLoopAddress : Device::SPU2VoiceNextAddress;
+      return {IOPBusRegion::Mmio, index * 2 + (field % 4) / 2, device};
     }
   }
   for (std::size_t core = 0; core < spu2CoreAttributeAddresses.size(); ++core)
@@ -525,13 +535,17 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio, core, Device::SPU2CoreStatus};
     }
   }
-  for (const auto keyOffAddress : spu2KeyOffAddresses)
+  for (std::size_t index = 0; index < spu2KeyOffAddresses.size(); ++index)
   {
-    if (first == keyOffAddress &&
+    if (first == spu2KeyOffAddresses[index] &&
         last < first + sizeof(std::uint16_t))
     {
-      return {IOPBusRegion::Mmio, 0, Device::SPU2UnstartedKeyOff};
+      return {IOPBusRegion::Mmio, index, Device::SPU2KeyOff};
     }
+    if (first == spu2KeyOnAddresses[index] && last < first + sizeof(std::uint16_t))
+      return {IOPBusRegion::Mmio, index, Device::SPU2KeyOn};
+    if (first == spu2EndAddresses[index] && last < first + sizeof(std::uint16_t))
+      return {IOPBusRegion::Mmio, index, Device::SPU2VoiceEndMask};
   }
   for (std::size_t core = 0; core < spu2AutoDMAAddresses.size(); ++core)
   {
@@ -958,6 +972,34 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readVoiceStartAddress(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoiceLoopAddress:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceLoopAddress(location.offset)} : IOPBusReadResult{};
+    case Device::SPU2VoiceNextAddress:
+      if (width == sizeof(std::uint16_t) && spu2 != nullptr)
+      {
+        const auto result = spu2->readVoiceNextAddress(location.offset);
+        if (result.status == SPU2AccessStatus::Accepted)
+          return {IOPBusStatus::Completed, result.value};
+      }
+      return {};
+    case Device::SPU2VoiceEnvelope:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceEnvelope(location.offset)} : IOPBusReadResult{};
+    case Device::SPU2VoiceEndMask:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceEndMask(location.offset)} : IOPBusReadResult{};
+    case Device::SPU2KeyOn:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readKeyOn(location.offset)} : IOPBusReadResult{};
+    case Device::SPU2KeyOff:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readKeyOff(location.offset)} : IOPBusReadResult{};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1146,7 +1188,6 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
     case Device::SPU2TransferData:
-    case Device::SPU2UnstartedKeyOff:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
     case Device::POST3:
@@ -1262,12 +1303,19 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeCoreAttribute(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
-    case Device::SPU2UnstartedKeyOff:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
-          !spu2->keyOffUnstartedVoices())
-      {
+    case Device::SPU2VoiceLoopAddress:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
         return {};
-      }
+      spu2->writeVoiceLoopAddressHalfword(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2KeyOn:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeKeyOn(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPU2KeyOff:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+        return {};
+      spu2->writeKeyOff(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2AutoDMAWriteSelection:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
@@ -1477,6 +1525,9 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2CoreStatus:
+    case Device::SPU2VoiceNextAddress:
+    case Device::SPU2VoiceEnvelope:
+    case Device::SPU2VoiceEndMask:
     case Device::DEV9Revision:
     case Device::AbsentROM1:
     case Device::None:

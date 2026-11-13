@@ -343,6 +343,40 @@ TEST_CASE("Startup SPU trace and capture exports retain typed positions and raw 
   }
 }
 
+TEST_CASE("Startup SPU command and lifecycle traces preserve typed and raw payloads",
+  "[startup-diagnostics][spu-diagnostics]")
+{
+  const auto command = nekoSPUCommandEvent({1, NekoSPUTrace::CommandKind::KeyOn, 0x800001, 511});
+  const auto voice = nekoSPUVoiceEvent({1, 23, NekoSPUTrace::VoiceReason::KeyOff,
+    3, 4, 0x7fff, 0x7fff, 511});
+  std::ostringstream output;
+  writeStartupTraceEventFields(output, command);
+  writeStartupTraceEventFields(output, voice);
+  REQUIRE(output.str().find("\"spu_command\":{\"core\":1,\"command\":\"kon\","
+    "\"mask\":8388609,\"sample_position\":511}") != std::string::npos);
+  REQUIRE(output.str().find("\"spu_voice\":{\"core\":1,\"voice\":23,\"reason\":\"koff\","
+    "\"phase_before\":3,\"phase_after\":4,\"level_before\":32767,"
+    "\"level_after\":32767,\"sample_position\":511}") != std::string::npos);
+  REQUIRE(output.str().find("\"values\":[" + std::to_string(voice.value0) + ',' +
+    std::to_string(voice.value1) + ',' + std::to_string(voice.value2) + ",511]") !=
+    std::string::npos);
+  REQUIRE_THROWS_AS(nekoDecodeSPUInput(voice), std::invalid_argument);
+  for (const auto invalid : {
+    nekoSPUCommandEvent({2, NekoSPUTrace::CommandKind::KeyOn, 1, 0}),
+    nekoSPUCommandEvent({0, NekoSPUTrace::CommandKind::KeyOff, 0, 0}),
+    nekoSPUCommandEvent({0, NekoSPUTrace::CommandKind::KeyOn, 0x1000000, 0}),
+    nekoSPUCommandEvent({0, NekoSPUTrace::CommandKind::KeyOff, 1, 512}),
+    nekoSPUVoiceEvent({0, 24, NekoSPUTrace::VoiceReason::Endpoint, 1, 0, 1, 0, 0}),
+    nekoSPUVoiceEvent({0, 0, NekoSPUTrace::VoiceReason::EnvelopeZero, 5, 0, 1, 0, 0}),
+    nekoSPUVoiceEvent({0, 0, NekoSPUTrace::VoiceReason::EnvelopePhase, 1, 2, 0x8000, 1, 0}),
+    nekoSPUVoiceEvent({0, 0, NekoSPUTrace::VoiceReason::KeyOn, 0, 1, 0, 0, 512})})
+  {
+    std::ostringstream rejected;
+    REQUIRE_THROWS_AS(writeStartupTraceEventFields(rejected, invalid), std::invalid_argument);
+    REQUIRE(rejected.str().empty());
+  }
+}
+
 TEST_CASE("Startup trace fields decode only CDVD command identities",
   "[startup-diagnostics][cdvd]")
 {

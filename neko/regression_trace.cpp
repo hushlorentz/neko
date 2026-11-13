@@ -218,7 +218,8 @@ NekoTraceEvent nekoSPUInputEvent(
 NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event)
 {
   if (event.subsystem != NekoTraceSubsystem::SPU2 ||
-      event.type != NekoTraceEventType::StateChanged)
+      event.type != NekoTraceEventType::StateChanged ||
+      (event.value0 & NekoSPUTrace::VOICE_TRANSITION) != 0)
   {
     throw std::invalid_argument("Not a SPU input transition trace event.");
   }
@@ -229,6 +230,58 @@ NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event)
   transition.before = decodeSPUInput(event.value1);
   transition.after = decodeSPUInput(event.value2);
   return transition;
+}
+
+NekoTraceEvent nekoSPUCommandEvent(const NekoSPUTrace::Command &command) noexcept
+{
+  return {0, NekoTraceSubsystem::SPU2, NekoTraceEventType::CommandCompleted,
+    command.core | (std::uint64_t{static_cast<std::uint8_t>(command.kind)} << 8),
+    command.mask, command.samplePosition, 0};
+}
+
+NekoSPUTrace::Command nekoDecodeSPUCommand(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::SPU2 ||
+      event.type != NekoTraceEventType::CommandCompleted ||
+      (event.value0 & ~UINT64_C(0x101)) != 0 ||
+      event.value1 == 0 || event.value1 > 0xffffff ||
+      event.value2 >= 512 || event.value3 != 0)
+    throw std::invalid_argument("Invalid SPU command consumption trace event.");
+  return {static_cast<std::uint8_t>(event.value0),
+    static_cast<NekoSPUTrace::CommandKind>(event.value0 >> 8),
+    static_cast<std::uint32_t>(event.value1), static_cast<std::uint16_t>(event.value2)};
+}
+
+NekoTraceEvent nekoSPUVoiceEvent(const NekoSPUTrace::VoiceTransition &transition) noexcept
+{
+  return {0, NekoTraceSubsystem::SPU2, NekoTraceEventType::StateChanged,
+    NekoSPUTrace::VOICE_TRANSITION | transition.core |
+      (std::uint64_t{transition.voice} << 8) |
+      (std::uint64_t{static_cast<std::uint8_t>(transition.reason)} << 16),
+    transition.beforePhase | (std::uint64_t{transition.beforeLevel} << 8),
+    transition.afterPhase | (std::uint64_t{transition.afterLevel} << 8),
+    transition.samplePosition};
+}
+
+NekoSPUTrace::VoiceTransition nekoDecodeSPUVoice(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::SPU2 ||
+      event.type != NekoTraceEventType::StateChanged ||
+      (event.value0 & NekoSPUTrace::VOICE_TRANSITION) == 0 ||
+      (event.value0 & ~(NekoSPUTrace::VOICE_TRANSITION | UINT64_C(0xffffff))) != 0 ||
+      (event.value0 & 0xff) > 1 || ((event.value0 >> 8) & 0xff) >= 24 ||
+      ((event.value0 >> 16) & 0xff) > 4 ||
+      (event.value1 & 0xff) > 4 || (event.value2 & 0xff) > 4 ||
+      (event.value1 >> 8) > 0x7fff || (event.value2 >> 8) > 0x7fff ||
+      event.value3 >= 512)
+    throw std::invalid_argument("Invalid SPU voice transition trace event.");
+  return {static_cast<std::uint8_t>(event.value0),
+    static_cast<std::uint8_t>(event.value0 >> 8),
+    static_cast<NekoSPUTrace::VoiceReason>((event.value0 >> 16) & 0xff),
+    static_cast<std::uint8_t>(event.value1), static_cast<std::uint8_t>(event.value2),
+    static_cast<std::uint16_t>(event.value1 >> 8),
+    static_cast<std::uint16_t>(event.value2 >> 8),
+    static_cast<std::uint16_t>(event.value3)};
 }
 
 std::uint64_t nekoFrameHash(

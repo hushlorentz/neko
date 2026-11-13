@@ -366,8 +366,6 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       physical == 0x1f9007b8 || physical == 0x1f9007ba ||
       physical == 0x1f9007bc || physical == 0x1f9007be ||
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
-      physical == 0x1f9005a4 || physical == 0x1f9005a6 ||
       physical == 0x1f9001ac || physical == 0x1f9005ac;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
@@ -457,8 +455,6 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
       physical == 0x1f9007b8 || physical == 0x1f9007ba ||
       physical == 0x1f9007bc || physical == 0x1f9007be ||
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
-      physical == 0x1f9005a4 || physical == 0x1f9005a6 ||
       physical == 0x1f9001ac || physical == 0x1f9005ac;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
@@ -952,9 +948,11 @@ TEST_CASE("SPU2 inactive key-off bypasses cached payloads but preserves isolatio
     REQUIRE((core.status() & IOPCOP0Status::CACHE_PROBE_RESULT) != 0);
     const auto isolated = core.cache();
     IOPCacheTestAccess::setStatus(&core, swap);
-    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0);
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0xffff);
     requireUnchangedCache(core.cache(), isolated);
   }
 }

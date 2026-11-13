@@ -289,6 +289,39 @@ class InspectorTests(unittest.TestCase):
         rows[3].update(subsystem=16, event_type=1)
         self.reject(rows, "spu_input")
 
+    def test_spu_lifecycle_decoding_distinguishes_input_and_voice_state_events(self):
+        command = dict(core=1, command="kon", mask=0x800001, sample_position=511)
+        voice = dict(core=1, voice=23, reason="koff", phase_before=3, phase_after=4,
+                     level_before=32767, level_after=32767, sample_position=511)
+        for source in ("prefix", "failure_capture"):
+            rows = records() if source == "prefix" else capture_records()
+            events = rows[3:5] if source == "prefix" else rows[-2]["events"]
+            events[0].update(subsystem=16, event_type=24, spu_command=command,
+                             values=[257, 0x800001, 511, 0])
+            events[1].update(subsystem=16, event_type=1, spu_voice=voice,
+                             values=[(1 << 32) | (1 << 16) | (23 << 8) | 1,
+                                     (32767 << 8) | 3, (32767 << 8) | 4, 511])
+            self.write(self.path, rows)
+            report = self.report("events", self.path, "--source", source,
+                                 "--subsystem", "spu2")
+            self.assertEqual(report["matched_events"], 2)
+            self.assertEqual(report["events"][0]["spu_command"], command)
+            self.assertEqual(report["events"][1]["spu_voice"], voice)
+            self.assertNotIn("spu_input", report["events"][1])
+        for field, value in (("core", 2), ("voice", 24), ("reason", "ready"),
+                             ("phase_after", 5), ("level_before", 32768),
+                             ("sample_position", 512)):
+            rows = records()
+            rows[3].update(subsystem=16, event_type=1, values=[1 << 32, 0, 0, 0],
+                           spu_voice=dict(voice))
+            rows[3]["spu_voice"][field] = value
+            self.reject(rows, "spu_voice")
+        for field, value in (("command", "ready"), ("mask", 0), ("mask", 1 << 24)):
+            rows = records()
+            rows[3].update(subsystem=16, event_type=24, spu_command=dict(command))
+            rows[3]["spu_command"][field] = value
+            self.reject(rows, "spu_command")
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(dir=SCRIPT.parent)
         self.addCleanup(self.directory.cleanup)

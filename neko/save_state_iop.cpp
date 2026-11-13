@@ -444,6 +444,19 @@ void NekoSaveStateCodec::writeIOPState(
         }
       }
     }
+    {
+      auto commands = writer->scope("commands");
+      for (std::size_t core = 0; core < SPU2Controller::CORE_COUNT; ++core)
+      {
+        auto element = writer->element(core);
+        writer->writeFieldU16("keyOnLow", spu.keyOnImages[core * 2]);
+        writer->writeFieldU16("keyOnHigh", spu.keyOnImages[core * 2 + 1]);
+        writer->writeFieldU16("keyOffLow", spu.keyOffImages[core * 2]);
+        writer->writeFieldU16("keyOffHigh", spu.keyOffImages[core * 2 + 1]);
+        writer->writeFieldU32("pendingKeyOn", spu.pendingKeyOn[core]);
+        writer->writeFieldU32("pendingKeyOff", spu.pendingKeyOff[core]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -854,6 +867,21 @@ void NekoSaveStateCodec::readIOP(
         }
       }
     }
+    {
+      auto commands = reader->scope("commands");
+      for (std::size_t core = 0; core < SPU2Controller::CORE_COUNT; ++core)
+      {
+        auto element = reader->element(core);
+        spu.keyOnImages[core * 2] = reader->readFieldU16("keyOnLow");
+        spu.keyOnImages[core * 2 + 1] = reader->readFieldU16("keyOnHigh");
+        spu.keyOffImages[core * 2] = reader->readFieldU16("keyOffLow");
+        spu.keyOffImages[core * 2 + 1] = reader->readFieldU16("keyOffHigh");
+        spu.pendingKeyOn[core] = reader->readFieldU32("pendingKeyOn");
+        spu.pendingKeyOff[core] = reader->readFieldU32("pendingKeyOff");
+      }
+    }
+    reader->requireField(spu.hasValidCommandState(),
+      "SPU2 pending commands are outside the bounded profile");
     reader->requireField(spu.hasValidVoiceState(),
       "SPU2 waveform source state is outside the bounded profile");
   }

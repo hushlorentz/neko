@@ -96,6 +96,15 @@ class SPU2Controller final
     void writeVoiceADSRControl(std::size_t index, std::uint16_t value);
     std::uint16_t readVoiceStartAddress(std::size_t index) const;
     bool writeVoiceStartAddress(std::size_t index, std::uint16_t value);
+    std::uint16_t readVoiceLoopAddress(std::size_t index) const;
+    void writeVoiceLoopAddressHalfword(std::size_t index, std::uint16_t value);
+    SPU2ReadResult readVoiceNextAddress(std::size_t index) const;
+    std::uint16_t readVoiceEnvelope(std::size_t index) const;
+    std::uint16_t readVoiceEndMask(std::size_t index) const;
+    std::uint16_t readKeyOn(std::size_t index) const;
+    bool writeKeyOn(std::size_t index, std::uint16_t value);
+    std::uint16_t readKeyOff(std::size_t index) const;
+    void writeKeyOff(std::size_t index, std::uint16_t value);
     // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
@@ -116,8 +125,6 @@ class SPU2Controller final
     bool writeVoiceModeMask(std::size_t index, std::uint16_t value);
     // Provisional idle STATX: mode00 zero; mode01 ready only with both inputs inactive.
     SPU2ReadResult readCoreStatus(std::size_t core) const;
-    // Passive parameter images do not start voices; revisit before envelope execution or KON.
-    bool keyOffUnstartedVoices() const noexcept;
     // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
       std::size_t core, std::uint16_t value) noexcept;
@@ -156,24 +163,45 @@ class SPU2Controller final
     std::array<std::int16_t, 4> renderVoiceMix(std::size_t core) noexcept;
     SPU2StereoSample renderCoreOutput(std::size_t core,
       const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input) const noexcept;
-    bool hasLiveVoices() const noexcept;
+    void consumeCommands(std::size_t core) noexcept;
+    bool isVoiceActive(std::size_t index) const noexcept;
+    bool hasActiveVoices() const noexcept;
     bool hasSupportedVoiceMode(std::size_t index) const noexcept;
     bool hasValidVoiceState() const noexcept;
+    bool hasValidCommandState() const noexcept;
     struct Observation
     {
+      enum class Kind : std::uint8_t
+      {
+        Input, KeyOffConsumed, KeyOnConsumed, KeyOn, KeyOff,
+        Endpoint, EnvelopePhase, EnvelopeZero
+      };
+      Kind kind = Kind::Input;
       std::uint8_t core = 0;
+      std::uint8_t voice = 0;
+      std::uint32_t mask = 0;
+      SPU2Envelope::Phase beforePhase = SPU2Envelope::Phase::Stopped;
+      SPU2Envelope::Phase afterPhase = SPU2Envelope::Phase::Stopped;
+      std::uint16_t beforeLevel = 0;
+      std::uint16_t afterLevel = 0;
+      std::uint16_t samplePosition = 0;
       SPU2InputWriteState before;
       SPU2InputWriteState after;
       std::size_t sequence = 0;
     };
-    // Two sample switches, full-half + completion, and one CPU selection/open.
-    std::array<Observation, 8> observations{};
+    // Per voice: KOFF, KON, endpoint, envelope transition; four commands and
+    // eight existing PCM/DMA/CPU input transitions per IOP pulse.
+    std::array<Observation, 4 * CORE_COUNT * VOICE_COUNT_PER_CORE + 4 + 8> observations{};
     std::size_t observationCount = 0;
     bool observationsEnabled = false;
     NekoObservationOrder *observationOrder = nullptr;
     void enableObservations(NekoObservationOrder *order) noexcept;
     void disableObservations() noexcept;
     void clearObservations() noexcept;
+    Observation &appendObservation(Observation::Kind kind, std::size_t core) noexcept;
+    void recordCommand(Observation::Kind kind, std::size_t core, std::uint32_t mask) noexcept;
+    void recordVoice(Observation::Kind kind, std::size_t index,
+      const SPU2Envelope::State &before) noexcept;
     void recordInputState(std::size_t core, const SPU2InputWriteState &before) noexcept;
     struct InputState
     {
@@ -205,6 +233,10 @@ class SPU2Controller final
     std::array<std::uint16_t, VOICE_START_ADDRESS_HALFWORD_COUNT> voiceStartAddresses{};
     std::array<VoiceState, VOICE_PITCH_COUNT> voices{};
     std::array<std::uint32_t, CORE_COUNT> voiceEndMasks{{0xffffff, 0xffffff}};
+    std::array<std::uint16_t, CORE_COUNT * 2> keyOnImages{};
+    std::array<std::uint16_t, CORE_COUNT * 2> keyOffImages{};
+    std::array<std::uint32_t, CORE_COUNT> pendingKeyOn{};
+    std::array<std::uint32_t, CORE_COUNT> pendingKeyOff{};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
     // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
     // Raw halfwords, including unused upper bits; gates decode only voices 0-23.
