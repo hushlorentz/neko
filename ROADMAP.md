@@ -3923,6 +3923,36 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement passive SSA programming for both cores/all24voices through
       the existing SPU2 owner, with normalized high/low halfwords and focused
       CPU/bus, lifecycle and persistence coverage; keep loop/current state separate.
+- [x] Independently review and verify fresh unchanged-input cold/restored
+      traced/plain and canonical progress without claiming completed boot.
+
+### SPU2 Key-On and Active Voice Lifecycle
+
+- [x] Identify the originating `0xffff` halfword store to `0x1f9005a0`,
+      its command family and coupled voice-lifecycle requirements through the
+      existing SPU2 owner; distinguish active execution from passive storage.
+- [x] Select and explicitly approve a bounded active-voice contract, including
+      command timing/readback, source/envelope progression and key-off replacement;
+      expand the implementation into independently reviewable dependency items.
+- [x] Establish independently authored ADPCM/envelope vectors and usable
+      Gaussian-coefficient provenance; pin interpolation arithmetic before
+      admitting key-on rather than silently substituting another filter.
+- [ ] Implement focused ADPCM, interpolation and fixed-gain arithmetic with
+      authored clipping, rounding, fractional-pitch and raw-header coverage.
+- [ ] Implement ADSR rates and transitions with key-off release, retrigger
+      initialization and explicit live-parameter/timing boundaries.
+- [ ] Integrate fixed-capacity waveform source state, prefetch, pitch,
+      looping/endpoints and current addresses into the existing SPU2 sample
+      clock and canonical state; keep guest key-on rejected.
+- [ ] Integrate voice capture, dry/wet mix captures and core0-to-core1 output
+      through shared sound RAM; cover live-control admission, existing PCM/DMA
+      ordering and restored continuation without adding host audio.
+- [ ] Admit approved KON/KOFF, supported live-register accesses and sparse
+      lifecycle tracing only after execution dependencies pass; replace inactive-only
+      key-off, separate command images/pending work and reject unsupported modes.
+- [ ] Complete authored CPU/bus, sample-boundary, reset and persistence
+      conformance, due full validation and bounded architecture/correctness
+      reviews before the user-owned BIOS-verification commit checkpoint.
 - [ ] Independently review and verify fresh unchanged-input cold/restored
       traced/plain and canonical progress without claiming completed boot.
 
@@ -4009,8 +4039,9 @@ cores, voice processing, streaming, effects, DMA, interrupts, and continuation.
       mixing, effects and reverb, streaming, DMA, interrupts, sample timing,
       persistence, PCM validation, unresolved evidence, and frontend
       boundaries.
-- [ ] Implement voice decoding and lifecycle, pitch, envelopes, looping, and
-      deterministic per-sample mixing for both cores.
+- [ ] Extend the BIOS-prerequisite voice engine through the same SPU2 owner
+      with the remaining decoding, lifecycle, pitch, envelope, looping and
+      deterministic per-sample mixing scope for both cores.
 - [ ] Add effects, streaming, DMA, interrupt, timing, reset, and save-state
       behavior required by authored guests and the selected system workload.
 - [ ] Add headless PCM hashes and reference fixtures, then complete optimized,
