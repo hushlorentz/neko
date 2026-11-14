@@ -3950,7 +3950,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Admit approved KON/KOFF, supported live-register accesses and sparse
       lifecycle tracing only after execution dependencies pass; replace inactive-only
       key-off, separate command images/pending work and reject unsupported modes.
-- [ ] Complete authored CPU/bus, sample-boundary, reset and persistence
+- [x] Complete authored CPU/bus, sample-boundary, reset and persistence
       conformance, due full validation and bounded architecture/correctness
       reviews before the user-owned BIOS-verification commit checkpoint.
 - [ ] Independently review and verify fresh unchanged-input cold/restored

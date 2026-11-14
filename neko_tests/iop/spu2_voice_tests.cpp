@@ -564,6 +564,68 @@ TEST_CASE("SPU2 lifecycle traces omit level ticks and distinguish release from s
   }
 }
 
+TEST_CASE("SPU2 queued active and releasing voices obey owner and machine reset boundaries",
+          "[iop][spu2][spu2-conformance][save-state]")
+{
+  enum class Reset { Owner, Machine };
+  const auto requireSPUFields = [](const SaveStateDiagnosticSnapshot &before,
+                                   const SaveStateDiagnosticSnapshot &after)
+  {
+    for (const auto &difference : diffSaveStates(before, after))
+    {
+      CAPTURE(difference.path);
+      REQUIRE(difference.path.find("system.iop.spu2.") != 0);
+    }
+  };
+  for (const auto ticks : {0u, 1u, 4u})
+  for (const auto reset : {Reset::Owner, Reset::Machine})
+  {
+    CAPTURE(ticks);
+    CAPTURE(reset);
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    for (const auto index : {0u, 47u})
+    {
+      block(spu, 0x4000 + index * 8, 0x0700, 0x1111);
+      program(spu, index, 0x4000 + index * 8, 0x1000);
+      spu.writeVoiceADSRControl(index * 2, 0x000f);
+      spu.writeVoiceADSRControl(index * 2 + 1, 0x1fdf);
+    }
+    REQUIRE(spu.writeKeyOn(0, 1));
+    REQUIRE(spu.writeKeyOn(3, 0xff80));
+    samples(spu, ticks);
+    spu.writeKeyOff(0, 1);
+    spu.writeKeyOff(3, 0xff80);
+    if (ticks == 4)
+    {
+      samples(spu, 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).envelope.phase ==
+        SPU2Envelope::Phase::Release);
+      REQUIRE(spu.writeKeyOn(0, 1));
+      REQUIRE(spu.writeKeyOn(3, 0xff80));
+    }
+    const auto before = inspectSaveState(system.saveState());
+    system.iopBus().reset();
+    system.iopCore().reset();
+    requireSPUFields(before, inspectSaveState(system.saveState()));
+    if (reset == Reset::Owner)
+      spu.reset();
+    else
+      system.reset();
+    NekoSystem fresh;
+    requireSPUFields(inspectSaveState(fresh.saveState()), inspectSaveState(system.saveState()));
+    samples(spu, 1);
+    REQUIRE(spu.readKeyOn(0) == 0);
+    REQUIRE(spu.readKeyOn(3) == 0);
+    REQUIRE(spu.readKeyOff(0) == 0);
+    REQUIRE(spu.readKeyOff(3) == 0);
+    REQUIRE(spu.readVoiceEnvelope(0) == 0);
+    REQUIRE(spu.readVoiceEnvelope(47) == 0);
+    REQUIRE(spu.readVoiceEndMask(0) == 0xffff);
+    REQUIRE(spu.readVoiceEndMask(3) == 0xff);
+  }
+}
+
 TEST_CASE("SPU2 waveform source reset state is canonical",
           "[iop][spu2][spu2-source][save-state]")
 {
