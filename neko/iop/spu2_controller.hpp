@@ -70,6 +70,12 @@ class SPU2Controller final
     static constexpr std::size_t VOICE_MODE_HALFWORD_COUNT = 8;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
     static constexpr std::size_t EFFECT_START_HALFWORD_COUNT = CORE_COUNT * 2;
+    static constexpr std::size_t EFFECT_OFFSET_HALFWORDS_PER_CORE = 44;
+    static constexpr std::size_t EFFECT_OFFSET_HALFWORD_COUNT =
+      CORE_COUNT * EFFECT_OFFSET_HALFWORDS_PER_CORE;
+    static constexpr std::size_t EFFECT_COEFFICIENTS_PER_CORE = 10;
+    static constexpr std::size_t EFFECT_COEFFICIENT_COUNT =
+      CORE_COUNT * EFFECT_COEFFICIENTS_PER_CORE;
     static constexpr std::size_t TRANSFER_START_HALFWORD_COUNT = 4;
     static constexpr std::uint16_t INPUT_CLOCK_PERIOD = 768;
     static constexpr std::uint16_t INPUT_SAMPLE_COUNT = 512;
@@ -121,6 +127,10 @@ class SPU2Controller final
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readEffectStartAddress(std::size_t index) const;
     void writeEffectStartAddress(std::size_t index, std::uint16_t value);
+    std::uint16_t readEffectOffset(std::size_t index) const;
+    void writeEffectOffset(std::size_t index, std::uint16_t value);
+    std::uint16_t readEffectCoefficient(std::size_t index) const;
+    void writeEffectCoefficient(std::size_t index, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
     bool writeTransferStartAddress(std::size_t index, std::uint16_t value);
     // Provisional synchronous PIO, only while both PCM inputs are inactive.
@@ -261,6 +271,9 @@ class SPU2Controller final
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
     // Per core: passive raw ESA high/low images, not an effect processing cursor.
     std::array<std::uint16_t, EFFECT_START_HALFWORD_COUNT> effectStartAddresses{};
+    // Per core, ascending raw high/low offset halves and coefficients; no active DSP.
+    std::array<std::uint16_t, EFFECT_OFFSET_HALFWORD_COUNT> effectOffsets{};
+    std::array<std::uint16_t, EFFECT_COEFFICIENT_COUNT> effectCoefficients{};
     // Per core: raw programmed TSA high/low images, independent of PIO progress.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
     std::array<std::uint32_t, CORE_COUNT> transferCursor{};

@@ -173,6 +173,8 @@ class IOPBus final
       SPU2EffectInputVolume,
       SPU2EffectEndAddressHigh,
       SPU2EffectStartAddress,
+      SPU2EffectOffset,
+      SPU2EffectCoefficient,
       SPU2TransferStartAddress,
       SPU2TransferData,
       SPU2CoreStatus,

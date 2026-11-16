@@ -4001,9 +4001,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored CPU-driven normal-write lifecycle and cold/restored
       traced/plain conformance for both cores, contention, faults and restart;
       independently review before the user-owned conformance commit checkpoint.
-- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+- [x] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.
+
+### SPU2 Effect-Offset and Coefficient Programming
+
+- [x] Research the originating zero halfword store to `0x1f9002e4` and its
+      containing register family through local manuals and existing SPU2
+      ownership; select the bounded contract and implementation breakdown.
+- [x] Implement paired-core passive offset/coefficient halfword programming
+      through the existing SPU2 owner, with exact CPU admission, red/green,
+      lifecycle/persistence coverage and independent review before user commit.
+- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without admitting active effects or claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

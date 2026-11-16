@@ -164,6 +164,37 @@ namespace
   constexpr std::array<std::uint16_t, 4> effectStartAddressValues = {{
     0x800e, 0x1357, 0xffff, 0x8001
   }};
+  constexpr std::size_t effectParameterCount = 108;
+
+  IOPAddress effectParameterAddress(std::size_t index)
+  {
+    if (index < 88)
+      return static_cast<IOPAddress>(0x1f9002e4 + (index / 44) * 0x400 + (index % 44) * 2);
+    const auto coefficient = index - 88;
+    return static_cast<IOPAddress>(
+      0x1f900774 + (coefficient / 10) * 0x28 + (coefficient % 10) * 2);
+  }
+
+  std::uint16_t effectParameterValue(std::size_t index)
+  {
+    return static_cast<std::uint16_t>(0x8001 + index * 0x103);
+  }
+
+  std::string effectParameterPath(std::size_t index)
+  {
+    return index < 88
+      ? "system.iop.spu2.effectOffsets[" + std::to_string(index) + "].value"
+      : "system.iop.spu2.effectCoefficients[" + std::to_string(index - 88) + "].value";
+  }
+
+  void programEffectParameters(NekoSystem &system)
+  {
+    for (std::size_t index = 0; index < effectParameterCount; ++index)
+      REQUIRE(system.iopBus().write16(
+        effectParameterAddress(index), effectParameterValue(index)).status ==
+        IOPBusStatus::Completed);
+  }
+
   constexpr std::array<IOPAddress, 4> transferStartAddressAddresses = {{
     0x1f9001a8, 0x1f9001aa, 0x1f9005a8, 0x1f9005aa
   }};
@@ -1395,7 +1426,6 @@ TEST_CASE("SPU2 ESA retains independent raw halves through exact CPU data ports"
     REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
   }
   for (const IOPAddress address : {
-      0x1f9002e4u, 0x1f9002e6u, 0x1f9006e4u, 0x1f9006e6u,
       0x1f90033eu, 0x1f90073eu, 0x1f900ae0u, 0x1f900ae2u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
@@ -1535,6 +1565,245 @@ TEST_CASE("SPU2 ESA canonical images restore ownership and pending guest accesse
     restored.runMasterCycles(96 - cut);
     plain.runMasterCycles(96 - cut);
     REQUIRE(original.iopCore().retiredInstructions() == 12);
+    REQUIRE(original.iopBus().read32(0x104).value == 0xffffffff);
+    REQUIRE(original.iopBus().read32(0x10c).value == 0xffff);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+  }
+}
+
+TEST_CASE("SPU2 effect parameters retain independent raw halfwords at exact CPU ports",
+  "[iop][spu2][spu2-effect-parameters]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+  {
+    REQUIRE(bus.read16(effectParameterAddress(index)).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(effectParameterAddress(index)).value == 0);
+  }
+  programEffectParameters(system);
+  programEffectStartAddresses(system);
+  programEffectEndAddresses(system);
+  programEffectInputVolumes(system);
+  for (std::size_t selected = 0; selected < effectParameterCount; ++selected)
+  {
+    CAPTURE(selected);
+    const auto address = effectParameterAddress(selected);
+    for (const std::uint16_t value : {0, 1, 7, 0xf, 0x40, 0x7fff, 0x8000, 0xffff})
+    {
+      REQUIRE(bus.write16(address, value).status == IOPBusStatus::Completed);
+      for (std::size_t index = 0; index < effectParameterCount; ++index)
+        REQUIRE(bus.read16(effectParameterAddress(index)).value ==
+          (index == selected ? value : effectParameterValue(index)));
+    }
+    REQUIRE(bus.write16(address, effectParameterValue(selected)).status ==
+      IOPBusStatus::Completed);
+  }
+  const auto before = system.iopStateHash();
+  IOPBus unattached;
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+  {
+    CAPTURE(index);
+    const auto address = effectParameterAddress(index);
+    const auto wordAddress = address & ~IOPAddress(3);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.read32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(wordAddress).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+      REQUIRE(bus.writeMasked32(wordAddress, 0, mask).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(wordAddress) == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) == IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    for (const auto segment : {0x80000000u, 0xa0000000u})
+    {
+      REQUIRE(bus.read16(address | segment).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(address | segment, 0).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(unattached.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
+    std::uint16_t value = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &value));
+    REQUIRE(value == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+  }
+  for (const IOPAddress address : {
+      0x1f90033eu, 0x1f90073eu, 0x1f900770u, 0x1f900772u,
+      0x1f900798u, 0x1f90079au, 0x1f9007b0u, 0x1f9007b2u,
+      0x1f900ae4u, 0x1f900b74u})
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  for (const auto address : coreAttributeAddresses)
+    REQUIRE(bus.write16(address, 0x80).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == before);
+  for (std::size_t index = 0; index < effectStartAddressAddresses.size(); ++index)
+    REQUIRE(bus.read16(effectStartAddressAddresses[index]).value == effectStartAddressValues[index]);
+  for (std::size_t core = 0; core < effectEndAddressHighAddresses.size(); ++core)
+    REQUIRE(bus.read16(effectEndAddressHighAddresses[core]).value == effectEndAddressHighValues[core]);
+  for (std::size_t index = 0; index < effectInputVolumeAddresses.size(); ++index)
+    REQUIRE(bus.read16(effectInputVolumeAddresses[index]).value == effectInputVolumeValues[index]);
+
+  for (const auto address : coreAttributeAddresses)
+    REQUIRE(bus.write16(address, 0xc021).status == IOPBusStatus::Completed);
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+    REQUIRE(bus.read16(effectParameterAddress(index)).value == effectParameterValue(index));
+  system.spu2Controller().reset();
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+    REQUIRE(bus.read16(effectParameterAddress(index)).value == 0);
+  programEffectParameters(system);
+  system.reset();
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+    REQUIRE(bus.read16(effectParameterAddress(index)).value == 0);
+}
+
+TEST_CASE("SPU2 effect parameter guests preserve aliases branches and delayed loads",
+  "[iop][spu2][spu2-effect-parameters][trace]")
+{
+  for (const std::size_t index : {0u, 1u, 42u, 43u, 44u, 45u, 76u, 77u,
+      78u, 79u, 86u, 87u, 88u, 97u, 98u, 107u})
+  for (const IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    CAPTURE(index);
+    CAPTURE(segment);
+    NekoSystem system;
+    const auto physical = effectParameterAddress(index);
+    const auto address = physical | segment;
+    const auto value = index == 0 ? std::uint16_t{0} : effectParameterValue(index);
+    installConfigurationProgram(system, address, value);
+    system.startTrace();
+    system.runMasterCycles(96);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().retiredInstructions() == 12);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000034);
+    REQUIRE(system.iopBus().read16(physical).value == value);
+    const auto signedLoad = (value & 0x8000) ? 0xffff0000u | value : value;
+    REQUIRE(system.iopBus().read32(0x100).value == 0);
+    REQUIRE(system.iopBus().read32(0x104).value == signedLoad);
+    REQUIRE(system.iopBus().read32(0x108).value == 0);
+    REQUIRE(system.iopBus().read32(0x10c).value == value);
+    IOPTraceTest::Events accesses;
+    for (const auto &event : system.trace())
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess && event.value0 == address)
+        accesses.push_back(event);
+    namespace Memory = NekoIOPTraceMemory;
+    const auto route = segment == 0xa0000000
+      ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached;
+    const auto store = nekoPackIOPMemoryTraceMetadata({
+      physical, 2, Memory::AccessKind::DataStore, Memory::Outcome::Completed, route, true,
+      static_cast<std::uint8_t>(3u << (physical & 3))});
+    const auto load = nekoPackIOPMemoryTraceMetadata({
+      physical, 2, Memory::AccessKind::DataLoad, Memory::Outcome::Completed, route, true, 0});
+    IOPTraceTest::requireEvents(accesses, {
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess, address, value, 0, store},
+      {41, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess, address, value, 0, load},
+      {65, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess, address, value, 0, load}
+    });
+  }
+}
+
+TEST_CASE("SPU2 effect parameter canonical images restore ownership and reject damaged states",
+  "[iop][spu2][spu2-effect-parameters][save-state]")
+{
+  NekoSystem source;
+  const auto resetHash = source.iopStateHash();
+  const auto initial = inspectSaveState(source.saveState());
+  programEffectParameters(source);
+  REQUIRE(source.iopStateHash() != resetHash);
+  const auto candidate = source.saveState();
+  REQUIRE(source.saveState() == candidate);
+  const auto fields = inspectSaveState(candidate);
+  const auto differences = diffSaveStates(initial, fields);
+  REQUIRE(differences.size() == effectParameterCount);
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+  {
+    const auto path = effectParameterPath(index);
+    const auto *field = fields.find(path);
+    REQUIRE(field != nullptr);
+    REQUIRE(field->kind == SaveStateFieldKind::U16);
+    REQUIRE(field->size == 2);
+    REQUIRE(field->scalarValue == effectParameterValue(index));
+    REQUIRE(std::find_if(differences.begin(), differences.end(),
+      [&path](const SaveStateDifference &difference) { return difference.path == path; }) !=
+      differences.end());
+  }
+  NekoSystem destination;
+  SPU2Controller foreign;
+  destination.iopBus().attachSPU2(&foreign);
+  destination.loadState(candidate);
+  REQUIRE(destination.iopStateHash() == source.iopStateHash());
+  REQUIRE(destination.saveState() == candidate);
+  IOPBus foreignBus;
+  foreignBus.attachSPU2(&foreign);
+  for (std::size_t index = 0; index < effectParameterCount; ++index)
+  {
+    const auto address = effectParameterAddress(index);
+    REQUIRE(destination.iopBus().read16(address).value == effectParameterValue(index));
+    REQUIRE(destination.iopBus().write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(destination.iopBus().read16(address).value == 0xffff);
+    REQUIRE(source.iopBus().read16(address).value == effectParameterValue(index));
+    REQUIRE(foreignBus.read16(address).value == 0);
+  }
+  destination.startTrace();
+  const auto before = destination.saveState();
+  SaveStateMutation badChecksum(candidate);
+  badChecksum.writeScalar(effectParameterPath(107), 0);
+  REQUIRE_THROWS_AS(destination.loadState(badChecksum), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  SaveStateMutation lateInvalid(candidate);
+  lateInvalid.writeScalar("system.iop.timing.pixelPhase", 0xffff);
+  lateInvalid.refreshChecksum();
+  REQUIRE_THROWS_AS(destination.loadState(lateInvalid), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  const auto *tail = fields.find(effectParameterPath(107));
+  REQUIRE(tail != nullptr);
+  auto truncated = candidate;
+  truncated.resize(tail->containerOffset + 1);
+  REQUIRE_THROWS_AS(destination.loadState(truncated), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  REQUIRE(destination.traceEnabled());
+}
+
+TEST_CASE("SPU2 effect parameter guests restore branch and load continuations",
+  "[iop][spu2][spu2-effect-parameters][save-state][trace]")
+{
+  for (const std::size_t index : {0u, 79u, 88u, 107u})
+  for (const unsigned cut : {32u, 48u})
+  {
+    CAPTURE(index);
+    CAPTURE(cut);
+    NekoSystem original;
+    installConfigurationProgram(original, effectParameterAddress(index) | 0xa0000000u, 0xffff);
+    original.runMasterCycles(cut);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(96 - cut);
+    restored.runMasterCycles(96 - cut);
+    plain.runMasterCycles(96 - cut);
+    REQUIRE(original.iopCore().retiredInstructions() == 12);
+    REQUIRE(original.iopBus().read16(effectParameterAddress(index)).value == 0xffff);
     REQUIRE(original.iopBus().read32(0x104).value == 0xffffffff);
     REQUIRE(original.iopBus().read32(0x10c).value == 0xffff);
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
@@ -4847,10 +5116,8 @@ TEST_CASE("SPU2 configuration excludes neighbors widths and non-CPU transports",
   for (IOPAddress address : {0x1f9007c2u, 0x1f9007c4u,
       0x1f9003c0u, 0x1f900bc0u, 0x1f900fc0u,
       0x1f9007ceu, 0x1f9007d0u, 0x1f9003c6u, 0x1f90075eu,
-      0x1f900770u, 0x1f900772u, 0x1f900774u, 0x1f900786u,
-      0x1f900798u, 0x1f90079au, 0x1f90079cu,
-      0x1f90033au, 0x1f90033eu,
-      0x1f90073au, 0x1f90073eu,
+      0x1f900770u, 0x1f900772u, 0x1f900798u, 0x1f90079au,
+      0x1f90033eu, 0x1f90073eu,
       0x1f90017eu, 0x1f90057eu,
       0x1f90019cu, 0x1f90019eu,
       0x1f90059cu, 0x1f90059eu,

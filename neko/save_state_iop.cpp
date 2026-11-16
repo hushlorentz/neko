@@ -473,6 +473,22 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldBool("value", spu.normalWriteOpen[core]);
       }
     }
+    {
+      auto offsets = writer->scope("effectOffsets");
+      for (std::size_t index = 0; index < spu.effectOffsets.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", spu.effectOffsets[index]);
+      }
+    }
+    {
+      auto coefficients = writer->scope("effectCoefficients");
+      for (std::size_t index = 0; index < spu.effectCoefficients.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", spu.effectCoefficients[index]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -910,6 +926,22 @@ void NekoSaveStateCodec::readIOP(
       {
         auto element = reader->element(core);
         spu.normalWriteOpen[core] = reader->readFieldBool("value");
+      }
+    }
+    {
+      auto offsets = reader->scope("effectOffsets");
+      for (std::size_t index = 0; index < spu.effectOffsets.size(); ++index)
+      {
+        auto word = reader->element(index);
+        spu.effectOffsets[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto coefficients = reader->scope("effectCoefficients");
+      for (std::size_t index = 0; index < spu.effectCoefficients.size(); ++index)
+      {
+        auto word = reader->element(index);
+        spu.effectCoefficients[index] = reader->readFieldU16("value");
       }
     }
     reader->requireField(spu.hasValidCommandState(),

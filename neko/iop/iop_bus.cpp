@@ -30,6 +30,9 @@ namespace
   constexpr IOPAddress spu2VoiceStride = 0x10;
   constexpr IOPAddress spu2VoiceAddressBase = 0x1f9001c0;
   constexpr IOPAddress spu2VoiceAddressStride = 0xc;
+  constexpr IOPAddress spu2EffectOffsetBase = 0x1f9002e4;
+  constexpr IOPAddress spu2EffectCoefficientBase = 0x1f900774;
+  constexpr IOPAddress spu2EffectCoefficientCoreStride = 0x28;
   constexpr std::array<IOPAddress, 6> spu2UnknownInitializationAddresses = {{
     0x1f9007b8, 0x1f9007ba, 0x1f9007bc, 0x1f9007be, 0x1f900b60, 0x1f900b62
   }};
@@ -520,6 +523,29 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2EffectStartAddress};
+    }
+  }
+  for (std::size_t core = 0; core < SPU2Controller::CORE_COUNT; ++core)
+  {
+    const auto offsetBase =
+      spu2EffectOffsetBase + static_cast<IOPAddress>(core) * spu2CoreStride;
+    if (first >= offsetBase &&
+        first < offsetBase + SPU2Controller::EFFECT_OFFSET_HALFWORDS_PER_CORE * 2 &&
+        first % 2 == 0 && last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio,
+        core * SPU2Controller::EFFECT_OFFSET_HALFWORDS_PER_CORE + (first - offsetBase) / 2,
+        Device::SPU2EffectOffset};
+    }
+    const auto coefficientBase = spu2EffectCoefficientBase +
+      static_cast<IOPAddress>(core) * spu2EffectCoefficientCoreStride;
+    if (first >= coefficientBase &&
+        first < coefficientBase + SPU2Controller::EFFECT_COEFFICIENTS_PER_CORE * 2 &&
+        first % 2 == 0 && last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio,
+        core * SPU2Controller::EFFECT_COEFFICIENTS_PER_CORE + (first - coefficientBase) / 2,
+        Device::SPU2EffectCoefficient};
     }
   }
   for (std::size_t index = 0; index < spu2TransferStartAddressAddresses.size(); ++index)
@@ -1042,6 +1068,16 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readEffectStartAddress(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2EffectOffset:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readEffectOffset(location.offset)}
+        : IOPBusReadResult{};
+    case Device::SPU2EffectCoefficient:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readEffectCoefficient(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2TransferStartAddress:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1239,6 +1275,20 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       spu2->writeEffectStartAddress(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2EffectOffset:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeEffectOffset(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2EffectCoefficient:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeEffectCoefficient(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2EffectEndAddressHigh:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)

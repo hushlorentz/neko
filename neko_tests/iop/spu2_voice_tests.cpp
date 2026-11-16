@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -294,6 +295,90 @@ TEST_CASE("SPU2 ESA programming preserves live voices PCM PIO commands and resto
   restored.loadState(saved);
   plain.loadState(saved);
   REQUIRE(restored.saveState() == saved);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(2 * 6144);
+  restored.runMasterCycles(2 * 6144);
+  plain.runMasterCycles(2 * 6144);
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  IOPTraceTest::requireMachine(restored, source);
+  IOPTraceTest::requireMachine(plain, source);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 effect parameters preserve live voices transfers and restored progress",
+          "[iop][spu2][spu2-effect-parameters][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  auto &dma = source.iopDMAController();
+  auto &bus = source.iopBus();
+  SPU2InputTest::programProfile(spu);
+  for (const auto index : {0u, 24u})
+    constantVoice(spu, index);
+  samples(spu, 4);
+  SECTION("PIO cursor")
+  {
+    REQUIRE(spu.writeCoreAttribute(0, 0xc011));
+    REQUIRE(spu.writeTransferStartAddress(1, 0x7000));
+    REQUIRE(spu.writeTransferData(0, 0x0707));
+  }
+  SECTION("paired PCM")
+  {
+    for (std::size_t core = 0; core < 2; ++core)
+    {
+      REQUIRE(spu.writeAutoDMAWriteSelection(core, 1u << core));
+      REQUIRE(dma.writeSPUMemoryAddress(core, 0x1000) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(dma.writeSPUBlockControl(core, 0x00100010) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(dma.startSPUTransfer(core, bus, spu) == IOPDMAWriteOutcome::Completed);
+      dma.writePriority(core == 0 ? IOPDMABank::Primary : IOPDMABank::Secondary,
+        core == 0 ? 0x80000 : 8);
+      REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+    }
+  }
+  SECTION("normal DMA")
+  {
+    REQUIRE(spu.writeCoreAttribute(0, 0xc021));
+    REQUIRE(spu.writeTransferStartAddress(1, 0x7000));
+    REQUIRE(dma.writeSPUMemoryAddress(0, 0x1000) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.writeSPUBlockControl(0, 0x10010) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.startSPUTransfer(0, bus, spu) == IOPDMAWriteOutcome::Completed);
+    dma.writePriority(IOPDMABank::Primary, 0x80000);
+    REQUIRE(dma.clockSPU(0, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+  }
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(spu.writeKeyOn(core * 2, 2));
+    spu.writeKeyOff(core * 2, 1);
+  }
+  source.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  const auto before = inspectSaveState(source.saveState());
+  const std::array<IOPAddress, 4> addresses = {{
+    0x1f9002e4, 0x1f90072a, 0x1f900774, 0x1f9007ae
+  }};
+  const std::array<std::string, 4> paths = {{
+    "system.iop.spu2.effectOffsets[0].value",
+    "system.iop.spu2.effectOffsets[79].value",
+    "system.iop.spu2.effectCoefficients[0].value",
+    "system.iop.spu2.effectCoefficients[19].value"
+  }};
+  for (const auto address : addresses)
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+  const auto saved = source.saveState();
+  const auto differences = diffSaveStates(before, inspectSaveState(saved));
+  REQUIRE(differences.size() == paths.size());
+  for (const auto &path : paths)
+    REQUIRE(std::find_if(differences.begin(), differences.end(),
+      [&path](const SaveStateDifference &difference) { return difference.path == path; }) !=
+      differences.end());
+  bus.reset();
+  source.iopCore().reset();
+  const bool resetPreservedState = source.saveState() == saved;
+  REQUIRE(resetPreservedState);
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
   source.startTrace();
   restored.startTrace();
   source.runMasterCycles(2 * 6144);
