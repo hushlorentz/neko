@@ -3343,6 +3343,282 @@ TEST_CASE("IOP SPU CPU started channels wait on capacity and complete only after
   }
 }
 
+TEST_CASE("IOP SPU normal writes use programmed TSA and complete on real wrapped RAM grants",
+  "[iop][dma][spu-normal]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (const bool masked : {false, true})
+  {
+    CAPTURE(core);
+    CAPTURE(masked);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &dma = system.iopDMAController();
+    auto &spu = system.spu2Controller();
+    const IOPAddress base = 0x1f900000 + static_cast<IOPAddress>(core * 0x400);
+    const auto bank = core == 0 ? PRIMARY : SECONDARY;
+    const IOPWord mask = core == 0 ? 0x100000 : 0x10000;
+    for (const std::uint16_t image : {0x20, 0x21, 0x4020, 0x4021,
+                                     0x8020, 0x8021, 0xc020, 0xc021})
+    {
+      REQUIRE(bus.write16(base + 0x19a, image).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(base + 0x19a).value == image);
+    }
+    for (const std::uint16_t image : {0x30, 0xc031, 0x22, 0x60, 0xa0})
+      REQUIRE(bus.write16(base + 0x19a, image).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 0x1a8, 0xff0f).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 0x1aa, 0xfff8).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 0x1ac, 0xdead).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SPU_MADR[core], 0x1000).status == IOPBusStatus::Completed);
+    for (const IOPWord invalid : {0u, 16u, 0x10020u})
+    {
+      REQUIRE(bus.write32(SPU_BCR[core], invalid).status == IOPBusStatus::Completed);
+      const auto before = system.iopStateHash();
+      REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Unmapped);
+      REQUIRE(system.iopStateHash() == before);
+    }
+    REQUIRE(bus.write32(SPU_BCR[core], 0x10010).status == IOPBusStatus::Completed);
+    for (IOPWord word = 0; word < 16; ++word)
+      REQUIRE(bus.write32(0x1000 + word * 4, 0xa0000000 | word).status ==
+        IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 0x344).value == 0x80);
+    dma.writeInterrupt(bank, 0x800000 | (masked ? mask : 0));
+    REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 0x344).value == 0x400);
+    REQUIRE(spu.readSoundRAMHalfword(0xffff8) == 0xdead);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Wait);
+    dma.writePriority(bank, core == 0 ? 0x80000 : 8);
+    for (IOPWord word = 0; word < 16; ++word)
+    {
+      const auto beat = dma.clockSPU(core, bus, spu);
+      REQUIRE(beat.outcome == (word == 15 ? IOPDMABeatOutcome::Completed :
+        IOPDMABeatOutcome::Accepted));
+      const auto target = (0xffff8 + word * 2) & 0xfffff;
+      REQUIRE(spu.readSoundRAMHalfword(target) == word);
+      REQUIRE(spu.readSoundRAMHalfword((target + 1) & 0xfffff) == 0xa000);
+      REQUIRE(dma.spuRemainingWords(core) == 15 - word);
+      REQUIRE(bus.read16(base + 0x344).value == (word == 15 ? 0x80 : 0x400));
+      if (word != 15)
+        REQUIRE(dma.interruptStatus(bank) == (0x800000 | (masked ? mask : 0)));
+    }
+    REQUIRE(bus.read16(base + 0x1a8).value == 0xff0f);
+    REQUIRE(bus.read16(base + 0x1aa).value == 0xfff8);
+    REQUIRE(dma.spuMemoryAddress(core) == 0x1040);
+    REQUIRE(dma.spuBlockControl(core) == 16);
+    REQUIRE(dma.spuChannelControl(core) == 0x201);
+    REQUIRE(dma.interruptStatus(bank) ==
+      (0x800000 | (masked ? SUMMARY | mask | (mask << 8) : 0)));
+    REQUIRE(((system.iopInterruptController().status() & DMAC_CAUSE) != 0) == masked);
+    REQUIRE((system.iopInterruptController().status() & (1u << 9)) == 0);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Wait);
+  }
+}
+
+TEST_CASE("IOP SPU normal writes guard live programming and restart rather than resume",
+  "[iop][dma][spu-normal]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (const IOPWord stop : {0u, 0x201u})
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &dma = system.iopDMAController();
+    auto &spu = system.spu2Controller();
+    const IOPAddress base = 0x1f900000 + static_cast<IOPAddress>(core * 0x400);
+    const IOPAddress peer = 0x1f900000 + static_cast<IOPAddress>((1 - core) * 0x400);
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(bus.write16(base + 0x19a, 0xc021).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SPU_MADR[core], 0x1000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SPU_BCR[core], 0x10010).status == IOPBusStatus::Completed);
+    REQUIRE(spu.writeAutoDMAWriteSelection(1 - core,
+      static_cast<std::uint16_t>(1u << (1 - core))));
+    const auto selected = system.iopStateHash();
+    REQUIRE(dma.startSPUTransfer(core, bus, spu) == IOPDMAWriteOutcome::UnsupportedControl);
+    REQUIRE(system.iopStateHash() == selected);
+    REQUIRE(spu.writeAutoDMAWriteSelection(1 - core, 0));
+    for (const std::uint16_t low : {1, 2, 7})
+    {
+      REQUIRE(bus.write16(base + 0x1aa, low).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.write16(base + 0x1aa, 0x3000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1000, 0x12345678).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1004, 0xabcdfedc).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.write16(base + 0x1aa, 0x3000).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 0x1a8, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 0x19a, 0xc001).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 0x19a, 0xc021).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 0x1b0, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(peer + 0x1b0, static_cast<std::uint16_t>(1u << (1 - core))).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 0x1ac, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(peer + 0x1ac, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(SPU_MADR[core], 0x2000).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(SPU_BCR[core], 32).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(bus.write16(peer + 0x19a, 0xc011).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(peer + 0x344).status == IOPBusStatus::Unmapped);
+    dma.writePriority(core == 0 ? PRIMARY : SECONDARY, core == 0 ? 0x80000 : 8);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+    const auto progressed = system.iopStateHash();
+    REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() == progressed);
+    bus.reset();
+    system.iopCore().reset();
+    REQUIRE(bus.write32(0x1004, 0xabcdfedc).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 0x344).value == 0x400);
+    REQUIRE(bus.write32(SPU_CHCR[core], stop).status == IOPBusStatus::Completed);
+    REQUIRE(dma.spuMemoryAddress(core) == 0x1004);
+    REQUIRE(dma.spuBlockControl(core) == 0x10010);
+    REQUIRE(dma.interruptStatus(core == 0 ? PRIMARY : SECONDARY) == 0);
+    REQUIRE(bus.read16(peer + 0x344).value == 0x80);
+    REQUIRE(bus.write32(SPU_CHCR[core], 0x01000201).status == IOPBusStatus::Completed);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+    REQUIRE(spu.readSoundRAMHalfword(0x3000) == 0xfedc);
+    REQUIRE(spu.readSoundRAMHalfword(0x3001) == 0xabcd);
+    REQUIRE(spu.readSoundRAMHalfword(0x3002) == 0);
+  }
+}
+
+TEST_CASE("IOP SPU normal source rejection preserves accepted work and active status",
+  "[iop][dma][spu-normal]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &dma = system.iopDMAController();
+    auto &spu = system.spu2Controller();
+    const IOPAddress base = 0x1f900000 + static_cast<IOPAddress>(core * 0x400);
+    REQUIRE(bus.write16(base + 0x19a, 0x20).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 0x1aa, 0x3000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1ffffc, 0x1234abcd).status == IOPBusStatus::Completed);
+    REQUIRE(dma.writeSPUMemoryAddress(core, 0x7ffffc) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.writeSPUBlockControl(core, 0x10010) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.startSPUTransfer(core, bus, spu) == IOPDMAWriteOutcome::Completed);
+    dma.writePriority(core == 0 ? PRIMARY : SECONDARY, core == 0 ? 0x80000 : 8);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+    const auto before = system.iopStateHash();
+    const auto rejected = dma.clockSPU(core, bus, spu);
+    REQUIRE(rejected.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(rejected.address == 0x800000);
+    REQUIRE(rejected.failure == IOPDMAFailure::SourceRead);
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(spu.readSoundRAMHalfword(0x3000) == 0xabcd);
+    REQUIRE(spu.readSoundRAMHalfword(0x3002) == 0);
+    REQUIRE(bus.read16(base + 0x344).value == 0x400);
+  }
+}
+
+TEST_CASE("IOP SPU normal active state restores and rejects orphan or inconsistent endpoints",
+  "[iop][dma][spu-normal][save-state]")
+{
+  NekoSystem source;
+  auto &dma = source.iopDMAController();
+  auto &bus = source.iopBus();
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const IOPAddress base = 0x1f900000 + static_cast<IOPAddress>(core * 0x400);
+    REQUIRE(bus.write16(base + 0x19a, 0xc021).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(base + 0x1aa, 0xfff8).status == IOPBusStatus::Completed);
+    REQUIRE(dma.writeSPUMemoryAddress(core, 0x1000) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.writeSPUBlockControl(core, 0x20010) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.startSPUTransfer(core, bus, source.spu2Controller()) ==
+      IOPDMAWriteOutcome::Completed);
+    dma.writePriority(core == 0 ? PRIMARY : SECONDARY, core == 0 ? 0x80000 : 8);
+    for (unsigned word = 0; word < (core == 0 ? 3u : 15u); ++word)
+      REQUIRE(dma.clockSPU(core, bus, source.spu2Controller()).outcome ==
+        IOPDMABeatOutcome::Accepted);
+  }
+  const auto saved = source.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  const std::pair<const char *, std::uint64_t> invalid[] = {
+    {"system.iop.spu2.normalWriteOpen[0].value", 0},
+    {"system.iop.spu2.normalWriteOpen[1].value", 2},
+    {"system.iop.spu2.transferCursor[0].value", 0},
+    {"system.iop.spu2.transferCursor[0].value", 0x10006},
+    {"system.iop.spu2.transferCursor[1].value", 0x1001e},
+    {"system.iop.spu2.coreAttributes[1].value", 0xc001},
+    {"system.iop.dmaController.spuTransfers[1].channelControl", 0},
+    {"system.iop.dmaController.spuBlockControl[0].value", 16}
+  };
+  for (const auto &change : invalid)
+  {
+    SaveStateMutation broken(saved);
+    broken.writeScalar(change.first, change.second);
+    broken.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(broken), std::invalid_argument);
+  }
+  REQUIRE(restored.saveState() == saved);
+  for (auto *system : {&source, &restored})
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    auto &owner = system->iopDMAController();
+    while (owner.spuActive(core))
+      owner.clockSPU(core, system->iopBus(), system->spu2Controller());
+  }
+  REQUIRE(restored.saveState() == source.saveState());
+  const auto stopped = restored.saveState();
+  SaveStateMutation orphan(stopped);
+  orphan.writeScalar("system.iop.spu2.normalWriteOpen[0].value", 1);
+  orphan.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(orphan), std::invalid_argument);
+  REQUIRE(restored.saveState() == stopped);
+}
+
+TEST_CASE("IOP SPU normal shared grants emit actual RAM destinations and rejected sources",
+  "[iop][dma][spu-normal][trace]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  auto &dma = system.iopDMAController();
+  REQUIRE(bus.write16(0x1f90019a, 0x20).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001aa, 0x3000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1000, 0x89abcdef).status == IOPBusStatus::Completed);
+  REQUIRE(dma.writeSPUMemoryAddress(0, 0x1000) == IOPDMAWriteOutcome::Completed);
+  REQUIRE(dma.writeSPUBlockControl(0, 0x10010) == IOPDMAWriteOutcome::Completed);
+  REQUIRE(dma.startSPUTransfer(0, bus, system.spu2Controller()) ==
+    IOPDMAWriteOutcome::Completed);
+  dma.writePriority(PRIMARY, 0x80000);
+  system.startTrace();
+  system.clockMasterCycle();
+  const auto found = std::find_if(system.trace().begin(), system.trace().end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.subsystem == NekoTraceSubsystem::SPU2 &&
+        event.type == NekoTraceEventType::DMABeat;
+    });
+  REQUIRE(found != system.trace().end());
+  const auto beat = nekoDecodeSPUDMABeat(*found);
+  REQUIRE(beat.target == NekoSPUTrace::Target::SoundRAM);
+  REQUIRE(beat.targetAddressBefore == 0x3000);
+  REQUIRE(beat.targetAddressAfter == 0x3002);
+  REQUIRE(beat.sourceAddress == 0x1000);
+  REQUIRE(beat.sourceValue == 0x89abcdef);
+  REQUIRE(beat.remainingBefore == 16);
+  REQUIRE(beat.remainingAfter == 15);
+  dma.stopSPUTransfer(0, bus, system.spu2Controller());
+  REQUIRE(dma.writeSPUMemoryAddress(0, 0x800000) == IOPDMAWriteOutcome::Completed);
+  REQUIRE(dma.startSPUTransfer(0, bus, system.spu2Controller()) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE_THROWS_AS(system.runMasterCycles(8), IOPDMATransferError);
+  const auto rejected = std::find_if(system.trace().rbegin(), system.trace().rend(),
+    [](const NekoTraceEvent &event)
+    {
+      return nekoTraceFailureKind(event) == NekoTraceFailureKind::DMARejection;
+    });
+  REQUIRE(rejected != system.trace().rend());
+  const auto failed = nekoDecodeSPUDMABeat(*rejected);
+  REQUIRE(failed.outcome == NekoSPUTrace::Outcome::Rejected);
+  REQUIRE(failed.targetAddressBefore == failed.targetAddressAfter);
+  REQUIRE(failed.remainingBefore == failed.remainingAfter);
+  REQUIRE(failed.sourceValue == 0);
+}
+
 TEST_CASE("IOP SPU DMA completion uses its own bank and stored mask",
   "[iop][dma][spu-transfer]")
 {

@@ -343,6 +343,59 @@ TEST_CASE("Startup SPU trace and capture exports retain typed positions and raw 
   }
 }
 
+TEST_CASE("Startup normal SPU DMA traces round trip RAM progress without PCM coordinates",
+  "[startup-diagnostics][spu-diagnostics][spu-normal]")
+{
+  for (const std::uint8_t core : {0, 1})
+  for (const auto outcome : {NekoSPUTrace::Outcome::Accepted, NekoSPUTrace::Outcome::Completed,
+                            NekoSPUTrace::Outcome::Wait, NekoSPUTrace::Outcome::Rejected})
+  {
+    NekoSPUTrace::Beat beat;
+    beat.core = core;
+    beat.channel = core == 0 ? 4 : 7;
+    beat.target = NekoSPUTrace::Target::SoundRAM;
+    beat.outcome = outcome;
+    beat.busStatus = outcome == NekoSPUTrace::Outcome::Rejected
+      ? NekoSPUTrace::BusStatus::Unmapped : NekoSPUTrace::BusStatus::None;
+    const bool accepted = outcome == NekoSPUTrace::Outcome::Accepted ||
+      outcome == NekoSPUTrace::Outcome::Completed;
+    beat.sourceAddress = 0x1000;
+    beat.sourceValue = accepted ? 0x89abcdef : 0;
+    beat.targetAddressBefore = 0xffffe;
+    beat.targetAddressAfter = accepted ? 0 : 0xffffe;
+    beat.remainingBefore = outcome == NekoSPUTrace::Outcome::Completed ? 1 : 2;
+    beat.remainingAfter = beat.remainingBefore - (accepted ? 1 : 0);
+    const auto event = nekoSPUDMABeatEvent(beat);
+    const auto decoded = nekoDecodeSPUDMABeat(event);
+    REQUIRE(decoded.target == NekoSPUTrace::Target::SoundRAM);
+    REQUIRE(decoded.sourceValue == beat.sourceValue);
+    REQUIRE(decoded.targetAddressBefore == beat.targetAddressBefore);
+    REQUIRE(decoded.targetAddressAfter == beat.targetAddressAfter);
+    REQUIRE(decoded.remainingBefore == beat.remainingBefore);
+    REQUIRE(decoded.remainingAfter == beat.remainingAfter);
+    REQUIRE((nekoTraceFailureKind(event) == NekoTraceFailureKind::DMARejection) ==
+      (outcome == NekoSPUTrace::Outcome::Rejected));
+    std::ostringstream json;
+    writeStartupTraceEventFields(json, event);
+    REQUIRE(json.str().find("\"kind\":\"normal_write\"") != std::string::npos);
+    REQUIRE(json.str().find("\"target_half\"") == std::string::npos);
+    REQUIRE(json.str().find("\"source_value\":" +
+      (accepted ? std::to_string(beat.sourceValue) : std::string("null"))) !=
+      std::string::npos);
+    for (unsigned invalid = 0; invalid < 3; ++invalid)
+    {
+      auto broken = beat;
+      if (invalid == 0) broken.targetAddressBefore = 0xfffff;
+      if (invalid == 1) broken.targetAddressAfter = 0x100000;
+      if (invalid == 2) broken.remainingBefore = 0;
+      std::ostringstream output;
+      REQUIRE_THROWS_AS(writeStartupTraceEventFields(output, nekoSPUDMABeatEvent(broken)),
+        std::invalid_argument);
+      REQUIRE(output.str().empty());
+    }
+  }
+}
+
 TEST_CASE("Startup SPU command and lifecycle traces preserve typed and raw payloads",
   "[startup-diagnostics][spu-diagnostics]")
 {

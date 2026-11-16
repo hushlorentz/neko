@@ -1267,7 +1267,7 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
   {
     for (std::size_t core = 0; core < SPU2Controller::CORE_COUNT; ++core)
     {
-      if (spu2ControllerComponent.inputWriteRequested(core))
+      if (spu2ControllerComponent.dmaWriteRequested(core))
         observedSPUWait[core] = false;
     }
   }
@@ -1387,6 +1387,11 @@ IOPDMABeatResult NekoSystem::clockIOPSPUChannel(
   beat.remainingBefore = dma.spuRemainingWords(core);
   beat.targetHalf = target.fillHalf;
   beat.targetWord = target.fillWords;
+  if (spu.dmaWriteTarget(core) == SPU2Controller::DMAWriteTarget::SoundRAM)
+  {
+    beat.target = NekoSPUTrace::Target::SoundRAM;
+    beat.targetAddressBefore = spu.transferCursor[core];
+  }
   // Reserve before source acceptance can close a buffer or publish INTC.
   const auto sequence = order.next++;
   const auto result = grant();
@@ -1409,6 +1414,13 @@ IOPDMABeatResult NekoSystem::clockIOPSPUChannel(
     }
   }
   beat.remainingAfter = dma.spuRemainingWords(core);
+  if (beat.target == NekoSPUTrace::Target::SoundRAM)
+  {
+    beat.targetAddressAfter = spu.transferCursor[core];
+    if (result.outcome == IOPDMABeatOutcome::Accepted ||
+        result.outcome == IOPDMABeatOutcome::Completed)
+      beat.sourceValue = result.value;
+  }
   const auto event = nekoSPUDMABeatEvent(beat);
   const auto &previous = lastSPUWait[core];
   const bool waiting = result.outcome == IOPDMABeatOutcome::Wait;

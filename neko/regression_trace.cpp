@@ -128,10 +128,13 @@ NekoTraceEvent nekoSPUDMABeatEvent(const NekoSPUTrace::Beat &beat) noexcept
   return {0, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
     beat.channel | (std::uint64_t{beat.core} << 8) |
       (static_cast<std::uint64_t>(beat.outcome) << 16) |
-      (static_cast<std::uint64_t>(beat.busStatus) << 24),
-    beat.sourceAddress,
+      (static_cast<std::uint64_t>(beat.busStatus) << 24) |
+      (beat.target == NekoSPUTrace::Target::SoundRAM ? NekoSPUTrace::NORMAL_DMA : 0),
+    beat.sourceAddress | (std::uint64_t{beat.sourceValue} << 32),
     beat.remainingBefore | (std::uint64_t{beat.remainingAfter} << 32),
-    beat.targetHalf | (std::uint64_t{beat.targetWord} << 8)};
+    beat.target == NekoSPUTrace::Target::SoundRAM
+      ? beat.targetAddressBefore | (std::uint64_t{beat.targetAddressAfter} << 32)
+      : beat.targetHalf | (std::uint64_t{beat.targetWord} << 8)};
 }
 
 NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event)
@@ -150,15 +153,37 @@ NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event)
   beat.sourceAddress = static_cast<std::uint32_t>(event.value1);
   beat.remainingBefore = static_cast<std::uint32_t>(event.value2);
   beat.remainingAfter = static_cast<std::uint32_t>(event.value2 >> 32);
-  beat.targetHalf = static_cast<std::uint8_t>(event.value3);
-  beat.targetWord = static_cast<std::uint16_t>(event.value3 >> 8);
   if (static_cast<unsigned>(beat.outcome) > 3 ||
-      static_cast<unsigned>(beat.busStatus) > 3 || beat.targetHalf > 1 ||
-      beat.targetWord > 256 ||
+      static_cast<unsigned>(beat.busStatus) > 3 ||
       ((beat.outcome == NekoSPUTrace::Outcome::Rejected) ==
         (beat.busStatus == NekoSPUTrace::BusStatus::None)))
   {
     throw std::invalid_argument("Unknown SPU DMA beat trace metadata.");
+  }
+  if ((event.value0 & NekoSPUTrace::NORMAL_DMA) != 0)
+  {
+    beat.target = NekoSPUTrace::Target::SoundRAM;
+    beat.sourceValue = static_cast<std::uint32_t>(event.value1 >> 32);
+    beat.targetAddressBefore = static_cast<std::uint32_t>(event.value3);
+    beat.targetAddressAfter = static_cast<std::uint32_t>(event.value3 >> 32);
+    const bool accepted = beat.outcome == NekoSPUTrace::Outcome::Accepted ||
+      beat.outcome == NekoSPUTrace::Outcome::Completed;
+    if ((event.value0 >> 33) != 0 || beat.targetAddressBefore > 0xfffff ||
+        beat.targetAddressAfter > 0xfffff || (beat.targetAddressBefore & 1) != 0 ||
+        beat.remainingBefore == 0 || beat.remainingBefore > 65535u * 16 ||
+        beat.remainingAfter != beat.remainingBefore - (accepted ? 1u : 0u) ||
+        ((beat.outcome == NekoSPUTrace::Outcome::Completed) !=
+          (accepted && beat.remainingAfter == 0)) ||
+        beat.targetAddressAfter != ((beat.targetAddressBefore + (accepted ? 2u : 0u)) & 0xfffff) ||
+        (!accepted && beat.sourceValue != 0))
+      throw std::invalid_argument("Unknown SPU normal DMA beat trace metadata.");
+  }
+  else
+  {
+    beat.targetHalf = static_cast<std::uint8_t>(event.value3);
+    beat.targetWord = static_cast<std::uint16_t>(event.value3 >> 8);
+    if (beat.targetHalf > 1 || beat.targetWord > 256)
+      throw std::invalid_argument("Unknown SPU DMA beat trace buffer position.");
   }
   return beat;
 }

@@ -54,6 +54,7 @@ void SPU2Controller::reset() noexcept
   effectStartAddresses.fill(0);
   transferStartAddress.fill(0);
   transferCursor.fill(0);
+  normalWriteOpen.fill(false);
   voiceModeMasks.fill(0);
   autoDMAWriteSelection.fill(0);
 }
@@ -232,7 +233,7 @@ bool SPU2Controller::beginInputWrite(std::size_t core)
 {
   const auto before = observationsEnabled ? inputWriteState(core) : SPU2InputWriteState{};
   auto &state = inputStates.at(core);
-  if (autoDMAWriteSelection[core] == 0)
+  if (autoDMAWriteSelection[core] == 0 || hasNormalWrites())
   {
     return false;
   }
@@ -400,7 +401,7 @@ bool SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t val
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
-  return (value & 0x3fee) == 0;
+  return (value & 0x3fce) == 0 && (value & 0x30) != 0x30;
 }
 
 std::uint16_t SPU2Controller::readCoreAttribute(std::size_t core) const
@@ -413,7 +414,7 @@ bool SPU2Controller::writeCoreAttribute(
 {
   auto &attribute = coreAttributes.at(core);
   if (!isSupportedCoreAttribute(value) ||
-      (autoDMAWriteSelection[core] != 0 && attribute != value))
+      ((autoDMAWriteSelection[core] != 0 || normalWriteOpen[core]) && attribute != value))
   {
     return false;
   }
@@ -499,20 +500,68 @@ std::uint16_t SPU2Controller::readTransferStartAddress(std::size_t index) const
   return transferStartAddress.at(index);
 }
 
-void SPU2Controller::writeTransferStartAddress(
+bool SPU2Controller::writeTransferStartAddress(
   std::size_t index, std::uint16_t value)
 {
+  if (normalWriteOpen.at(index / 2))
+    return false;
   transferStartAddress.at(index) = value;
-  const auto core = index / 2;
-  transferCursor[core] =
-    ((std::uint32_t{transferStartAddress[core * 2]} & 0xf) << 16) |
-    transferStartAddress[core * 2 + 1];
+  transferCursor[index / 2] = programmedTransferAddress(index / 2);
+  return true;
+}
+
+std::uint32_t SPU2Controller::programmedTransferAddress(std::size_t core) const
+{
+  return ((std::uint32_t{transferStartAddress.at(core * 2)} & 0xf) << 16) |
+    transferStartAddress.at(core * 2 + 1);
+}
+
+bool SPU2Controller::hasNormalWrites() const noexcept
+{
+  return normalWriteOpen[0] || normalWriteOpen[1];
+}
+
+SPU2Controller::DMAWriteTarget SPU2Controller::dmaWriteTarget(std::size_t core) const
+{
+  return normalWriteOpen.at(core) ? DMAWriteTarget::SoundRAM : DMAWriteTarget::PCMInput;
+}
+
+bool SPU2Controller::dmaWriteRequested(std::size_t core) const
+{
+  return normalWriteOpen.at(core) || inputWriteRequested(core);
+}
+
+bool SPU2Controller::beginNormalWrite(std::size_t core)
+{
+  const auto address = programmedTransferAddress(core);
+  if ((coreAttributes.at(core) & 0x30) != 0x20 || !hasInactiveInputs() ||
+      normalWriteOpen[core] || (address & 7) != 0)
+    return false;
+  transferCursor[core] = address;
+  normalWriteOpen[core] = true;
+  return true;
+}
+
+void SPU2Controller::cancelNormalWrite(std::size_t core)
+{
+  normalWriteOpen.at(core) = false;
+}
+
+bool SPU2Controller::writeNormalWord(std::size_t core, std::uint32_t value)
+{
+  if (!normalWriteOpen.at(core))
+    return false;
+  auto &cursor = transferCursor[core];
+  writeSoundRAMHalfword(cursor, static_cast<std::uint16_t>(value));
+  writeSoundRAMHalfword((cursor + 1) & 0xfffff, static_cast<std::uint16_t>(value >> 16));
+  cursor = (cursor + 2) & 0xfffff;
+  return true;
 }
 
 bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 {
   auto &cursor = transferCursor.at(core);
-  if (!hasInactiveInputs())
+  if (!hasInactiveInputs() || hasNormalWrites())
   {
     return false;
   }
@@ -524,13 +573,16 @@ bool SPU2Controller::writeTransferData(std::size_t core, std::uint16_t value)
 SPU2ReadResult SPU2Controller::readCoreStatus(std::size_t core) const
 {
   const auto mode = coreAttributes.at(core) & 0x30;
+  if (mode == 0x20 && hasInactiveInputs())
+    return {SPU2AccessStatus::Accepted,
+      static_cast<std::uint16_t>(normalWriteOpen[core] ? 0x400 : 0x80)};
   if (hasActiveVoices())
     return {};
   if (mode == 0 && hasInactiveInput(core))
   {
     return {SPU2AccessStatus::Accepted, 0};
   }
-  if (mode == 0x10 && hasInactiveInputs())
+  if (mode == 0x10 && hasInactiveInputs() && !hasNormalWrites())
   {
     return {SPU2AccessStatus::Accepted, 0x80};
   }
@@ -569,7 +621,8 @@ bool SPU2Controller::writeAutoDMAWriteSelection(
   std::size_t core, std::uint16_t value)
 {
   auto &selection = autoDMAWriteSelection.at(core);
-  if (!isSupportedAutoDMAWriteSelection(core, value))
+  if (!isSupportedAutoDMAWriteSelection(core, value) || normalWriteOpen[core] ||
+      (value != 0 && hasNormalWrites()))
   {
     return false;
   }

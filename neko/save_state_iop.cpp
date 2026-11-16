@@ -465,6 +465,14 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", spu.effectStartAddresses[index]);
       }
     }
+    {
+      auto transfers = writer->scope("normalWriteOpen");
+      for (std::size_t core = 0; core < spu.normalWriteOpen.size(); ++core)
+      {
+        auto element = writer->element(core);
+        writer->writeFieldBool("value", spu.normalWriteOpen[core]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -896,6 +904,14 @@ void NekoSaveStateCodec::readIOP(
         spu.effectStartAddresses[index] = reader->readFieldU16("value");
       }
     }
+    {
+      auto transfers = reader->scope("normalWriteOpen");
+      for (std::size_t core = 0; core < spu.normalWriteOpen.size(); ++core)
+      {
+        auto element = reader->element(core);
+        spu.normalWriteOpen[core] = reader->readFieldBool("value");
+      }
+    }
     reader->requireField(spu.hasValidCommandState(),
       "SPU2 pending commands are outside the bounded profile");
     reader->requireField(spu.hasValidVoiceState(),
@@ -957,7 +973,7 @@ void NekoSaveStateCodec::readIOP(
         channel.registers.channelControlRegister = reader->readFieldU32("channelControl");
         channel.blockWordsTransferred = reader->readFieldU8("blockWordsTransferred");
         reader->requireField(dma.validSPUContinuation(core, system->spu2ControllerComponent),
-          "IOP SPU DMA continuation is incompatible with channel or PCM input state");
+          "IOP SPU DMA continuation is incompatible with channel or endpoint state");
       }
     }
     {

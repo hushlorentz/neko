@@ -538,11 +538,24 @@ bool IOPDMAController::validSPUContinuation(
   }
   if (!spuActive(core))
   {
-    return (control == 0 || control == SPU_STOP) && channel.blockWordsTransferred == 0;
+    return (control == 0 || control == SPU_STOP) && channel.blockWordsTransferred == 0 &&
+      !spu.normalWriteOpen[core];
+  }
+  if (control != SPU_START || spuBlockSize(core) != SPU_BLOCK_SIZE ||
+      spuBlockCount(core) == 0)
+    return false;
+  if (spu.dmaWriteTarget(core) == SPU2Controller::DMAWriteTarget::SoundRAM)
+  {
+    const auto address = spu.programmedTransferAddress(core);
+    constexpr auto blockHalfwords = SPU_BLOCK_SIZE * 2u;
+    return (spu.coreAttributes[core] & 0x30) == 0x20 && spu.hasInactiveInputs() &&
+      (address & 7) == 0 &&
+      spu.transferCursor[core] < SPU2Controller::SOUND_RAM_HALFWORD_COUNT &&
+      spu.transferCursor[core] % blockHalfwords ==
+        (address + channel.blockWordsTransferred * 2u) % blockHalfwords;
   }
   const auto &input = spu.inputStates[core];
-  return control == SPU_START && spuBlockSize(core) == SPU_BLOCK_SIZE &&
-    spuBlockCount(core) != 0 && input.writeOpen &&
+  return input.writeOpen &&
     spu.hasValidInputState() &&
     (spuRemainingWords(core) + input.fillWords) % SPU2Controller::INPUT_HALF_WORD_COUNT == 0;
 }
@@ -565,14 +578,17 @@ IOPDMAWriteOutcome IOPDMAController::startSPUTransfer(
   {
     return IOPDMAWriteOutcome::Completed;
   }
-  if (spuBlockSize(core) != SPU_BLOCK_SIZE || spuBlockCount(core) == 0 ||
-      spuBlockCount(core) % 16 != 0 || spu.readAutoDMAWriteSelection(core) == 0)
+  if (spuBlockSize(core) != SPU_BLOCK_SIZE || spuBlockCount(core) == 0)
   {
     return IOPDMAWriteOutcome::UnsupportedControl;
   }
-  const bool opened = spu.beginInputWrite(core);
-  assert(opened);
-  (void)opened;
+  if (spu.readAutoDMAWriteSelection(core) != 0)
+  {
+    if (spuBlockCount(core) % 16 != 0 || !spu.beginInputWrite(core))
+      return IOPDMAWriteOutcome::UnsupportedControl;
+  }
+  else if (!spu.beginNormalWrite(core))
+    return IOPDMAWriteOutcome::UnsupportedControl;
   channel.blockWordsTransferred = 0;
   channel.registers.channelControlRegister = SPU_START;
   return IOPDMAWriteOutcome::Completed;
@@ -585,7 +601,10 @@ void IOPDMAController::stopSPUTransfer(
   auto &channel = spuChannels.at(core);
   channel.registers.channelControlRegister = SPU_STOP;
   channel.blockWordsTransferred = 0;
-  spu.cancelInputWrite(core);
+  if (spu.dmaWriteTarget(core) == SPU2Controller::DMAWriteTarget::SoundRAM)
+    spu.cancelNormalWrite(core);
+  else
+    spu.cancelInputWrite(core);
 }
 
 IOPDMABeatResult IOPDMAController::inspectSPU(
@@ -599,7 +618,7 @@ IOPDMABeatResult IOPDMAController::inspectSPU(
     throw std::logic_error("IOP SPU DMA continuation is outside the bounded profile.");
   }
   if (!channelEnabled(result.channel) || !spuActive(core) ||
-      !spu.inputWriteRequested(core))
+      !spu.dmaWriteRequested(core))
   {
     return result;
   }
@@ -629,7 +648,8 @@ IOPDMABeatResult IOPDMAController::clockSPU(
   {
     return result;
   }
-  const bool accepted = spu.writeInputWord(core, result.value);
+  const bool accepted = spu.dmaWriteTarget(core) == SPU2Controller::DMAWriteTarget::SoundRAM
+    ? spu.writeNormalWord(core, result.value) : spu.writeInputWord(core, result.value);
   assert(accepted);
   (void)accepted;
   auto &channel = spuChannels[core];

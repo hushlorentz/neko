@@ -122,12 +122,12 @@ class SPU2Controller final
     std::uint16_t readEffectStartAddress(std::size_t index) const;
     void writeEffectStartAddress(std::size_t index, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
-    void writeTransferStartAddress(std::size_t index, std::uint16_t value);
+    bool writeTransferStartAddress(std::size_t index, std::uint16_t value);
     // Provisional synchronous PIO, only while both PCM inputs are inactive.
     bool writeTransferData(std::size_t core, std::uint16_t value);
     std::uint16_t readVoiceModeMask(std::size_t index) const;
     bool writeVoiceModeMask(std::size_t index, std::uint16_t value);
-    // Provisional idle STATX: mode00 zero; mode01 ready only with both inputs inactive.
+    // Provisional STATX: idle00 zero, idle01 ready, normal DMA ready/busy.
     SPU2ReadResult readCoreStatus(std::size_t core) const;
     // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
@@ -218,6 +218,14 @@ class SPU2Controller final
     bool hasValidInputState() const noexcept;
     bool hasInactiveInput(std::size_t core) const;
     bool hasInactiveInputs() const;
+    enum class DMAWriteTarget : std::uint8_t { PCMInput, SoundRAM };
+    DMAWriteTarget dmaWriteTarget(std::size_t core) const;
+    bool dmaWriteRequested(std::size_t core) const;
+    bool hasNormalWrites() const noexcept;
+    std::uint32_t programmedTransferAddress(std::size_t core) const;
+    bool beginNormalWrite(std::size_t core);
+    void cancelNormalWrite(std::size_t core);
+    bool writeNormalWord(std::size_t core, std::uint32_t value);
     static std::uint16_t voiceStartAddressMask(std::size_t index) noexcept;
     std::vector<std::uint8_t> soundRAM;
     std::uint16_t inputClockPhase = 0;
@@ -256,6 +264,7 @@ class SPU2Controller final
     // Per core: raw programmed TSA high/low images, independent of PIO progress.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
     std::array<std::uint32_t, CORE_COUNT> transferCursor{};
+    std::array<bool, CORE_COUNT> normalWriteOpen{};
     // Per core: raw PMON low/high, NON low/high; no voice or noise execution.
     std::array<std::uint16_t, VOICE_MODE_HALFWORD_COUNT> voiceModeMasks{};
     std::array<std::uint16_t, CORE_COUNT> autoDMAWriteSelection{};

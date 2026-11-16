@@ -2570,7 +2570,7 @@ TEST_CASE("SPU2 core attributes retain independent bit0 and bits14-15 images",
     REQUIRE(system.iopStateHash() == programmed);
     for (std::uint32_t value = 1; value <= 0xffff; ++value)
     {
-      if ((value & 0x3fee) != 0 &&
+      if (((value & 0x3fce) != 0 || (value & 0x30) == 0x30) &&
           (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
             IOPBusStatus::Unmapped ||
            system.spu2Controller().readCoreAttribute(selected) != 0xc001))
@@ -2783,7 +2783,7 @@ TEST_CASE("SPU2 I/O mode restores guest stores and cursor status boundaries",
     previousVersion.refreshChecksum();
     REQUIRE_THROWS_AS(restored.loadState(previousVersion), std::invalid_argument);
     REQUIRE(restored.saveState() == before);
-    for (const auto value : {0x8020u, 0x8030u, 0x8012u})
+    for (const auto value : {0x8022u, 0x8030u, 0x8012u})
     {
       SaveStateMutation invalid(before);
       invalid.writeScalar(
@@ -4252,7 +4252,6 @@ TEST_CASE("SPU2 SSA excludes loop current fields widths and non-CPU transports",
     REQUIRE(bus.read16(address).value == voiceStartValue(index));
   }
   for (IOPAddress address : {0x1f9001beu, 0x1f9005beu,
-      0x1f9002e0u, 0x1f9002e2u, 0x1f9006e0u, 0x1f9006e2u,
       0x1f801c00u, 0x1f801c06u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
@@ -4852,7 +4851,6 @@ TEST_CASE("SPU2 configuration excludes neighbors widths and non-CPU transports",
       0x1f900798u, 0x1f90079au, 0x1f90079cu,
       0x1f90033au, 0x1f90033eu,
       0x1f90073au, 0x1f90073eu,
-      0x1f9002e0u, 0x1f9002e2u, 0x1f9006e0u, 0x1f9006e2u,
       0x1f90017eu, 0x1f90057eu,
       0x1f90019cu, 0x1f90019eu,
       0x1f90059cu, 0x1f90059eu,

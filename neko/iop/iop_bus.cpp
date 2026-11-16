@@ -1230,12 +1230,9 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         spu2->writeTransferData(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2TransferStartAddress:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
-      {
-        return {};
-      }
-      spu2->writeTransferStartAddress(location.offset, static_cast<std::uint16_t>(value));
-      return {IOPBusStatus::Completed};
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeTransferStartAddress(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2EffectStartAddress:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

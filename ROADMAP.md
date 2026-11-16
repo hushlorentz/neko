@@ -3982,6 +3982,25 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded programming contract with focused red/green,
       immediate integration coverage and independent review before the
       user-owned implementation commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Core I/O Mode-10 Dependency
+
+- [x] Research the originating core-1 ATTR store to `0x1f90059a` and paired-core
+      mode semantics; distinguish mode programming from transfer requests,
+      status progression and DMA execution through existing SPU2/DMA owners.
+- [x] Select and approve the bounded contract and state/transfer boundaries;
+      split the active lifecycle into independently testable items before
+      admitting the mode.
+- [x] Implement the approved paired normal-write runtime through existing
+      SPU2/DMA owners, including grants, status, cancellation/completion,
+      persistence and typed observations; validate and independently review
+      before the user-owned implementation commit checkpoint.
+- [ ] Add authored CPU-driven normal-write lifecycle and cold/restored
+      traced/plain conformance for both cores, contention, faults and restart;
+      independently review before the user-owned conformance commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

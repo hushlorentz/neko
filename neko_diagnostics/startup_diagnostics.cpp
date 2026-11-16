@@ -547,15 +547,29 @@ void writeStartupSPUDMABeatJson(
   output << "{\"endpoint\":\"iop_spu" << static_cast<unsigned>(beat.core)
     << "\",\"channel\":" << static_cast<unsigned>(beat.channel)
     << ",\"core\":" << static_cast<unsigned>(beat.core)
-    << ",\"kind\":\"payload\",\"outcome\":\"" << outcome
+    << ",\"kind\":\"" << (beat.target == NekoSPUTrace::Target::SoundRAM
+      ? "normal_write" : "payload") << "\",\"outcome\":\"" << outcome
     << "\",\"failure\":\"" << (beat.outcome == NekoSPUTrace::Outcome::Rejected
       ? "source_read" : "none")
     << "\",\"bus_status\":\"" << status
     << "\",\"attempted_address\":" << beat.sourceAddress
     << ",\"remaining_before\":" << beat.remainingBefore
-    << ",\"remaining_after\":" << beat.remainingAfter
-    << ",\"target_half\":" << static_cast<unsigned>(beat.targetHalf)
-    << ",\"target_word\":" << beat.targetWord << '}';
+    << ",\"remaining_after\":" << beat.remainingAfter;
+  if (beat.target == NekoSPUTrace::Target::SoundRAM)
+  {
+    output << ",\"destination_before\":" << beat.targetAddressBefore
+      << ",\"destination_after\":" << beat.targetAddressAfter
+      << ",\"source_value\":";
+    if (beat.outcome == NekoSPUTrace::Outcome::Accepted ||
+        beat.outcome == NekoSPUTrace::Outcome::Completed)
+      output << beat.sourceValue;
+    else
+      output << "null";
+  }
+  else
+    output << ",\"target_half\":" << static_cast<unsigned>(beat.targetHalf)
+      << ",\"target_word\":" << beat.targetWord;
+  output << '}';
 }
 
 void writeStartupSIO2DMABeatJson(

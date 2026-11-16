@@ -255,6 +255,41 @@ class InspectorTests(unittest.TestCase):
                 self.assertNotIn("cpu", row)
                 self.assertEqual(row[key], expected)
 
+    def test_normal_spu_ram_beats_preserve_progress_and_reject_invalid_payloads(self):
+        beat = dict(endpoint="iop_spu0", channel=4, core=0, kind="normal_write",
+                    outcome="completed", failure="none", bus_status="none",
+                    attempted_address=4096, remaining_before=1, remaining_after=0,
+                    destination_before=0xffffe, destination_after=0,
+                    source_value=0x89abcdef)
+        for source in ("prefix", "failure_capture"):
+            rows = records() if source == "prefix" else capture_records()
+            payload = rows[3] if source == "prefix" else rows[-2]["events"][0]
+            payload.update(subsystem=16, event_type=20, values=[1 << 32, 0, 0, 0],
+                           spu_dma=beat)
+            self.write(self.path, rows)
+            report = self.report("events", self.path, "--source", source,
+                                 "--subsystem", "spu2", "--event", "dma_beat")
+            self.assertEqual(report["events"][0]["spu_dma"], beat)
+        for field, value in (("destination_before", 1), ("destination_after", 0x100000),
+                             ("destination_after", 2), ("remaining_before", 0),
+                             ("remaining_after", 1), ("source_value", None)):
+            rows = records()
+            rows[3].update(subsystem=16, event_type=20, values=[1 << 32, 0, 0, 0],
+                           spu_dma=dict(beat))
+            rows[3]["spu_dma"][field] = value
+            self.reject(rows, "spu_dma")
+        rows[3]["spu_dma"] = dict(beat)
+        rows[3]["values"][0] = 0
+        self.reject(rows, "spu_dma")
+        rows[3]["values"][0] = 1 << 32
+        rows[3]["spu_dma"].update(outcome="rejected", failure="source_read",
+                                 bus_status="unmapped", remaining_after=1,
+                                 destination_after=0xffffe, source_value=None)
+        self.write(self.path, rows)
+        self.report("events", self.path)
+        rows[3]["spu_dma"]["source_value"] = 0
+        self.reject(rows, "spu_dma")
+
     def test_spu_decoded_schema_rejects_malformed_identity_and_metadata(self):
         beat = dict(endpoint="iop_spu0", channel=4, core=0, kind="payload",
                     outcome="rejected", failure="source_read", bus_status="unmapped",

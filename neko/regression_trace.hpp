@@ -129,6 +129,7 @@ namespace NekoSPUTrace
   {
     None = 0, Misaligned = 1, ReadOnly = 2, Unmapped = 3
   };
+  enum class Target : std::uint8_t { PCMInput, SoundRAM };
   struct Beat
   {
     std::uint8_t channel = 4;
@@ -140,6 +141,10 @@ namespace NekoSPUTrace
     std::uint32_t remainingAfter = 0;
     std::uint8_t targetHalf = 0;
     std::uint16_t targetWord = 0;
+    Target target = Target::PCMInput;
+    std::uint32_t targetAddressBefore = 0;
+    std::uint32_t targetAddressAfter = 0;
+    std::uint32_t sourceValue = 0;
   };
   struct InputState
   {
@@ -179,6 +184,7 @@ namespace NekoSPUTrace
     std::uint16_t samplePosition = 0;
   };
   constexpr std::uint64_t VOICE_TRANSITION = UINT64_C(1) << 32;
+  constexpr std::uint64_t NORMAL_DMA = UINT64_C(1) << 32;
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
 }
 

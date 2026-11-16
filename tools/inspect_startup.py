@@ -136,10 +136,15 @@ def validate_spu_event(record):
         if key == "spu_dma":
             fields = {"endpoint", "channel", "core", "kind", "outcome", "failure",
                       "bus_status", "attempted_address", "remaining_before",
-                      "remaining_after", "target_half", "target_word"}
+                      "remaining_after"}
+            normal = decoded.get("kind") == "normal_write"
+            fields |= ({"destination_before", "destination_after", "source_value"}
+                       if normal else {"target_half", "target_word"})
             if decoded.keys() != fields:
                 raise ValueError("spu_dma has invalid fields")
-            if decoded["endpoint"] != f"iop_spu{core}" or decoded["kind"] != "payload":
+            if (decoded["endpoint"] != f"iop_spu{core}" or
+                    decoded["kind"] not in ("payload", "normal_write") or
+                    normal != bool(record["values"][0] & (1 << 32))):
                 raise ValueError("spu_dma has invalid endpoint or kind")
             if decoded["outcome"] not in ("accepted", "wait", "completed", "rejected"):
                 raise ValueError("spu_dma has invalid outcome")
@@ -150,7 +155,22 @@ def validate_spu_event(record):
                 raise ValueError("spu_dma has invalid failure/bus_status")
             for field in ("attempted_address", "remaining_before", "remaining_after"):
                 uint(decoded[field], f"spu_dma.{field}", 32)
-            if (uint(decoded["target_half"], "spu_dma.target_half", 8) > 1 or
+            if normal:
+                before = uint(decoded["destination_before"], "spu_dma.destination_before", 20)
+                after = uint(decoded["destination_after"], "spu_dma.destination_after", 20)
+                count = decoded["remaining_before"]
+                accepted = decoded["outcome"] in ("accepted", "completed")
+                if (before & 1 or not 0 < count <= 65535 * 16 or
+                        decoded["remaining_after"] != count - int(accepted) or
+                        ((decoded["outcome"] == "completed") !=
+                         (accepted and decoded["remaining_after"] == 0)) or
+                        after != (before + 2 * int(accepted)) & 0xfffff):
+                    raise ValueError("spu_dma has invalid normal progress")
+                if accepted:
+                    uint(decoded["source_value"], "spu_dma.source_value", 32)
+                elif decoded["source_value"] is not None:
+                    raise ValueError("spu_dma source_value requires an accepted word")
+            elif (uint(decoded["target_half"], "spu_dma.target_half", 8) > 1 or
                     uint(decoded["target_word"], "spu_dma.target_word", 16) > 256):
                 raise ValueError("spu_dma has invalid target position")
         else:

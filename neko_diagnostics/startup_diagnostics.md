@@ -310,14 +310,31 @@ or `rejected`; only rejection carries `failure: "source_read"` and a
 non-`none` bus status (`misaligned`, `read_only`, or `unmapped`). The physical
 source address, remaining word counts, and captured target half/word describe
 the attempted source beat, not a CPU access or a newly inferred request.
-Target halves are 0/1; word positions are 0..256, including a full-half wait
-at 256. Acceptance advances the source count; completion is the final accepted
+For PCM `kind: "payload"`, target halves are 0/1; word positions are 0..256,
+including a full-half wait at 256. Acceptance advances the source count;
+completion is the final accepted
 word. Waiting and rejection leave it unchanged.
 
 The raw beat encoding is channel/core/outcome/bus status in successive bytes
 of `values[0]`, physical source in `values[1]`, remaining-before/after in the
 low/high 32 bits of `values[2]`, and target half/word in the low byte and bits
-8..23 of `values[3]`. Use `nekoDecodeSPUDMABeat` for the typed C++ view.
+8..23 of `values[3]`.
+
+Normal sound-RAM writes instead use `kind: "normal_write"`:
+
+```json
+{"endpoint":"iop_spu0","channel":4,"core":0,"kind":"normal_write","outcome":"accepted","failure":"none","bus_status":"none","attempted_address":4096,"remaining_before":16,"remaining_after":15,"destination_before":12288,"destination_after":12290,"source_value":2309737967}
+```
+
+`destination_before`/`destination_after` are even 20-bit sound-RAM halfword
+coordinates, advancing by 2 modulo `0x100000` on acceptance/completion and
+unchanged on wait/rejection. `source_value` is the accepted 32-bit word, or
+`null` on wait/rejection; these beats do not contain PCM target positions.
+Their raw encoding sets bit32 of `values[0]`, packs source address/value in
+the low/high 32 bits of `values[1]` (value 0 when unaccepted), and destination
+before/after in the low/high 32 bits of `values[3]`. The remaining-count and
+channel/core/outcome/status encodings are unchanged. Use
+`nekoDecodeSPUDMABeat` for both typed variants.
 
 SPU2 event 1 (`StateChanged`) with `values[0]` bit32 clear adds `spu_input`
 with `channel`, `core`, and

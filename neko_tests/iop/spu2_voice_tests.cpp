@@ -72,6 +72,45 @@ namespace
   }
 }
 
+TEST_CASE("SPU2 normal DMA preserves decoded voices and derives status independently",
+          "[iop][spu2][spu-normal]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    auto &dma = system.iopDMAController();
+    auto &bus = system.iopBus();
+    const auto index = (1 - core) * 24;
+    constantVoice(spu, index);
+    samples(spu, 1);
+    const auto before = SPU2VoiceTestAccess::voice(spu, index);
+    REQUIRE(before.fifoCount != 0);
+    const IOPAddress base = 0x1f900000 + static_cast<IOPAddress>(core * 0x400);
+    REQUIRE(bus.write16(base + 0x19a, 0x20).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 0x344).value == 0x80);
+    REQUIRE(bus.write16(base + 0x1aa, static_cast<std::uint16_t>(0x4000 + index * 8)).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(dma.writeSPUMemoryAddress(core, 0x1000) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.writeSPUBlockControl(core, 0x10010) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.startSPUTransfer(core, bus, spu) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(bus.read16(base + 0x344).value == 0x400);
+    dma.writePriority(core == 0 ? IOPDMABank::Primary : IOPDMABank::Secondary,
+      core == 0 ? 0x80000 : 8);
+    REQUIRE(dma.clockSPU(core, bus, spu).outcome == IOPDMABeatOutcome::Accepted);
+    const auto &after = SPU2VoiceTestAccess::voice(spu, index);
+    REQUIRE(after.fifo == before.fifo);
+    REQUIRE(after.fifoHead == before.fifoHead);
+    REQUIRE(after.fifoCount == before.fifoCount);
+    REQUIRE(after.nextAddress == before.nextAddress);
+    REQUIRE(after.envelope.level == before.envelope.level);
+    REQUIRE(spu.readSoundRAMHalfword(static_cast<std::uint32_t>(0x4001 + index * 8)) == 0);
+    dma.stopSPUTransfer(core, bus, spu);
+    REQUIRE(bus.write16(base + 0x19a, 0x10).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(base + 0x344).status == IOPBusStatus::Unmapped);
+  }
+}
+
 TEST_CASE("SPU2 guest commands retain images and start all voices only at the next tick",
           "[iop][spu2][spu2-command]")
 {
