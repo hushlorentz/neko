@@ -53,6 +53,10 @@ namespace
     spu2TransferStartAddressAddresses = {{
       0x1f9001a8, 0x1f9001aa, 0x1f9005a8, 0x1f9005aa
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::EFFECT_START_HALFWORD_COUNT>
+    spu2EffectStartAddressAddresses = {{
+      0x1f9002e0, 0x1f9002e2, 0x1f9006e0, 0x1f9006e2
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::CORE_COUNT>
     spu2TransferDataAddresses = {{
       0x1f9001ac, 0x1f9005ac
@@ -508,6 +512,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, core, Device::SPU2EffectEndAddressHigh};
+    }
+  }
+  for (std::size_t index = 0; index < spu2EffectStartAddressAddresses.size(); ++index)
+  {
+    if (first == spu2EffectStartAddressAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2EffectStartAddress};
     }
   }
   for (std::size_t index = 0; index < spu2TransferStartAddressAddresses.size(); ++index)
@@ -1025,6 +1037,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readEffectEndAddressHigh(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2EffectStartAddress:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readEffectStartAddress(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2TransferStartAddress:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1218,6 +1235,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       spu2->writeTransferStartAddress(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2EffectStartAddress:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeEffectStartAddress(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2EffectEndAddressHigh:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)

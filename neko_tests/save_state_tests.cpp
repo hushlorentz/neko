@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 118 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source]")
+TEST_CASE("Version 119 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,11 +662,11 @@ TEST_CASE("Version 118 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 118);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 119);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 696 + 4456);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 696 + 4464);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -901,9 +901,21 @@ TEST_CASE("Version 118 save-state layout is byte-stable",
     REQUIRE(phase->containerOffset == voiceStateOffset + 8 + index * 92);
     REQUIRE(tail->containerOffset + tail->size == phase->containerOffset + 92);
   }
+  const auto *commandTail = snapshot.find("system.iop.spu2.commands[1].pendingKeyOff");
+  REQUIRE(commandTail != nullptr);
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    const auto *address = snapshot.find(
+      "system.iop.spu2.effectStartAddresses[" + std::to_string(index) + "].value");
+    REQUIRE(address != nullptr);
+    REQUIRE(address->kind == SaveStateFieldKind::U16);
+    REQUIRE(address->size == 2);
+    REQUIRE(address->containerOffset == commandTail->containerOffset + 4 + index * 2);
+    REQUIRE(address->scalarValue == 0);
+  }
   auto previousVersion = state;
   previousVersion.erase(previousVersion.begin() + voiceStateOffset,
-    previousVersion.begin() + voiceStateOffset + 4456);
+    previousVersion.begin() + voiceStateOffset + 4464);
   previousVersion.erase(previousVersion.begin() + cursorOffset,
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
@@ -922,7 +934,7 @@ TEST_CASE("Version 118 save-state layout is byte-stable",
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
-      (offset >= voiceStateOffset + 4456 ? 4456 : 0);
+      (offset >= voiceStateOffset + 4464 ? 4464 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

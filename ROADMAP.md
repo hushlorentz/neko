@@ -3970,9 +3970,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded write contract with focused red/green,
       lifecycle/integration coverage and independent review before the
       user-owned implementation commit checkpoint.
-- [ ] Verify fresh unchanged-input BIOS progress with appropriate same-build
+- [x] Verify fresh unchanged-input BIOS progress with appropriate same-build
       replay/conformance comparisons; identify the next originating dependency
       without claiming completed boot.
+
+### SPU2 Effect Work-Area Start-Address Dependency
+
+- [x] Research the originating halfword store to `0x1f9002e0` and paired ESA
+      halves on both cores; define the address-programming boundary through
+      existing SPU2/shared-RAM ownership, distinct from active effects or clearing.
+- [x] Implement the selected bounded programming contract with focused red/green,
+      immediate integration coverage and independent review before the
+      user-owned implementation commit checkpoint.
+- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

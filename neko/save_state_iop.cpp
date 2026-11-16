@@ -457,6 +457,14 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU32("pendingKeyOff", spu.pendingKeyOff[core]);
       }
     }
+    {
+      auto addresses = writer->scope("effectStartAddresses");
+      for (std::size_t index = 0; index < spu.effectStartAddresses.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", spu.effectStartAddresses[index]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -878,6 +886,14 @@ void NekoSaveStateCodec::readIOP(
         spu.keyOffImages[core * 2 + 1] = reader->readFieldU16("keyOffHigh");
         spu.pendingKeyOn[core] = reader->readFieldU32("pendingKeyOn");
         spu.pendingKeyOff[core] = reader->readFieldU32("pendingKeyOff");
+      }
+    }
+    {
+      auto addresses = reader->scope("effectStartAddresses");
+      for (std::size_t index = 0; index < spu.effectStartAddresses.size(); ++index)
+      {
+        auto word = reader->element(index);
+        spu.effectStartAddresses[index] = reader->readFieldU16("value");
       }
     }
     reader->requireField(spu.hasValidCommandState(),

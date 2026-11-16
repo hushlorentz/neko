@@ -215,6 +215,57 @@ TEST_CASE("SPU2 KON admission and pending mode guards are atomic",
   REQUIRE(SPU2VoiceTestAccess::valid(spu));
 }
 
+TEST_CASE("SPU2 ESA programming preserves live voices PCM PIO commands and restored progress",
+          "[iop][spu2][spu2-esa][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  REQUIRE(spu.writeCoreAttribute(0, 0x0010));
+  spu.writeTransferStartAddress(1, 0x7000);
+  REQUIRE(spu.writeTransferData(0, 0x0707));
+  SPU2InputTest::programProfile(spu);
+  for (const auto index : {0u, 24u})
+    constantVoice(spu, index);
+  samples(spu, 4);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(spu.writeAutoDMAWriteSelection(core, 1u << core));
+    REQUIRE(spu.writeInputWord(core, 0x12345678));
+    REQUIRE(spu.writeKeyOn(core * 2, 2));
+    spu.writeKeyOff(core * 2, 1);
+  }
+  source.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  source.iopDMAController().writeAuxiliaryControl(0x12345678);
+  const auto before = inspectSaveState(source.saveState());
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    const auto address = static_cast<IOPAddress>(
+      0x1f9002e0 + (index / 2) * 0x400 + (index % 2) * 2);
+    REQUIRE(source.iopBus().write16(address,
+      static_cast<std::uint16_t>(0xfffd + index / 2)).status == IOPBusStatus::Completed);
+  }
+  const auto saved = source.saveState();
+  const auto differences = diffSaveStates(before, inspectSaveState(saved));
+  REQUIRE(differences.size() == 4);
+  for (std::size_t index = 0; index < differences.size(); ++index)
+    REQUIRE(differences[index].path ==
+      "system.iop.spu2.effectStartAddresses[" + std::to_string(index) + "].value");
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(2 * 6144);
+  restored.runMasterCycles(2 * 6144);
+  plain.runMasterCycles(2 * 6144);
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  IOPTraceTest::requireMachine(restored, source);
+  IOPTraceTest::requireMachine(plain, source);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
 TEST_CASE("SPU2 ENDX halfword writes preserve zero and clear the whole selected core",
           "[iop][spu2][spu2-endx]")
 {

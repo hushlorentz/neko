@@ -51,6 +51,7 @@ void SPU2Controller::reset() noexcept
   mainMix.fill(0);
   effectInputVolumes.fill(0);
   effectEndAddressHigh.fill(0);
+  effectStartAddresses.fill(0);
   transferStartAddress.fill(0);
   transferCursor.fill(0);
   voiceModeMasks.fill(0);
@@ -481,6 +482,16 @@ void SPU2Controller::writeEffectEndAddressHigh(
   std::size_t core, std::uint16_t value)
 {
   effectEndAddressHigh.at(core) = value;
+}
+
+std::uint16_t SPU2Controller::readEffectStartAddress(std::size_t index) const
+{
+  return effectStartAddresses.at(index);
+}
+
+void SPU2Controller::writeEffectStartAddress(std::size_t index, std::uint16_t value)
+{
+  effectStartAddresses.at(index) = value;
 }
 
 std::uint16_t SPU2Controller::readTransferStartAddress(std::size_t index) const
