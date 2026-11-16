@@ -344,7 +344,7 @@ TEST_CASE("Startup SPU trace and capture exports retain typed positions and raw 
 }
 
 TEST_CASE("Startup normal SPU DMA traces round trip RAM progress without PCM coordinates",
-  "[startup-diagnostics][spu-diagnostics][spu-normal]")
+  "[startup-diagnostics][spu-diagnostics][spu-normal][spu-normal-raw-tsa]")
 {
   for (const std::uint8_t core : {0, 1})
   for (const auto outcome : {NekoSPUTrace::Outcome::Accepted, NekoSPUTrace::Outcome::Completed,
@@ -361,8 +361,8 @@ TEST_CASE("Startup normal SPU DMA traces round trip RAM progress without PCM coo
       outcome == NekoSPUTrace::Outcome::Completed;
     beat.sourceAddress = 0x1000;
     beat.sourceValue = accepted ? 0x89abcdef : 0;
-    beat.targetAddressBefore = 0xffffe;
-    beat.targetAddressAfter = accepted ? 0 : 0xffffe;
+    beat.targetAddressBefore = 0xfffff;
+    beat.targetAddressAfter = accepted ? 1 : 0xfffff;
     beat.remainingBefore = outcome == NekoSPUTrace::Outcome::Completed ? 1 : 2;
     beat.remainingAfter = beat.remainingBefore - (accepted ? 1 : 0);
     const auto event = nekoSPUDMABeatEvent(beat);
@@ -382,12 +382,13 @@ TEST_CASE("Startup normal SPU DMA traces round trip RAM progress without PCM coo
     REQUIRE(json.str().find("\"source_value\":" +
       (accepted ? std::to_string(beat.sourceValue) : std::string("null"))) !=
       std::string::npos);
-    for (unsigned invalid = 0; invalid < 3; ++invalid)
+    for (unsigned invalid = 0; invalid < 4; ++invalid)
     {
       auto broken = beat;
-      if (invalid == 0) broken.targetAddressBefore = 0xfffff;
+      if (invalid == 0) broken.targetAddressBefore = 0x100000;
       if (invalid == 1) broken.targetAddressAfter = 0x100000;
       if (invalid == 2) broken.remainingBefore = 0;
+      if (invalid == 3) broken.targetAddressAfter ^= 1;
       std::ostringstream output;
       REQUIRE_THROWS_AS(writeStartupTraceEventFields(output, nekoSPUDMABeatEvent(broken)),
         std::invalid_argument);

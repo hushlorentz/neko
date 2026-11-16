@@ -259,7 +259,7 @@ class InspectorTests(unittest.TestCase):
         beat = dict(endpoint="iop_spu0", channel=4, core=0, kind="normal_write",
                     outcome="completed", failure="none", bus_status="none",
                     attempted_address=4096, remaining_before=1, remaining_after=0,
-                    destination_before=0xffffe, destination_after=0,
+                    destination_before=0xfffff, destination_after=1,
                     source_value=0x89abcdef)
         for source in ("prefix", "failure_capture"):
             rows = records() if source == "prefix" else capture_records()
@@ -270,7 +270,7 @@ class InspectorTests(unittest.TestCase):
             report = self.report("events", self.path, "--source", source,
                                  "--subsystem", "spu2", "--event", "dma_beat")
             self.assertEqual(report["events"][0]["spu_dma"], beat)
-        for field, value in (("destination_before", 1), ("destination_after", 0x100000),
+        for field, value in (("destination_before", 0x100000), ("destination_after", 0x100000),
                              ("destination_after", 2), ("remaining_before", 0),
                              ("remaining_after", 1), ("source_value", None)):
             rows = records()
@@ -284,7 +284,7 @@ class InspectorTests(unittest.TestCase):
         rows[3]["values"][0] = 1 << 32
         rows[3]["spu_dma"].update(outcome="rejected", failure="source_read",
                                  bus_status="unmapped", remaining_after=1,
-                                 destination_after=0xffffe, source_value=None)
+                                 destination_after=0xfffff, source_value=None)
         self.write(self.path, rows)
         self.report("events", self.path)
         rows[3]["spu_dma"]["source_value"] = 0

@@ -160,7 +160,7 @@ def validate_spu_event(record):
                 after = uint(decoded["destination_after"], "spu_dma.destination_after", 20)
                 count = decoded["remaining_before"]
                 accepted = decoded["outcome"] in ("accepted", "completed")
-                if (before & 1 or not 0 < count <= 65535 * 16 or
+                if (not 0 < count <= 65535 * 16 or
                         decoded["remaining_after"] != count - int(accepted) or
                         ((decoded["outcome"] == "completed") !=
                          (accepted and decoded["remaining_after"] == 0)) or

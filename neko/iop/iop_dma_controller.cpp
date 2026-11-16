@@ -549,7 +549,6 @@ bool IOPDMAController::validSPUContinuation(
     const auto address = spu.programmedTransferAddress(core);
     constexpr auto blockHalfwords = SPU_BLOCK_SIZE * 2u;
     return (spu.coreAttributes[core] & 0x30) == 0x20 && spu.hasInactiveInputs() &&
-      (address & 7) == 0 &&
       spu.transferCursor[core] < SPU2Controller::SOUND_RAM_HALFWORD_COUNT &&
       spu.transferCursor[core] % blockHalfwords ==
         (address + channel.blockWordsTransferred * 2u) % blockHalfwords;

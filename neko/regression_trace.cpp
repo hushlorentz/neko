@@ -169,7 +169,7 @@ NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event)
     const bool accepted = beat.outcome == NekoSPUTrace::Outcome::Accepted ||
       beat.outcome == NekoSPUTrace::Outcome::Completed;
     if ((event.value0 >> 33) != 0 || beat.targetAddressBefore > 0xfffff ||
-        beat.targetAddressAfter > 0xfffff || (beat.targetAddressBefore & 1) != 0 ||
+        beat.targetAddressAfter > 0xfffff ||
         beat.remainingBefore == 0 || beat.remainingBefore > 65535u * 16 ||
         beat.remainingAfter != beat.remainingBefore - (accepted ? 1u : 0u) ||
         ((beat.outcome == NekoSPUTrace::Outcome::Completed) !=

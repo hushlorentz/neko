@@ -4013,9 +4013,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement paired-core passive offset/coefficient halfword programming
       through the existing SPU2 owner, with exact CPU admission, red/green,
       lifecycle/persistence coverage and independent review before user commit.
-- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+- [x] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
       traced/plain and canonical comparisons; identify the next originating
       dependency without admitting active effects or claiming completed boot.
+
+### SPU2 Core-1 DMA Start Dependency
+
+- [x] Research the originating word store of `0x01000201` to `0x1f801508`
+      through the existing SPU2/DMA owners and containing lifecycle; distinguish
+      missing setup from unsupported behavior and split the bounded next work.
+- [x] Select and approve the bounded raw-TSA start policy, documenting the
+      unresolved API alignment versus observed raw programming evidence gap.
+- [x] Implement the approved paired-core start/continuation extension with
+      focused red/green, lifecycle/persistence and authored guest coverage;
+      independently review before the user-owned implementation commit.
+- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

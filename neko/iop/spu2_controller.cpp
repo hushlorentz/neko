@@ -557,7 +557,7 @@ bool SPU2Controller::beginNormalWrite(std::size_t core)
 {
   const auto address = programmedTransferAddress(core);
   if ((coreAttributes.at(core) & 0x30) != 0x20 || !hasInactiveInputs() ||
-      normalWriteOpen[core] || (address & 7) != 0)
+      normalWriteOpen[core])
     return false;
   transferCursor[core] = address;
   normalWriteOpen[core] = true;
