@@ -3998,7 +3998,7 @@ not requirements for exhaustive subsystem coverage.
       SPU2/DMA owners, including grants, status, cancellation/completion,
       persistence and typed observations; validate and independently review
       before the user-owned implementation commit checkpoint.
-- [ ] Add authored CPU-driven normal-write lifecycle and cold/restored
+- [x] Add authored CPU-driven normal-write lifecycle and cold/restored
       traced/plain conformance for both cores, contention, faults and restart;
       independently review before the user-owned conformance commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,

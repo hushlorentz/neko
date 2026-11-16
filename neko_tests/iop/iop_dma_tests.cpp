@@ -2430,6 +2430,17 @@ namespace
     guestStore(program, 0x1000, GUEST_DONE);
   }
 
+  void guestNormalProfile(SPUGuest &program, std::size_t core,
+    IOPWord blocks, IOPWord destination)
+  {
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    guestStore(program, base + 0x19a, 0xc021, GUEST_SH);
+    guestStore(program, base + 0x1a8, destination >> 16, GUEST_SH);
+    guestStore(program, base + 0x1aa, destination & 0xffff, GUEST_SH);
+    guestStore(program, SPU_MADR[core], static_cast<IOPAddress>(0x4000 + core * 0x2000));
+    guestStore(program, SPU_BCR[core], (blocks << 16) | 16);
+  }
+
   IOPWord guestPayload(std::size_t core, unsigned word)
   {
     return 0x51000000 | (static_cast<IOPWord>(core) << 20) | word;
@@ -3101,6 +3112,481 @@ TEST_CASE("Authored IOP SPU source faults restore before CPU retirement in every
     REQUIRE(actual.found);
     IOPTraceTest::requireEvents({actual.event}, {expected.event});
     REQUIRE_FALSE(actual.instruction.available);
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal guest completes wrapped paired RAM writes with shared contention",
+  "[iop][spu-normal-conformance][save-state][trace]")
+{
+  SPUGuest program;
+  guestNormalProfile(program, 0, 1, 0xffff8);
+  guestNormalProfile(program, 1, 3, 0x3000);
+  guestStore(program, DICR, 0x00900000);
+  guestStore(program, DICR2, 0x00810000);
+  guestStore(program, 0x1f80152c, 0x2000);
+  guestStore(program, 0x1f801528, 0x01000401);
+  guestStore(program, CHCR, START);
+  const auto firstStart = guestSPUStart(program, 0);
+  guestSPUStart(program, 1);
+  const auto statusLoad = guestReadback(program, 0x1f900344, 0x1100, GUEST_LHU);
+  const auto enable = program.size();
+  guestStore(program, DPCR, 0x80000);
+  guestStore(program, DPCR2, 0x8808);
+  guestSPUFinish(program);
+  program.push_back(0x1000ffff);
+  program.push_back(0);
+  NekoSystem source;
+  installSPUGuest(source, program);
+  installSPUSIFPeers(source);
+  source.runMasterCycles(firstStart * 8);
+  REQUIRE(source.iopCore().branchContinuation().active);
+  REQUIRE_FALSE(source.iopDMAController().spuActive(0));
+  requireSPUGuestContinuation(source, (statusLoad + 1 - firstStart) * 8);
+  REQUIRE(source.iopCore().delayedResultContinuation().source == IOPDelayedResultSource::Load);
+  REQUIRE(source.iopDMAController().spuRemainingWords(0) == 16);
+  REQUIRE(source.iopDMAController().spuRemainingWords(1) == 48);
+  requireSPUGuestContinuation(source, (enable - statusLoad - 1) * 8);
+  REQUIRE(source.iopBus().read32(0x1100).value == 0x400);
+  const auto waiting = source.saveState();
+  const auto waitingCycle = source.masterClockScheduler().currentCycle();
+  source.startTrace();
+  constexpr std::uint64_t end = 4096;
+  source.runMasterCycles(end - waitingCycle);
+  REQUIRE(source.iopCore().stopReason() == IOPStopReason::None);
+  REQUIRE(source.iopBus().read32(0x1000).value == GUEST_DONE);
+  std::array<unsigned, 2> words{};
+  std::array<unsigned, 2> completions{};
+  std::array<bool, 2> sifCompleted{};
+  std::vector<unsigned> grants;
+  std::uint64_t previousGrant = 0;
+  for (const auto &event : source.trace())
+  {
+    bool granted = false;
+    if (event.subsystem == NekoTraceSubsystem::SPU2 &&
+        event.type == NekoTraceEventType::DMABeat)
+    {
+      const auto beat = nekoDecodeSPUDMABeat(event);
+      if (beat.outcome == NekoSPUTrace::Outcome::Wait)
+        continue;
+      REQUIRE(beat.target == NekoSPUTrace::Target::SoundRAM);
+      REQUIRE((beat.outcome == NekoSPUTrace::Outcome::Accepted ||
+        beat.outcome == NekoSPUTrace::Outcome::Completed));
+      const auto word = words[beat.core]++;
+      const auto destination = beat.core == 0 ? 0xffff8u : 0x3000u;
+      REQUIRE(beat.sourceAddress == 0x4000 + beat.core * 0x2000 + word * 4);
+      REQUIRE(beat.sourceValue == guestPayload(beat.core, word));
+      REQUIRE(beat.targetAddressBefore == ((destination + word * 2) & 0xfffff));
+      REQUIRE(beat.targetAddressAfter == ((destination + word * 2 + 2) & 0xfffff));
+      if (beat.outcome == NekoSPUTrace::Outcome::Completed)
+        ++completions[beat.core];
+      grants.push_back(beat.channel);
+      granted = true;
+    }
+    if (event.subsystem == NekoTraceSubsystem::SIF &&
+        event.type == NekoTraceEventType::DMABeat)
+    {
+      const auto endpoint = static_cast<NekoSIFDMATrace::Endpoint>(event.value0 & 255);
+      const auto outcome = static_cast<NekoSIFDMATrace::Outcome>(
+        (event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255);
+      if ((endpoint == NekoSIFDMATrace::Endpoint::IOPSIF0 ||
+           endpoint == NekoSIFDMATrace::Endpoint::IOP) &&
+          (outcome == NekoSIFDMATrace::Outcome::Accepted ||
+           outcome == NekoSIFDMATrace::Outcome::Completed))
+      {
+        const auto peer = endpoint == NekoSIFDMATrace::Endpoint::IOPSIF0 ? 0u : 1u;
+        if (outcome == NekoSIFDMATrace::Outcome::Completed)
+          sifCompleted[peer] = true;
+        grants.push_back(peer == 0 ? 9 : 10);
+        granted = true;
+      }
+    }
+    if (granted)
+    {
+      REQUIRE(event.masterCycle > previousGrant);
+      previousGrant = event.masterCycle;
+    }
+  }
+  REQUIRE(words == (std::array<unsigned, 2>{{16, 48}}));
+  REQUIRE(completions == (std::array<unsigned, 2>{{1, 1}}));
+  REQUIRE(sifCompleted == (std::array<bool, 2>{{true, true}}));
+  const auto paired = std::find(grants.begin(), grants.end(), 7);
+  REQUIRE(std::distance(paired, grants.end()) >= 4);
+  REQUIRE(std::vector<unsigned>(paired, paired + 4) == (std::vector<unsigned>{7, 9, 10, 4}));
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto destination = core == 0 ? 0xffff8u : 0x3000u;
+    const unsigned count = core == 0 ? 16 : 48;
+    REQUIRE(source.iopBus().read32(static_cast<IOPAddress>(0x1200 + core * 8)).value ==
+      0x4000 + core * 0x2000 + count * 4);
+    REQUIRE(source.iopBus().read32(static_cast<IOPAddress>(0x1204 + core * 8)).value == 16);
+    REQUIRE(source.iopBus().read16(static_cast<IOPAddress>(0x1f900344 + core * 0x400)).value ==
+      0x80);
+    for (unsigned word = 0; word < count; ++word)
+    {
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword((destination + word * 2) & 0xfffff) ==
+        static_cast<std::uint16_t>(guestPayload(core, word)));
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword((destination + word * 2 + 1) & 0xfffff) ==
+        static_cast<std::uint16_t>(guestPayload(core, word) >> 16));
+    }
+  }
+  REQUIRE((source.iopDMAController().interruptStatus(PRIMARY) & 0x10000000) != 0);
+  REQUIRE((source.iopDMAController().interruptStatus(SECONDARY) & 0x01000000) != 0);
+  NekoSystem progressing;
+  progressing.loadState(waiting);
+  unsigned pulses = 0;
+  while (progressing.iopDMAController().spuRemainingWords(1) != 33 && pulses < 256)
+  {
+    progressing.runMasterCycles(8);
+    ++pulses;
+  }
+  REQUIRE(pulses < 256);
+  requireSPUGuestContinuation(progressing, 48);
+  REQUIRE(progressing.iopDMAController().spuBlockCount(1) == 2);
+  requireSPUGuestContinuation(progressing, 32);
+  progressing.runMasterCycles(end - progressing.masterClockScheduler().currentCycle());
+  IOPTraceTest::requireMachine(progressing, source);
+  for (const bool traced : {false, true})
+  {
+    NekoSystem cold;
+    installSPUGuest(cold, program);
+    installSPUSIFPeers(cold);
+    if (traced) cold.startTrace(32);
+    cold.runMasterCycles(end);
+    IOPTraceTest::requireMachine(cold, source);
+    NekoSystem restored;
+    restored.loadState(waiting);
+    if (traced) restored.startTrace();
+    restored.runMasterCycles(end - waitingCycle);
+    IOPTraceTest::requireMachine(restored, source);
+    if (traced)
+      IOPTraceTest::requireEvents(restored.trace(), source.trace());
+    else
+      REQUIRE(restored.trace().empty());
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal guest preserves partial stops and reseeds paired restarts",
+  "[iop][spu-normal-conformance][save-state][trace]")
+{
+  SPUGuest program;
+  for (std::size_t core = 0; core < 2; ++core)
+    guestNormalProfile(program, core, 8, core == 0 ? 0xffff8 : 0x3000);
+  guestStore(program, DICR, 0x00900000);
+  guestStore(program, DICR2, 0x00810000);
+  guestSPUStart(program, 0);
+  guestSPUStart(program, 1);
+  guestStore(program, DPCR, 0x80000);
+  guestStore(program, DPCR2, 8);
+  guestPoll(program, SPU_BCR[0], 0x80010, GUEST_BEQ);
+  guestStore(program, SPU_CHCR[0], 0);
+  guestStore(program, SPU_CHCR[1], 0x201);
+  const auto stopped = program.size();
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    guestReadback(program, SPU_MADR[core], static_cast<IOPAddress>(0x1100 + core * 8));
+    guestReadback(program, SPU_BCR[core], static_cast<IOPAddress>(0x1104 + core * 8));
+    guestStore(program, SPU_MADR[core], static_cast<IOPAddress>(0xc000 + core * 0x2000));
+    guestStore(program, SPU_BCR[core], 0x10010);
+  }
+  guestSPUStart(program, 0);
+  guestSPUStart(program, 1);
+  guestSPUFinish(program);
+  program.push_back(0x1000ffff);
+  program.push_back(0);
+  NekoSystem source;
+  installSPUGuest(source, program);
+  unsigned pulses = 0;
+  while (source.iopCore().programCounter() != 0xa0000000 + stopped * 4 && pulses < 512)
+  {
+    source.runMasterCycles(8);
+    ++pulses;
+  }
+  REQUIRE(pulses < 512);
+  std::array<IOPWord, 2> addresses{};
+  std::array<IOPWord, 2> blocks{};
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE_FALSE(source.iopDMAController().spuActive(core));
+    addresses[core] = source.iopDMAController().spuMemoryAddress(core);
+    blocks[core] = source.iopDMAController().spuBlockControl(core);
+    REQUIRE(addresses[core] > 0x4040 + core * 0x2000);
+    REQUIRE(addresses[core] < 0x4200 + core * 0x2000);
+  }
+  REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) == 0);
+  requireSPUGuestContinuation(source, 2048);
+  REQUIRE(source.iopCore().stopReason() == IOPStopReason::None);
+  REQUIRE(source.iopBus().read32(0x1000).value == GUEST_DONE);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto destination = core == 0 ? 0xffff8u : 0x3000u;
+    REQUIRE(source.iopBus().read32(static_cast<IOPAddress>(0x1100 + core * 8)).value ==
+      addresses[core]);
+    REQUIRE(source.iopBus().read32(static_cast<IOPAddress>(0x1104 + core * 8)).value ==
+      blocks[core]);
+    const auto oldWords = (addresses[core] - 0x4000 - core * 0x2000) / 4;
+    for (unsigned word = 0; word < oldWords; ++word)
+    {
+      const auto expected = word < 16 ? restartPayload(core, word) : guestPayload(core, word);
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword((destination + word * 2) & 0xfffff) ==
+        static_cast<std::uint16_t>(expected));
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword((destination + word * 2 + 1) & 0xfffff) ==
+        static_cast<std::uint16_t>(expected >> 16));
+    }
+    REQUIRE(source.iopBus().read32(static_cast<IOPAddress>(0x1200 + core * 8)).value ==
+      0xc040 + core * 0x2000);
+  }
+  for (const bool traced : {false, true})
+  {
+    NekoSystem cold;
+    installSPUGuest(cold, program);
+    if (traced) cold.startTrace(32);
+    cold.runMasterCycles(source.masterClockScheduler().currentCycle());
+    IOPTraceTest::requireMachine(cold, source);
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal live guards reject guest stores without endpoint mutation",
+  "[iop][spu-normal-conformance][save-state][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    const auto peer = static_cast<IOPAddress>(0x1f900000 + (core ^ 1) * 0x400);
+    const struct { IOPAddress address; IOPWord value; IOPWord opcode; } writes[] = {
+      {base + 0x1aa, 0xfff8, GUEST_SH}, {base + 0x19a, 0xc001, GUEST_SH},
+      {base + 0x1b0, 0, GUEST_SH}, {peer + 0x1b0, 1u << (core ^ 1), GUEST_SH},
+      {peer + 0x1ac, 0x1234, GUEST_SH},
+      {SPU_MADR[core], 0x8000, GUEST_SW}, {SPU_BCR[core], 0x20010, GUEST_SW}
+    };
+    for (const auto &write : writes)
+    {
+      CAPTURE(core);
+      CAPTURE(write.address);
+      SPUGuest program;
+      guestNormalProfile(program, core, 1, 0xffff8);
+      guestSPUStart(program, core);
+      guestStore(program, write.address, write.value, write.opcode);
+      NekoSystem source;
+      SPU2InputTest::programProfile(source.spu2Controller());
+      installSPUGuest(source, program);
+      source.runMasterCycles((program.size() - 1) * 8);
+      REQUIRE(source.iopDMAController().spuActive(core));
+      requireSPUGuestContinuation(source, 1);
+      REQUIRE(source.iopCore().stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(source.iopCore().storeFailure().access.physicalAddress == write.address);
+      REQUIRE(source.iopCore().storeFailure().access.virtualAddress == (write.address | 0xa0000000));
+      REQUIRE(source.iopDMAController().spuRemainingWords(core) == 16);
+      REQUIRE(source.iopDMAController().spuMemoryAddress(core) == 0x4000 + core * 0x2000);
+      REQUIRE(source.iopDMAController().spuBlockControl(core) == 0x10010);
+      REQUIRE(source.spu2Controller().readTransferStartAddress(core * 2) == 0xf);
+      REQUIRE(source.spu2Controller().readTransferStartAddress(core * 2 + 1) == 0xfff8);
+      REQUIRE(source.spu2Controller().readCoreAttribute(core) == 0xc021);
+      REQUIRE(source.spu2Controller().readAutoDMAWriteSelection(0) == 0);
+      REQUIRE(source.spu2Controller().readAutoDMAWriteSelection(1) == 0);
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword(0xffff8) == 0);
+      REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) == 0);
+    }
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal source faults retain prior RAM before CPU retirement",
+  "[iop][spu-normal-conformance][save-state][startup-failure]")
+{
+  for (std::size_t badCore = 0; badCore < 2; ++badCore)
+  {
+    CAPTURE(badCore);
+    SPUGuest program;
+    for (std::size_t core = 0; core < 2; ++core)
+      guestNormalProfile(program, core, 2, static_cast<IOPWord>(0x3000 + core * 0x100));
+    guestStore(program, DICR, 0x00900000);
+    guestStore(program, DICR2, 0x00810000);
+    guestStore(program, SPU_MADR[badCore], 0x7ffffc);
+    guestSPUStart(program, 0);
+    guestSPUStart(program, 1);
+    guestStore(program, badCore == 0 ? DPCR2 : DPCR, badCore == 0 ? 8 : 0x80000);
+    guestStore(program, badCore == 0 ? DPCR : DPCR2, badCore == 0 ? 0x80000 : 8);
+    NekoSystem source;
+    installSPUGuest(source, program);
+    REQUIRE(source.iopBus().write32(0x1ffffc, 0x1234abcd).status == IOPBusStatus::Completed);
+    const auto cut = program.size() * 8 + 16;
+    source.runMasterCycles(cut);
+    REQUIRE(source.iopDMAController().spuRemainingWords(badCore) == 31);
+    const auto checkpoint = source.saveState();
+    const auto retired = source.iopCore().retiredInstructions();
+    const auto goodRemaining = source.iopDMAController().spuRemainingWords(badCore ^ 1);
+    const auto grantCursor = source.iopDMAController().tieBreakChannel();
+    source.startFailureProbe();
+    REQUIRE_THROWS_AS(source.clockMasterCycle(), IOPDMATransferError);
+    REQUIRE(source.iopCore().retiredInstructions() == retired);
+    REQUIRE(source.iopDMAController().spuRemainingWords(badCore) == 31);
+    REQUIRE(source.iopDMAController().spuRemainingWords(badCore ^ 1) == goodRemaining);
+    REQUIRE(source.iopDMAController().spuMemoryAddress(badCore) == 0x800000);
+    REQUIRE(source.iopDMAController().tieBreakChannel() == grantCursor);
+    REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) == 0);
+    const auto expected = firstStartupFailure(source.trace());
+    REQUIRE(expected.found);
+    REQUIRE(expected.kind == StartupFailureKind::DMARejection);
+    REQUIRE_FALSE(expected.instruction.available);
+    const auto beat = nekoDecodeSPUDMABeat(expected.event);
+    REQUIRE(beat.target == NekoSPUTrace::Target::SoundRAM);
+    REQUIRE(beat.core == badCore);
+    REQUIRE(beat.sourceAddress == 0x800000);
+    REQUIRE(beat.targetAddressBefore == 0x3002 + badCore * 0x100);
+    REQUIRE(beat.targetAddressAfter == beat.targetAddressBefore);
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(
+      static_cast<std::uint32_t>(0x3000 + badCore * 0x100)) == 0xabcd);
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(
+      static_cast<std::uint32_t>(0x3001 + badCore * 0x100)) == 0x1234);
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(
+      static_cast<std::uint32_t>(0x3002 + badCore * 0x100)) == 0);
+    for (unsigned mode = 0; mode < 4; ++mode)
+    {
+      CAPTURE(mode);
+      NekoSystem restored;
+      restored.loadState(checkpoint);
+      const auto capture = std::make_shared<StartupFailureCapture>();
+      if (mode == 1) restored.startTrace();
+      if (mode == 2) restored.startFailureProbe();
+      if (mode == 3) restored.startTrace(0, capture);
+      REQUIRE_THROWS_AS(restored.clockMasterCycle(), IOPDMATransferError);
+      IOPTraceTest::requireMachine(restored, source);
+      if (mode != 0)
+      {
+        const auto actual = firstStartupFailure(mode == 3 ? capture->events() : restored.trace());
+        REQUIRE(actual.found);
+        REQUIRE_FALSE(actual.instruction.available);
+        IOPTraceTest::requireEvents({actual.event}, {expected.event});
+      }
+    }
+    for (const bool traced : {false, true})
+    {
+      NekoSystem cold;
+      installSPUGuest(cold, program);
+      REQUIRE(cold.iopBus().write32(0x1ffffc, 0x1234abcd).status == IOPBusStatus::Completed);
+      if (traced) cold.startTrace(8);
+      cold.runMasterCycles(cut);
+      REQUIRE_THROWS_AS(cold.clockMasterCycle(), IOPDMATransferError);
+      IOPTraceTest::requireMachine(cold, source);
+    }
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal final grant completes before a coincident CPU stop",
+  "[iop][spu-normal-conformance][save-state][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  for (const IOPWord stop : {0u, 0x201u})
+  {
+    CAPTURE(core);
+    CAPTURE(stop);
+    SPUGuest program;
+    guestNormalProfile(program, core, 1, 0x3000);
+    guestStore(program, core == 0 ? DICR : DICR2, core == 0 ? 0x00900000 : 0x00810000);
+    guestSPUStart(program, core);
+    guestStore(program, core == 0 ? DPCR : DPCR2, core == 0 ? 0x80000 : 8);
+    program.insert(program.end(), 11, 0);
+    guestStore(program, SPU_CHCR[core], stop);
+    const auto store = program.size() - 1;
+    NekoSystem source;
+    installSPUGuest(source, program);
+    source.runMasterCycles(store * 8);
+    REQUIRE(source.iopDMAController().spuRemainingWords(core) == 1);
+    REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) == 0);
+    requireSPUGuestContinuation(source, 1);
+    REQUIRE(source.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(source.iopBus().read32(SPU_CHCR[core]).value == stop);
+    REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) != 0);
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x301e) ==
+      static_cast<std::uint16_t>(guestPayload(core, 15)));
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x301f) ==
+      static_cast<std::uint16_t>(guestPayload(core, 15) >> 16));
+    const auto &events = source.trace();
+    const auto completed = std::find_if(events.begin(), events.end(), [](const NekoTraceEvent &event)
+    {
+      return event.subsystem == NekoTraceSubsystem::SPU2 &&
+        event.type == NekoTraceEventType::DMABeat &&
+        nekoDecodeSPUDMABeat(event).outcome == NekoSPUTrace::Outcome::Completed;
+    });
+    const auto cpuStore = std::find_if(events.begin(), events.end(), [core](const NekoTraceEvent &event)
+    {
+      return event.subsystem == NekoTraceSubsystem::IOP &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == (SPU_CHCR[core] | 0xa0000000);
+    });
+    REQUIRE(completed != events.end());
+    const auto interrupt = std::find_if(events.begin(), events.end(), [](const NekoTraceEvent &event)
+    {
+      return event.subsystem == NekoTraceSubsystem::IOPInterruptController &&
+        event.type == NekoTraceEventType::InterruptChanged;
+    });
+    REQUIRE(interrupt != events.end());
+    REQUIRE(cpuStore != events.end());
+    REQUIRE(completed < interrupt);
+    REQUIRE(interrupt < cpuStore);
+    REQUIRE(completed->masterCycle == cpuStore->masterCycle);
+    source.runMasterCycles(32);
+    REQUIRE(source.iopDMAController().spuRemainingWords(core) == 0);
+    REQUIRE((source.iopInterruptController().status() & DMAC_CAUSE) != 0);
+  }
+}
+
+TEST_CASE("Authored IOP SPU normal RAM writes follow voice decoding and precede CPU commands",
+  "[iop][spu-normal-conformance][save-state][trace]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    SPUGuest program;
+    guestVoiceProfile(program, core);
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    const auto voice = core == 0 ? 1u : 3u;
+    guestNormalProfile(program, core, 1, static_cast<IOPWord>(0x4000 + core * 0x1000));
+    guestStore(program, base + 0x1a0, 1u << voice, GUEST_SH);
+    guestSPUStart(program, core);
+    guestImmediate(program, 5, (base + 0x1a0) | 0xa0000000);
+    REQUIRE(program.size() < 762);
+    program.resize(762, 0);
+    guestStore(program, core == 0 ? DPCR : DPCR2, core == 0 ? 0x80000 : 8);
+    program.push_back(0xa4a00000); // sh zero, 0(r5)
+    NekoSystem source;
+    installSPUGuest(source, program);
+    REQUIRE(source.iopBus().write32(static_cast<IOPAddress>(0x4000 + core * 0x2000),
+      0x22220300).status == IOPBusStatus::Completed);
+    source.runMasterCycles(6136);
+    REQUIRE(source.iopDMAController().spuRemainingWords(core) == 16);
+    requireSPUGuestContinuation(source, 1);
+    REQUIRE(source.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(source.iopDMAController().spuRemainingWords(core) == 15);
+    REQUIRE(source.spu2Controller().readKeyOn(core * 2) == 0);
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(
+      static_cast<std::uint32_t>(0x4000 + core * 0x1000)) == 0x300);
+    REQUIRE(source.spu2Controller().readVoiceEnvelope(core * 24 + voice) == 14336);
+    const auto state = inspectSaveState(source.saveState());
+    const auto prefix = "system.iop.spu2.voices[" + std::to_string(core * 24 + voice) + "].";
+    REQUIRE(state.find(prefix + "history1")->scalarValue == 4096);
+    REQUIRE(state.find(prefix + "header")->scalarValue == 0x700);
+    const auto events = IOPTraceTest::subsystemEvents(source, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == 3);
+    REQUIRE(nekoDecodeSPUCommand(events[0]).mask == (1u << voice));
+    REQUIRE(nekoDecodeSPUVoice(events[1]).reason == NekoSPUTrace::VoiceReason::KeyOn);
+    REQUIRE(nekoDecodeSPUDMABeat(events[2]).target == NekoSPUTrace::Target::SoundRAM);
+    const auto &trace = source.trace();
+    const auto store = std::find_if(trace.begin(), trace.end(),
+      [base](const NekoTraceEvent &event)
+      {
+        return event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == ((base + 0x1a0) | 0xa0000000);
+      });
+    const auto beat = std::find_if(trace.begin(), trace.end(), [](const NekoTraceEvent &event)
+    {
+      return event.subsystem == NekoTraceSubsystem::SPU2 &&
+        event.type == NekoTraceEventType::DMABeat;
+    });
+    REQUIRE(store != trace.end());
+    REQUIRE(beat != trace.end());
+    REQUIRE(store->masterCycle == events.back().masterCycle);
+    REQUIRE(beat < store);
   }
 }
 
