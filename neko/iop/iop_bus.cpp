@@ -1317,6 +1317,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       spu2->writeKeyOff(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
+    case Device::SPU2VoiceEndMask:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+        return {};
+      spu2->writeVoiceEndMask(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SPU2AutoDMAWriteSelection:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         !(value == 0 && dmaController != nullptr &&
@@ -1527,7 +1532,6 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::SPU2CoreStatus:
     case Device::SPU2VoiceNextAddress:
     case Device::SPU2VoiceEnvelope:
-    case Device::SPU2VoiceEndMask:
     case Device::DEV9Revision:
     case Device::AbsentROM1:
     case Device::None:

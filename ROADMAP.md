@@ -3953,8 +3953,26 @@ not requirements for exhaustive subsystem coverage.
 - [x] Complete authored CPU/bus, sample-boundary, reset and persistence
       conformance, due full validation and bounded architecture/correctness
       reviews before the user-owned BIOS-verification commit checkpoint.
-- [ ] Independently review and verify fresh unchanged-input cold/restored
+- [x] Independently review and verify fresh unchanged-input cold/restored
       traced/plain and canonical progress without claiming completed boot.
+
+### Post-Voice BIOS Dependency Discovery
+
+- [x] Run bounded unchanged-input BIOS discovery beyond the voice verification
+      ceiling; retain the next originating failure with same-build replay
+      comparisons, or record the reached bound without claiming completed boot.
+
+### SPU2 ENDX Write Dependency
+
+- [x] Research the originating zero halfword store to `0x1f900342` and paired
+      ENDX halves on both cores; distinguish write admission from end-mask
+      mutation and select an evidence-backed contract through the existing owner.
+- [x] Implement the selected bounded write contract with focused red/green,
+      lifecycle/integration coverage and independent review before the
+      user-owned implementation commit checkpoint.
+- [ ] Verify fresh unchanged-input BIOS progress with appropriate same-build
+      replay/conformance comparisons; identify the next originating dependency
+      without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

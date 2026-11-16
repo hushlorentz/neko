@@ -101,6 +101,7 @@ class SPU2Controller final
     SPU2ReadResult readVoiceNextAddress(std::size_t index) const;
     std::uint16_t readVoiceEnvelope(std::size_t index) const;
     std::uint16_t readVoiceEndMask(std::size_t index) const;
+    void writeVoiceEndMask(std::size_t index, std::uint16_t value);
     std::uint16_t readKeyOn(std::size_t index) const;
     bool writeKeyOn(std::size_t index, std::uint16_t value);
     std::uint16_t readKeyOff(std::size_t index) const;

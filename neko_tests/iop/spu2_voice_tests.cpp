@@ -215,7 +215,132 @@ TEST_CASE("SPU2 KON admission and pending mode guards are atomic",
   REQUIRE(SPU2VoiceTestAccess::valid(spu));
 }
 
-TEST_CASE("SPU2 live register halfwords qualify LSAX NAX ENVX and read-only ENDX",
+TEST_CASE("SPU2 ENDX halfword writes preserve zero and clear the whole selected core",
+          "[iop][spu2][spu2-endx]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  auto &bus = system.iopBus();
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    const auto core = index / 2;
+    const auto address = static_cast<IOPAddress>(
+      0x1f900340 + core * 0x400 + (index % 2) * 2);
+    for (const std::uint16_t value : {0, 1, 0x100, 0xffff})
+    {
+      CAPTURE(address);
+      CAPTURE(value);
+      spu.reset();
+      const auto before = system.iopStateHash();
+      REQUIRE(bus.write16(address, value).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(0x1f900340 + core * 0x400).value ==
+        (value == 0 ? 0xffff : 0));
+      REQUIRE(bus.read16(0x1f900342 + core * 0x400).value ==
+        (value == 0 ? 0xff : 0));
+      REQUIRE(SPU2VoiceTestAccess::endMask(spu, 1 - core) == 0xffffff);
+      if (value == 0)
+        REQUIRE(system.iopStateHash() == before);
+      const auto after = system.iopStateHash();
+      REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopStateHash() == after);
+      REQUIRE(SPU2VoiceTestAccess::valid(spu));
+    }
+  }
+  bus.attachSPU2(nullptr);
+  REQUIRE(bus.write16(0x1f900342, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write16(0x1f900342, 1).status == IOPBusStatus::Unmapped);
+}
+
+TEST_CASE("SPU2 ENDX clearing preserves live voices pending commands and restored continuation",
+          "[iop][spu2][spu2-endx][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  for (const auto index : {0u, 1u, 16u, 24u, 40u})
+    constantVoice(spu, index);
+  samples(spu, 4);
+  spu.writeVoiceADSRControl(1, 0x1f);
+  spu.writeKeyOff(0, 1);
+  samples(spu, 1);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 0).envelope.phase ==
+    SPU2Envelope::Phase::Release);
+  REQUIRE(spu.writeKeyOn(0, 2));
+  spu.writeVoiceADSRControl(16 * 2 + 1, 0x1f);
+  spu.writeKeyOff(1, 1);
+  const auto before = inspectSaveState(source.saveState());
+  REQUIRE(source.iopBus().write16(0x1f900342, 0x100).status ==
+    IOPBusStatus::Completed);
+  const auto saved = source.saveState();
+  const auto differences = diffSaveStates(before, inspectSaveState(saved));
+  REQUIRE(differences.size() == 1);
+  REQUIRE(differences[0].path == "system.iop.spu2.voiceEndMasks[0].value");
+  REQUIRE(SPU2VoiceTestAccess::endMask(spu, 0) == 0);
+  REQUIRE(SPU2VoiceTestAccess::endMask(spu, 1) == 0xfefffe);
+  REQUIRE(SPU2VoiceTestAccess::valid(spu));
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(4 * 6144);
+  restored.runMasterCycles(4 * 6144);
+  plain.runMasterCycles(4 * 6144);
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  IOPTraceTest::requireMachine(restored, source);
+  IOPTraceTest::requireMachine(plain, source);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 1).age == 4);
+  REQUIRE(SPU2VoiceTestAccess::voice(spu, 16).envelope.phase ==
+    SPU2Envelope::Phase::Release);
+  REQUIRE(SPU2VoiceTestAccess::endMask(spu, 0) == 0);
+}
+
+TEST_CASE("SPU2 CPU ENDX clear follows a coincident endpoint and allows later reassertion",
+          "[iop][spu2][spu2-endx]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    NekoSystem system;
+    auto &spu = system.spu2Controller();
+    const auto index = core * 24;
+    const auto address = static_cast<std::uint32_t>(0x4000 + index * 8);
+    constantVoice(spu, index);
+    samples(spu, 4);
+    auto &voice = SPU2VoiceTestAccess::voice(spu, index);
+    voice.loopAddress = address;
+    voice.nextAddress = address + 7;
+    voice.header = 0x0300;
+    voice.headerValid = true;
+    voice.fifo.fill(0);
+    voice.fifoHead = 0;
+    voice.fifoCount = 0;
+    spu.writeSoundRAMHalfword(address, 0x0300);
+    spu.writeVoicePitchControl(index, 0x3fff);
+    SPU2VoiceTestAccess::sampleEdge(spu, 0);
+    REQUIRE(SPU2VoiceTestAccess::valid(spu));
+    REQUIRE(system.iopBus().write32(0, 0xa7bf0000).status == IOPBusStatus::Completed);
+    system.iopCore().prepareFreshExecution(0xa0000000, 0xbf900342 + core * 0x400, 1);
+    system.iopCore().startExecution(0xa0000000);
+    system.startTrace();
+    system.runMasterCycles(1);
+    REQUIRE(system.iopCore().retiredInstructions() == 1);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000004);
+    REQUIRE(SPU2VoiceTestAccess::endMask(spu, core) == 0);
+    REQUIRE(SPU2VoiceTestAccess::endMask(spu, 1 - core) == 0xffffff);
+    const auto events = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+    REQUIRE(events.size() == 1);
+    REQUIRE(nekoDecodeSPUVoice(events[0]).reason == NekoSPUTrace::VoiceReason::Endpoint);
+    REQUIRE(voice.envelope.phase == SPU2Envelope::Phase::Sustain);
+    system.iopCore().haltExecution();
+    system.runMasterCycles(8 * 6144);
+    REQUIRE(SPU2VoiceTestAccess::endMask(spu, core) == 1);
+    REQUIRE(SPU2VoiceTestAccess::valid(spu));
+  }
+}
+
+TEST_CASE("SPU2 live register halfwords qualify LSAX NAX and read-only ENVX",
           "[iop][spu2][spu2-command]")
 {
   for (const auto index : {0u, 23u, 24u, 47u})
@@ -257,9 +382,7 @@ TEST_CASE("SPU2 live register halfwords qualify LSAX NAX ENVX and read-only ENDX
     REQUIRE(bus.read16(base + 4).value == 3);
     REQUIRE(bus.read16(base + 6).value == 0xfff0);
     REQUIRE(SPU2VoiceTestAccess::voice(spu, index).loopOverride);
-    for (const auto address : {base + 8, base + 10, envx,
-                              0x1f900340 + core * 0x400,
-                              0x1f900342 + core * 0x400})
+    for (const auto address : {base + 8, base + 10, envx})
       REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
   }
 }

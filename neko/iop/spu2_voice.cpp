@@ -117,6 +117,14 @@ std::uint16_t SPU2Controller::readVoiceEndMask(std::size_t index) const
     ((index % 2) * 16));
 }
 
+void SPU2Controller::writeVoiceEndMask(std::size_t index, std::uint16_t value)
+{
+  auto &mask = voiceEndMasks.at(index / 2);
+  // Either halfword triggers a core-wide clear; zero preserves the status.
+  if (value != 0)
+    mask = 0;
+}
+
 bool SPU2Controller::startVoice(std::size_t index) noexcept
 {
   assert(index < voices.size());
