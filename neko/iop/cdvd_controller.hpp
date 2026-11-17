@@ -98,6 +98,7 @@ class CDVDController final
     static SubcommandResult versionResult() noexcept;
     static SubcommandResult forbidDVDPResult() noexcept;
     static SubcommandResult bootCertifyResult() noexcept;
+    static SubcommandResult wakeUpTimeResult() noexcept;
     static SubcommandResult regionResult() noexcept;
     static bool isValidSubcommandResult(std::uint8_t opcode,
       const SubcommandResult &snapshot) noexcept;

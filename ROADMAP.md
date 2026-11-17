@@ -4082,6 +4082,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
+
+### CD/DVD Wake-Up-Time Dependency
+
+- [x] Research the originating byte store `0x22` to `0x1f402016` through
+      local manuals and existing command ownership; establish identity and
+      request/result semantics before selecting behavior.
+- [x] Select and approve the bounded wake-up-time read profile and its limits
+      versus actual timer state; settle inputs, results, side effects, IRQs,
+      cancellation, reset and timing without a generic reply.
+- [x] Implement and independently review the approved behavior with focused
+      red/green and immediate lifecycle, transport and persistence coverage
+      before the user-owned commit checkpoint.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
 

@@ -133,6 +133,7 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
       return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
     case 8:
     case 0x15:
+    case 0x22:
     case 0x36:
       return subcommandParameterCount == 0;
     case 0x1a:
@@ -154,6 +155,8 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
     case 0x15:
     case 0x1a:
       return 1;
+    case 0x22:
+      return 10;
     case 0x36:
       return 15;
     default:
@@ -178,6 +181,12 @@ CDVDController::SubcommandResult CDVDController::bootCertifyResult() noexcept
   return {{1}};
 }
 
+CDVDController::SubcommandResult CDVDController::wakeUpTimeResult() noexcept
+{
+  // Approved opaque compatibility data, not a disabled timer or hardware default.
+  return {};
+}
+
 CDVDController::SubcommandResult CDVDController::regionResult() noexcept
 {
   // Approved compatibility profile, not measured SCPH-70012 NVM contents.
@@ -196,6 +205,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return forbidDVDPResult();
     case 0x1a:
       return bootCertifyResult();
+    case 0x22:
+      return wakeUpTimeResult();
     case 0x36:
       return regionResult();
     default:
@@ -216,6 +227,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == forbidDVDPResult();
     case 0x1a:
       return snapshot == bootCertifyResult();
+    case 0x22:
+      return snapshot == wakeUpTimeResult();
     case 0x36:
       return snapshot == regionResult();
     default:
