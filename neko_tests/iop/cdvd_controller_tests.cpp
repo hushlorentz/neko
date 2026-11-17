@@ -53,6 +53,7 @@ namespace
   const std::array<std::uint8_t, 8> EPOCH = {{0, 0, 0, 0, 0, 1, 1, 0}};
   const std::array<std::uint8_t, 8> LAST_SECOND =
     {{0, 0x59, 0x59, 0x23, 0, 0x31, 0x12, 0x99}};
+  const std::array<std::uint8_t, 4> BOOT_ROM_NAME = {{2, 0, 0x41, 0x43}};
 
   std::uint8_t read(CDVDController &controller, std::uint32_t offset)
   {
@@ -225,6 +226,141 @@ TEST_CASE("CDVD region query publishes exactly fifteen bytes on the next IOP pul
   accept(controller, 0x16, 8);
   REQUIRE(controller.completeSubcommand());
   REQUIRE(drain(controller) == EPOCH);
+}
+
+TEST_CASE("CDVD BootCertify publishes one compatibility byte on the next IOP pulse",
+  "[iop][cdvd-owner][cdvd-boot-certify]")
+{
+  CDVDController controller;
+  REQUIRE_FALSE(masterStep(controller, 0).completed);
+  for (const auto byte : BOOT_ROM_NAME)
+  {
+    accept(controller, 0x17, byte);
+  }
+  accept(controller, 0x16, 0x1a);
+  CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+  REQUIRE(read(controller, 0x16) == 0x1a);
+  for (unsigned cycle = 1; cycle < 8; ++cycle)
+  {
+    REQUIRE_FALSE(masterStep(controller, cycle).completed);
+    REQUIRE(read(controller, 0x17) == 0xc0);
+    REQUIRE(read(controller, 0x18) == 0);
+    CDVDControllerTestAccess::requireEmptyStorage(controller);
+  }
+  REQUIRE_FALSE(masterStep(controller, 8).completed);
+  REQUIRE(read(controller, 0x17) == 0);
+  REQUIRE(read(controller, 0x18) == 1);
+  REQUIRE(read(controller, 0x17) == 0x40);
+  REQUIRE(read(controller, 0x18) == 0);
+  REQUIRE(read(controller, 0x16) == 0x1a);
+  REQUIRE(read(controller, 8) == 0);
+  REQUIRE_FALSE(controller.completeSubcommand());
+  CDVDControllerTestAccess::requireEmptyStorage(controller);
+  accept(controller, 0x16, 8);
+  REQUIRE(controller.completeSubcommand());
+  REQUIRE(drain(controller) == EPOCH);
+}
+
+TEST_CASE("CDVD BootCertify rejects every wrong request byte and count atomically",
+  "[iop][cdvd-owner][cdvd-boot-certify]")
+{
+  for (unsigned count = 0; count <= 16; ++count)
+  {
+    if (count == BOOT_ROM_NAME.size())
+    {
+      continue;
+    }
+    CAPTURE(count);
+    CDVDController controller;
+    accept(controller, 4, 0);
+    for (unsigned index = 0; index < count; ++index)
+    {
+      accept(controller, 0x17,
+        index < BOOT_ROM_NAME.size() ? BOOT_ROM_NAME[index] : 0);
+    }
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x1a) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  for (std::size_t changed = 0; changed < BOOT_ROM_NAME.size(); ++changed)
+  {
+    for (unsigned value = 0; value < 256; ++value)
+    {
+      if (value == BOOT_ROM_NAME[changed])
+      {
+        continue;
+      }
+      CAPTURE(changed);
+      CAPTURE(value);
+      CDVDController controller;
+      for (std::size_t index = 0; index < BOOT_ROM_NAME.size(); ++index)
+      {
+        accept(controller, 0x17, index == changed ?
+          static_cast<std::uint8_t>(value) : BOOT_ROM_NAME[index]);
+      }
+      const auto before = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x1a) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+    }
+  }
+  CDVDController controller;
+  for (const auto byte : BOOT_ROM_NAME)
+  {
+    accept(controller, 0x17, byte);
+  }
+  const auto staged = controller;
+  for (unsigned opcode = 0; opcode < 256; ++opcode)
+  {
+    if (opcode != 0x1a)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x16,
+        static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, staged));
+    }
+  }
+}
+
+TEST_CASE("CDVD BootCertify phase rejection and reset preserve normal transport",
+  "[iop][cdvd-owner][cdvd-boot-certify]")
+{
+  for (unsigned stage = 0; stage < 3; ++stage)
+  {
+    CAPTURE(stage);
+    CDVDController controller;
+    for (const auto byte : BOOT_ROM_NAME)
+    {
+      accept(controller, 0x17, byte);
+    }
+    accept(controller, 0x16, 0x1a);
+    accept(controller, 4, 0);
+    REQUIRE(controller.completeNormalCommand().newCauses == 1);
+    if (stage != 0)
+    {
+      REQUIRE(controller.completeSubcommand());
+    }
+    if (stage == 2)
+    {
+      REQUIRE(read(controller, 0x18) == 1);
+    }
+    if (stage < 2)
+    {
+      const auto before = controller;
+      for (unsigned value = 0; value < 256; ++value)
+      {
+        REQUIRE(controller.writeByte(BASE + 0x17,
+          static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+        REQUIRE(controller.writeByte(BASE + 0x16,
+          static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+        REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+      }
+    }
+    REQUIRE(read(controller, 8) == 1);
+    accept(controller, 8, 1);
+    controller.reset();
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, CDVDController{}));
+  }
 }
 
 TEST_CASE("CDVD parameters retain all byte values in order and reject overflow",

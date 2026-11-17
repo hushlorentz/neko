@@ -21,6 +21,21 @@ namespace
       IOPBusStatus::Completed);
   }
 
+  void stageQueryParameters(NekoSystem &system, unsigned opcode)
+  {
+    if (opcode == 3)
+    {
+      write(system, 0x17, 0);
+    }
+    else if (opcode == 0x1a)
+    {
+      for (const auto byte : {2, 0, 0x41, 0x43})
+      {
+        write(system, 0x17, static_cast<std::uint8_t>(byte));
+      }
+    }
+  }
+
   std::uint8_t read(NekoSystem &system, unsigned offset)
   {
     const auto value = system.iopBus().read8(BASE + offset);
@@ -615,9 +630,9 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 }
 
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
-  "[iop][cdvd-integration][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][save-state]")
 {
-  for (const auto opcode : {3u, 8u, 0x36u})
+  for (const auto opcode : {3u, 8u, 0x1au, 0x36u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -626,10 +641,7 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
       NekoSystem original;
       original.runMasterCycles(phase);
       write(original, 4, 0);
-      if (opcode == 3)
-      {
-        write(original, 0x17, 0);
-      }
+      stageQueryParameters(original, opcode);
       write(original, 0x16, static_cast<std::uint8_t>(opcode));
       NekoSystem restored;
       restored.loadState(original.saveState());
@@ -649,25 +661,23 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
 }
 
 TEST_CASE("CDVD immutable queries restore pending and every result cursor",
-  "[iop][cdvd-integration][cdvd-version][cdvd-region][save-state]")
+  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][save-state]")
 {
-  for (const auto opcode : {3u, 0x36u})
+  for (const auto opcode : {3u, 0x1au, 0x36u})
   {
     CAPTURE(opcode);
-    const unsigned size = opcode == 3 ? 4 : 15;
+    const unsigned size = opcode == 3 ? 4 : (opcode == 0x1a ? 1 : 15);
     const std::array<std::uint8_t, 16> expected = opcode == 3 ?
       std::array<std::uint8_t, 16>{{3, 6, 2, 0}} :
-      std::array<std::uint8_t, 16>{{
-        0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}};
+      (opcode == 0x1a ? std::array<std::uint8_t, 16>{{1}} :
+        std::array<std::uint8_t, 16>{{
+          0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}});
     for (unsigned stage = 0; stage < size + 2; ++stage)
     {
       CAPTURE(stage);
       NekoSystem original;
       original.clockMasterCycle();
-      if (opcode == 3)
-      {
-        write(original, 0x17, 0);
-      }
+      stageQueryParameters(original, opcode);
       write(original, 0x16, static_cast<std::uint8_t>(opcode));
       const unsigned consumed = stage == 0 ? 0 : stage - 1;
       if (stage != 0)
@@ -712,6 +722,89 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
       restored.clockMasterCycle();
       requireClockResult(restored, EPOCH);
     }
+  }
+}
+
+TEST_CASE("CDVD malformed BootCertify snapshots fail without destination mutation",
+  "[iop][cdvd-integration][cdvd-boot-certify][save-state]")
+{
+  NekoSystem source;
+  stageQueryParameters(source, 0x1a);
+  write(source, 0x16, 0x1a);
+  NekoSystem destination;
+  write(destination, 0x16, 8);
+  destination.clockMasterCycle();
+  REQUIRE(read(destination, 0x18) == 0);
+  const auto before = destination.saveState();
+  for (unsigned stage = 0; stage < 2; ++stage)
+  {
+    CAPTURE(stage);
+    if (stage == 1)
+    {
+      source.clockMasterCycle();
+    }
+    const auto valid = source.saveState();
+    for (unsigned index = 0; index < 16; ++index)
+    {
+      CAPTURE(index);
+      SaveStateMutation bad(valid);
+      bad.xorByte("system.iop.cdvd.result", index, 1);
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
+    struct InvalidField
+    {
+      const char *path;
+      std::uint64_t value;
+    };
+    const InvalidField invalid[] = {
+      {"lastSubcommand", 0}, {"lastSubcommand", 1}, {"lastSubcommand", 0x1b},
+      {"resultCursor", 1}, {"resultCursor", 255}, {"subcommandPhase", 3},
+      {"subcommandParameterCount", 1}
+    };
+    for (const auto &field : invalid)
+    {
+      CAPTURE(field.path);
+      CAPTURE(field.value);
+      SaveStateMutation bad(valid);
+      bad.writeScalar(std::string("system.iop.cdvd.") + field.path, field.value);
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
+  }
+}
+
+TEST_CASE("CDVD BootCertify rejects malformed delay-slot stores without consuming staging",
+  "[iop][cdvd-integration][cdvd-boot-certify]")
+{
+  for (const unsigned count : {3u, 4u, 5u})
+  {
+    CAPTURE(count);
+    NekoSystem system;
+    const std::array<std::uint8_t, 5> parameters = {{
+      2, 0, 0x41, static_cast<std::uint8_t>(count == 4 ? 0x44 : 0x43), 0
+    }};
+    for (unsigned index = 0; index < count; ++index)
+    {
+      write(system, 0x17, parameters[index]);
+    }
+    auto expected = system.cdvdController();
+    const std::array<IOPWord, 5> words = {{
+      0x3c01bf40, 0x34212000, 0x3402001a, 0x10000001, 0xa0220016
+    }};
+    startProgram(system, words);
+    system.runMasterCycles(33);
+    for (unsigned cycle = 0; cycle < 33; ++cycle)
+    {
+      expected.advanceMasterTick();
+    }
+    REQUIRE(system.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000010);
+    REQUIRE(system.iopCore().retiredInstructions() == 4);
+    REQUIRE(system.iopCore().storeFailure().access.physicalAddress == BASE + 0x16);
+    REQUIRE(system.cdvdController().stateHash() == expected.stateHash());
   }
 }
 

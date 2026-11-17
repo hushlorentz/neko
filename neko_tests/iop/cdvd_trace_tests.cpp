@@ -172,6 +172,54 @@ namespace
   }
 }
 
+TEST_CASE("CDVD BootCertify guest publication and draining preserve traced continuation",
+  "[iop][cdvd-trace][cdvd-boot-certify][save-state]")
+{
+  const std::array<IOPWord, 9> words = {{
+    0x3c01bf40, 0x34212000, 0x3402001a, 0xa0220016,
+    0x90230017, 0x90240018, 0x90250017, 0, 0x34060001
+  }};
+  const auto prepare = [&words](NekoSystem &system) {
+    for (const auto byte : {2, 0, 0x41, 0x43})
+    {
+      write(system, 0x17, static_cast<std::uint8_t>(byte));
+    }
+    installProgram(system, 0, words);
+    system.iopCore().startExecution(0xa0000000);
+  };
+  NekoSystem reference;
+  prepare(reference);
+  reference.startTrace();
+  reference.runMasterCycles(65);
+  REQUIRE(reference.iopCore().exception().kind == IOPException::None);
+  REQUIRE(reference.iopCore().retiredInstructions() == words.size());
+  REQUIRE(reference.iopCore().generalRegister(3) == 0);
+  REQUIRE(reference.iopCore().generalRegister(4) == 1);
+  REQUIRE(reference.iopCore().generalRegister(5) == 0x40);
+  REQUIRE(reference.iopCore().generalRegister(6) == 1);
+  REQUIRE(reference.iopInterruptController().status() == 0);
+  const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+  REQUIRE(commands.size() == 2);
+  for (std::size_t index = 0; index < commands.size(); ++index)
+  {
+    const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+    REQUIRE(commands[index].masterCycle == (index == 0 ? 25 : 33));
+    REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+    REQUIRE(decoded.opcode == 0x1a);
+    const std::array<std::uint8_t, 16> expected = index == 0 ?
+      std::array<std::uint8_t, 16>{} : std::array<std::uint8_t, 16>{{1}};
+    REQUIRE(decoded.result == expected);
+  }
+  for (const unsigned cut : {25u, 33u, 49u})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    prepare(source);
+    source.runMasterCycles(cut);
+    requireContinuationModes(reference, source);
+  }
+}
+
 TEST_CASE("CDVD trace observes both completions and guest acceptance in mutation order",
   "[iop][cdvd-trace]")
 {

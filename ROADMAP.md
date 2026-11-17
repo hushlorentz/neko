@@ -4048,6 +4048,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add paired-core authored cold/restored, traced/plain and canonical
       conformance; resolve due broader gates and final independent block review
       before the user-owned commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
+
+### CD/DVD BootCertify Dependency
+
+- [x] Research the originating byte store `0x1a` to `0x1f402016` through
+      local manuals and the existing CD/DVD command/transport owner; distinguish
+      command semantics from endpoint admission before selecting behavior.
+- [x] Select and approve the bounded BootCertify contract, explicitly separating
+      a compatibility acknowledgement from unverified device certification;
+      settle inputs/results, side effects, IRQs, cancellation and timing.
+- [x] Implement and independently review the approved behavior through the
+      existing owners, with focused red/green and immediate lifecycle,
+      transport and persistence integration coverage before the user commit.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
 

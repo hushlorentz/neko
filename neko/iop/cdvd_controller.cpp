@@ -8,6 +8,8 @@ constexpr std::uint64_t CDVDController::RTC_PERIOD_TICKS;
 
 namespace
 {
+  constexpr std::array<std::uint8_t, 4> bootRomName = {{2, 0, 0x41, 0x43}};
+
   bool isLeapYear(unsigned year) noexcept
   {
     return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
@@ -132,6 +134,9 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
     case 8:
     case 0x36:
       return subcommandParameterCount == 0;
+    case 0x1a:
+      return subcommandParameterCount == bootRomName.size() &&
+        std::equal(bootRomName.begin(), bootRomName.end(), subcommandParameters.begin());
     default:
       return false;
   }
@@ -145,6 +150,8 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 4;
     case 8:
       return 8;
+    case 0x1a:
+      return 1;
     case 0x36:
       return 15;
     default:
@@ -155,6 +162,12 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
 CDVDController::SubcommandResult CDVDController::versionResult() noexcept
 {
   return {{3, 6, 2, 0}};
+}
+
+CDVDController::SubcommandResult CDVDController::bootCertifyResult() noexcept
+{
+  // Approved compatibility acknowledgement, not actual certification.
+  return {{1}};
 }
 
 CDVDController::SubcommandResult CDVDController::regionResult() noexcept
@@ -171,6 +184,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return versionResult();
     case 8:
       return clockResult();
+    case 0x1a:
+      return bootCertifyResult();
     case 0x36:
       return regionResult();
     default:
@@ -187,6 +202,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == versionResult();
     case 8:
       return isValidClockResult(snapshot);
+    case 0x1a:
+      return snapshot == bootCertifyResult();
     case 0x36:
       return snapshot == regionResult();
     default:

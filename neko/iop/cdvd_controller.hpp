@@ -26,7 +26,7 @@ struct CDVDNormalCompletion
   std::uint8_t newCauses = 0;
 };
 
-// Provisional no-media N-NOP, ReadClock, version and region-query profile.
+// Provisional no-media N-NOP and finite compatibility subcommand profile.
 class CDVDController final
 {
   public:
@@ -96,6 +96,7 @@ class CDVDController final
     static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
     SubcommandResult subcommandResult() const;
     static SubcommandResult versionResult() noexcept;
+    static SubcommandResult bootCertifyResult() noexcept;
     static SubcommandResult regionResult() noexcept;
     static bool isValidSubcommandResult(std::uint8_t opcode,
       const SubcommandResult &snapshot) noexcept;
