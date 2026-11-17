@@ -2551,6 +2551,316 @@ namespace
     guestStore(program, base + 0x198, 0x0c00, GUEST_SH);
     guestStore(program, base + 0x19a, 0x4000, GUEST_SH);
   }
+
+  void guestEffectProfile(SPUGuest &program, std::size_t core)
+  {
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    const auto high = core == 0 ? 0u : 15u;
+    guestStore(program, base + 0x1a8, high, GUEST_SH);
+    guestStore(program, base + 0x1aa, 0xfffe, GUEST_SH);
+    guestStore(program, base + 0x1ac, 16000, GUEST_SH);
+    guestStore(program, base + 0x1ac, static_cast<std::uint16_t>(-16000), GUEST_SH);
+    guestStore(program, base + 0x2e0, 0xfff0 | high, GUEST_SH);
+    guestStore(program, base + 0x2e2, 0xfffe, GUEST_SH);
+    guestStore(program, base + 0x33c, 0xfff0 | high, GUEST_SH);
+    const auto coefficients = static_cast<IOPAddress>(0x1f900774 + core * 0x28);
+    guestStore(program, coefficients + 12, 0x4000, GUEST_SH);
+    guestStore(program, coefficients + 14, 0x4000, GUEST_SH);
+    const auto master = static_cast<IOPAddress>(0x1f900760 + core * 0x28);
+    guestStore(program, master, 0x2000, GUEST_SH);
+    guestStore(program, master + 2, 0x2000, GUEST_SH);
+    guestStore(program, master + 4, 0x8000, GUEST_SH);
+    guestStore(program, master + 6, 0x8000, GUEST_SH);
+  }
+}
+
+TEST_CASE("Authored IOP paired effects restore nonzero FIR phases and inclusive window wrap",
+  "[iop][spu2][spu2-effect-conformance][save-state][trace]")
+{
+  SPUGuest program;
+  for (std::size_t core = 0; core < 2; ++core)
+    guestEffectProfile(program, core);
+  guestStore(program, 0x1f90019a, 0xc080, GUEST_SH);
+  program.back() = 0x10000001;
+  const auto enable = program.size();
+  program.push_back(GUEST_SH);
+  guestStore(program, 0x1f90059a, 0xc080, GUEST_SH);
+  const auto load = guestReadback(program, 0x1f90059a, 0x1100, GUEST_LHU);
+  guestStore(program, 0x1000, GUEST_DONE);
+  program.push_back(0x1000ffff);
+  program.push_back(0);
+  REQUIRE(program.size() * 4 < 0x1000);
+  NekoSystem source;
+  installSPUGuest(source, program);
+  source.runMasterCycles(enable * 8);
+  REQUIRE(source.iopCore().branchContinuation().active);
+  REQUIRE(source.spu2Controller().readCoreAttribute(0) == 0);
+  requireSPUGuestContinuation(source, (load + 1 - enable) * 8);
+  REQUIRE(source.iopCore().delayedResultContinuation().source == IOPDelayedResultSource::Load);
+  requireSPUGuestContinuation(source, 32);
+  REQUIRE(source.iopBus().read32(0x1100).value == 0xc080);
+  REQUIRE(source.masterClockScheduler().currentCycle() < 6136);
+
+  // With aliased taps and APF1/2=.5, RAM becomes r/4 and z=9r/8.
+  const std::int16_t first[] = {4000, 1000, 1000, 1000, 250};
+  const std::int16_t second[] = {-16000, -16000, -4000, -1000, -1000};
+  const std::int16_t left[] = {18000, 0, -18000, 0, 1125};
+  const std::int16_t right[] = {0, 4500, 0, -4500, 0};
+  const std::int16_t output[] = {1, 0, -2, 0, 7};
+  for (unsigned tick = 0; tick < 5; ++tick)
+  {
+    const auto edge = 6137 + std::uint64_t{tick} * 6144;
+    source.runMasterCycles(edge - 1 - source.masterClockScheduler().currentCycle());
+    if (tick == 0 || tick == 1 || tick == 3)
+      requireSPUGuestContinuation(source, 1);
+    else
+      source.runMasterCycles(1);
+    const auto snapshot = inspectSaveState(source.saveState());
+    for (std::size_t core = 0; core < 2; ++core)
+    {
+      CAPTURE(core);
+      CAPTURE(tick);
+      const auto address = core == 0 ? 0xfffeu : 0xffffeu;
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword(address) ==
+        static_cast<std::uint16_t>(first[tick]));
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword(address + 1) ==
+        static_cast<std::uint16_t>(second[tick]));
+      const auto path = "system.iop.spu2.effects[" + std::to_string(core) + "].";
+      REQUIRE(snapshot.find(path + "position")->scalarValue == ((tick + 1) / 2) % 2);
+      REQUIRE(snapshot.find(path + "upHistory[0][0].value")->scalarValue ==
+        static_cast<std::uint16_t>(left[tick]));
+      REQUIRE(snapshot.find(path + "upHistory[1][0].value")->scalarValue ==
+        static_cast<std::uint16_t>(right[tick]));
+    }
+    REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x800 + tick) ==
+      static_cast<std::uint16_t>(output[tick]));
+  }
+  source.runMasterCycles(6136 + 19 * 6144 - source.masterClockScheduler().currentCycle());
+  requireSPUGuestContinuation(source, 6145);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x800 + 19) ==
+    static_cast<std::uint16_t>(-9000));
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0xa00 + 20) ==
+    static_cast<std::uint16_t>(-2250));
+  constexpr std::uint64_t end = 64 * 6144;
+  source.runMasterCycles(end - source.masterClockScheduler().currentCycle());
+  REQUIRE(source.iopCore().stopReason() == IOPStopReason::None);
+  REQUIRE(source.iopBus().read32(0x1000).value == GUEST_DONE);
+  for (const bool traced : {false, true})
+  {
+    NekoSystem cold;
+    installSPUGuest(cold, program);
+    if (traced) cold.startTrace(32);
+    cold.runMasterCycles(end);
+    IOPTraceTest::requireMachine(cold, source);
+    REQUIRE(cold.trace().size() == (traced ? 32 : 0));
+  }
+}
+
+TEST_CASE("Authored IOP effect PCM impulse and current core output reach the down filter",
+  "[iop][spu2][spu2-effect-conformance][save-state][trace]")
+{
+  SPUGuest program;
+  const IOPAddress spdif[] = {
+    0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca, 0x1f9007c0
+  };
+  for (std::size_t index = 0; index < SPU2InputTest::configuration.size(); ++index)
+    guestStore(program, spdif[index], SPU2InputTest::configuration[index], GUEST_SH);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    guestStore(program, base + 0x1aa, 0x2000 + core * 0x400, GUEST_SH);
+    guestStore(program, base + 0x1ac, 16000, GUEST_SH);
+    guestStore(program, base + 0x1aa, 0x2200 + core * 0x400, GUEST_SH);
+    guestStore(program, base + 0x1ac, static_cast<std::uint16_t>(-16000), GUEST_SH);
+    guestStore(program, base + 0x2e0, 8 + core, GUEST_SH);
+    guestStore(program, base + 0x33c, 8 + core, GUEST_SH);
+    const unsigned destinations[] = {2, 3, 10, 11, 18, 19, 20, 21};
+    for (std::size_t role = 0; role < 8; ++role)
+    {
+      guestStore(program, base + 0x2e6 + destinations[role] * 4,
+        static_cast<IOPWord>((role + 1) * 0x100), GUEST_SH);
+    }
+    const auto coefficients = static_cast<IOPAddress>(0x1f900774 + core * 0x28);
+    for (const auto index : {0u, 8u, 9u})
+      guestStore(program, coefficients + index * 2, 0x4000, GUEST_SH);
+    const auto master = static_cast<IOPAddress>(0x1f900760 + core * 0x28);
+    guestStore(program, master, 0x2000, GUEST_SH);
+    for (const auto index : {2u, 3u, 4u, 5u})
+      guestStore(program, master + 4 + index * 2, 0x4000, GUEST_SH);
+    guestStore(program, base + 0x198, core == 0 ? 0xb0 : 0x33, GUEST_SH);
+    guestStore(program, base + 0x19a, 0xc081, GUEST_SH);
+  }
+  for (std::size_t core = 0; core < 2; ++core)
+    guestStore(program, static_cast<IOPAddress>(0x1f9001b0 + core * 0x400),
+      1u << core, GUEST_SH);
+  guestStore(program, 0x1000, GUEST_DONE);
+  program.push_back(0x1000ffff);
+  program.push_back(0);
+  REQUIRE(program.size() * 4 < 0x1000);
+  NekoSystem source;
+  installSPUGuest(source, program);
+  source.runMasterCycles(6136);
+  REQUIRE(source.iopBus().read32(0x1000).value == GUEST_DONE);
+  requireSPUGuestContinuation(source, 1);
+  const auto first = inspectSaveState(source.saveState());
+  REQUIRE(first.find("system.iop.spu2.effects[0].downHistory[0][0].value")->scalarValue == 8000);
+  REQUIRE(first.find("system.iop.spu2.effects[1].downHistory[0][0].value")->scalarValue == 10000);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x800) == 4000);
+  source.runMasterCycles(6136 + 20 * 6144 - source.masterClockScheduler().currentCycle());
+  requireSPUGuestContinuation(source, 1);
+  // The center down tap gives D=4000/5000; IN and IIR each halve it.
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x8010a) == 1000);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x9010a) == 1250);
+  const auto after = inspectSaveState(source.saveState());
+  REQUIRE(after.find("system.iop.spu2.effects[0].downHistory[0][20].value")->scalarValue == 8000);
+  REQUIRE(after.find("system.iop.spu2.effects[1].downHistory[0][20].value")->scalarValue == 10000);
+  for (const bool traced : {false, true})
+  {
+    NekoSystem cold;
+    installSPUGuest(cold, program);
+    if (traced) cold.startTrace(32);
+    cold.runMasterCycles(source.masterClockScheduler().currentCycle());
+    IOPTraceTest::requireMachine(cold, source);
+  }
+}
+
+TEST_CASE("Authored IOP effects disable and invalid reprogramming drain retained FIR tails",
+  "[iop][spu2][spu2-effect-conformance][save-state][trace]")
+{
+  SPUGuest program;
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    guestEffectProfile(program, core);
+    guestStore(program, static_cast<IOPAddress>(0x1f90019a + core * 0x400),
+      0xc080, GUEST_SH);
+  }
+  guestImmediate(program, 5, 4000);
+  program.push_back(0x24a5ffff);
+  program.push_back(0x14a0fffe);
+  program.push_back(0);
+  const auto disable = program.size();
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+    guestStore(program, base + 0x19a, 0x4000, GUEST_SH);
+    guestStore(program, base + 0x2e0, 0xffff, GUEST_SH);
+    guestStore(program, base + 0x33c, 0xfffe, GUEST_SH);
+    guestStore(program, base + 0x2e6, 0xffff, GUEST_SH);
+  }
+  guestStore(program, 0x1000, GUEST_DONE);
+  program.push_back(0x1000ffff);
+  program.push_back(0);
+  REQUIRE(program.size() * 4 < 0x1000);
+  NekoSystem source;
+  installSPUGuest(source, program);
+  const auto controlPC = static_cast<IOPAddress>(0xa0000000 + disable * 4);
+  unsigned pulses = 0;
+  while (source.iopCore().programCounter() != controlPC && pulses < 13000)
+  {
+    source.runMasterCycles(8);
+    ++pulses;
+  }
+  REQUIRE(pulses < 13000);
+  const auto prior = inspectSaveState(source.saveState());
+  bool liveTail = false;
+  for (std::size_t slot = 0; slot < 39; ++slot)
+    liveTail |= prior.find("system.iop.spu2.effects[0].upHistory[0][" +
+      std::to_string(slot) + "].value")->scalarValue != 0;
+  REQUIRE(liveTail);
+  requireSPUGuestContinuation(source, 512);
+  REQUIRE(source.iopBus().read32(0x1000).value == GUEST_DONE);
+  const auto invalid = inspectSaveState(source.saveState());
+  const std::array<std::uint16_t, 4> ram{{
+    source.spu2Controller().readSoundRAMHalfword(0xfffe),
+    source.spu2Controller().readSoundRAMHalfword(0xffff),
+    source.spu2Controller().readSoundRAMHalfword(0xffffe),
+    source.spu2Controller().readSoundRAMHalfword(0xfffff)
+  }};
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto path = "system.iop.spu2.effects[" + std::to_string(core) + "].";
+    REQUIRE(invalid.find(path + "position")->scalarValue == 0);
+    REQUIRE(source.spu2Controller().readCoreAttribute(core) == 0x4000);
+  }
+  source.runMasterCycles(6136 + 20 * 6144 - source.masterClockScheduler().currentCycle());
+  requireSPUGuestContinuation(source, 1);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x800 + 19) ==
+    static_cast<std::uint16_t>(-9000));
+  constexpr std::uint64_t end = 64 * 6144;
+  source.runMasterCycles(end - source.masterClockScheduler().currentCycle());
+  const auto drained = inspectSaveState(source.saveState());
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto path = "system.iop.spu2.effects[" + std::to_string(core) + "].";
+    REQUIRE(drained.find(path + "position")->scalarValue == 0);
+    for (std::size_t side = 0; side < 2; ++side)
+      for (std::size_t slot = 0; slot < 39; ++slot)
+        REQUIRE(drained.find(path + "upHistory[" + std::to_string(side) + "][" +
+          std::to_string(slot) + "].value")->scalarValue == 0);
+    for (std::size_t word = 0; word < 2; ++word)
+      REQUIRE(source.spu2Controller().readSoundRAMHalfword(
+        static_cast<std::uint32_t>((core == 0 ? 0xfffe : 0xffffe) + word)) ==
+        ram[core * 2 + word]);
+  }
+  NekoSystem cold;
+  installSPUGuest(cold, program);
+  cold.runMasterCycles(end);
+  IOPTraceTest::requireMachine(cold, source);
+}
+
+TEST_CASE("Authored IOP effect guards reject delay-slot stores without changing DSP state",
+  "[iop][spu2][spu2-effect-conformance][save-state][startup-failure]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+    for (const auto port : {0x2e0u, 0x2e2u, 0x33cu, 0x2e4u, 0x19au})
+    {
+      CAPTURE(core);
+      CAPTURE(port);
+      SPUGuest program;
+      guestEffectProfile(program, core);
+      const auto base = static_cast<IOPAddress>(0x1f900000 + core * 0x400);
+      if (port == 0x19a)
+      {
+        guestStore(program, base + 0x2e0, 0xffff, GUEST_SH);
+        guestStore(program, base + 0x33c, 0xfffe, GUEST_SH);
+      }
+      else
+        guestStore(program, base + 0x19a, 0xc080, GUEST_SH);
+      const auto value = port == 0x19a ? 0xc080u : port == 0x2e0 ?
+        0xfff0u | (core == 0 ? 0 : 15) : port == 0x2e2 ? 0xfffeu :
+        port == 0x33c ? 0xfff0u | (core == 0 ? 0 : 15) : 0;
+      guestStore(program, base + port, value, GUEST_SH);
+      program.back() = 0x10000001;
+      const auto rejected = program.size();
+      program.push_back(GUEST_SH);
+      NekoSystem source;
+      installSPUGuest(source, program);
+      source.runMasterCycles(rejected * 8);
+      REQUIRE(source.iopCore().branchContinuation().active);
+      const auto before = inspectSaveState(source.saveState());
+      requireSPUGuestContinuation(source, 16);
+      REQUIRE(source.iopCore().stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(source.iopCore().retiredInstructions() == rejected);
+      REQUIRE(source.iopCore().storeFailure().access.physicalAddress == base + port);
+      const auto failure = firstStartupFailure(source.trace());
+      REQUIRE(failure.found);
+      REQUIRE(failure.instruction.available);
+      REQUIRE(failure.instruction.delaySlot);
+      REQUIRE(failure.instruction.programCounter == 0xa0000000 + rejected * 4);
+      const auto after = inspectSaveState(source.saveState());
+      REQUIRE(after.find("system.iop.spu2.inputClockPhase")->scalarValue ==
+        before.find("system.iop.spu2.inputClockPhase")->scalarValue + 2);
+      for (const auto &difference : diffSaveStates(before, after))
+      {
+        CAPTURE(difference.path);
+        REQUIRE((difference.path == "system.iop.spu2.inputClockPhase" ||
+          difference.path.find("system.iop.spu2.") != 0));
+      }
+      NekoSystem cold;
+      installSPUGuest(cold, program);
+      cold.runMasterCycles(source.masterClockScheduler().currentCycle());
+      IOPTraceTest::requireMachine(cold, source);
+    }
 }
 
 TEST_CASE("Authored IOP SPU voice guest restores commands loads and complete source lifecycle",

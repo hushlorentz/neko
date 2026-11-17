@@ -4045,7 +4045,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Integrate and independently review effect timing, wet routing/return and
       exact ATTR/live-profile admission through the existing sample owner,
       with red/green CPU and immediate shared-RAM/DMA integration coverage.
-- [ ] Add paired-core authored cold/restored, traced/plain and canonical
+- [x] Add paired-core authored cold/restored, traced/plain and canonical
       conformance; resolve due broader gates and final independent block review
       before the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
