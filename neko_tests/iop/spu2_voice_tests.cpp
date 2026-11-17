@@ -285,11 +285,23 @@ TEST_CASE("SPU2 ESA programming preserves live voices PCM PIO commands and resto
       static_cast<std::uint16_t>(0xfffd + index / 2)).status == IOPBusStatus::Completed);
   }
   const auto saved = source.saveState();
-  const auto differences = diffSaveStates(before, inspectSaveState(saved));
-  REQUIRE(differences.size() == 4);
-  for (std::size_t index = 0; index < differences.size(); ++index)
+  const auto after = inspectSaveState(saved);
+  const auto differences = diffSaveStates(before, after);
+  REQUIRE(differences.size() == 6);
+  for (std::size_t index = 0; index < 4; ++index)
     REQUIRE(differences[index].path ==
       "system.iop.spu2.effectStartAddresses[" + std::to_string(index) + "].value");
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto path = "system.iop.spu2.effects[" + std::to_string(core) + "].position";
+    REQUIRE(differences[4 + core].path == path);
+    const auto *prior = before.find(path);
+    REQUIRE(prior != nullptr);
+    REQUIRE(prior->scalarValue == 2);
+    const auto *current = after.find(path);
+    REQUIRE(current != nullptr);
+    REQUIRE(current->scalarValue == 0);
+  }
   NekoSystem restored;
   NekoSystem plain;
   restored.loadState(saved);

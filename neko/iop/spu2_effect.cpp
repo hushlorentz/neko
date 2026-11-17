@@ -169,6 +169,22 @@ SPU2StereoSample SPU2Controller::filterEffectOutput(
   return {filter(history[0], upCoefficients), filter(history[1], upCoefficients)};
 }
 
+SPU2StereoSample SPU2Controller::advanceEffect(
+  std::size_t core, SPU2StereoSample input) noexcept
+{
+  const auto side = inputReadPosition % 2 == 0 ? EffectSide::Left : EffectSide::Right;
+  const auto window = effectWindow(core);
+  const auto sample = window.size != 0
+    ? processEffectSide(core, side, filterEffectInput(core, side)) : std::int16_t{0};
+  pushEffectInputs(core, input);
+  const auto output = filterEffectOutput(core, side, sample);
+  if (window.size == 0)
+    effects[core].position = 0;
+  else if (side == EffectSide::Right)
+    effects[core].position = (effects[core].position + 1) % window.size;
+  return output;
+}
+
 bool SPU2Controller::hasValidEffectState() const noexcept
 {
   for (std::size_t core = 0; core < CORE_COUNT; ++core)

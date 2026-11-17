@@ -41,32 +41,46 @@ std::array<std::int16_t, 4> SPU2Controller::renderVoiceMix(std::size_t core) noe
 }
 
 SPU2StereoSample SPU2Controller::renderCoreOutput(std::size_t core,
-  const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input) const noexcept
+  const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input,
+  SPU2StereoSample external) noexcept
 {
-  std::array<std::int16_t, 2> external{};
-  if (core == 1)
-  {
-    external[0] = SPU2Numeric::signedSample(readSoundRAMHalfword(0x800 + inputReadPosition));
-    external[1] = SPU2Numeric::signedSample(readSoundRAMHalfword(0xa00 + inputReadPosition));
-  }
   const std::array<std::uint16_t, 2> pcm = {{input.left, input.right}};
+  const std::array<std::int16_t, 2> linked = {{external.left, external.right}};
+  std::array<std::int64_t, 2> dry{};
+  std::array<std::int16_t, 2> wet{};
   std::array<std::int16_t, 2> output{};
   for (std::size_t side = 0; side < output.size(); ++side)
   {
-    std::int64_t sum = 0;
+    const auto pcmSample = input.consumed
+      ? SPU2Numeric::applyGain(SPU2Numeric::signedSample(pcm[side]),
+          SPU2Numeric::signedSample(effectInputVolumes[core * 6 + 4 + side]))
+      : std::int16_t{0};
+    const auto externalSample = core == 1
+      ? SPU2Numeric::applyGain(linked[side],
+          SPU2Numeric::signedSample(effectInputVolumes[core * 6 + 2 + side]))
+      : std::int16_t{0};
     if ((mainMix[core] & (0x800 >> side)) != 0)
-      sum += mix[side];
-    if ((mainMix[core] & (0x80 >> side)) != 0 && input.consumed)
-    {
-      sum += SPU2Numeric::applyGain(SPU2Numeric::signedSample(pcm[side]),
-        SPU2Numeric::signedSample(effectInputVolumes[core * 6 + 4 + side]));
-    }
-    if ((mainMix[core] & (8 >> side)) != 0 && core == 1)
-    {
-      sum += SPU2Numeric::applyGain(external[side],
-        SPU2Numeric::signedSample(effectInputVolumes[core * 6 + 2 + side]));
-    }
-    const auto mastered = SPU2Numeric::applyGain(SPU2Numeric::clipSample(sum),
+      dry[side] += mix[side];
+    if ((mainMix[core] & (0x80 >> side)) != 0)
+      dry[side] += pcmSample;
+    if ((mainMix[core] & (8 >> side)) != 0)
+      dry[side] += externalSample;
+    std::int64_t wetSum = 0;
+    if ((mainMix[core] & (0x200 >> side)) != 0)
+      wetSum += mix[2 + side];
+    if ((mainMix[core] & (0x20 >> side)) != 0)
+      wetSum += pcmSample;
+    if ((mainMix[core] & (2 >> side)) != 0)
+      wetSum += externalSample;
+    wet[side] = SPU2Numeric::clipSample(wetSum);
+  }
+  const auto effect = advanceEffect(core, {wet[0], wet[1]});
+  const std::array<std::int16_t, 2> returned = {{effect.left, effect.right}};
+  for (std::size_t side = 0; side < output.size(); ++side)
+  {
+    dry[side] += SPU2Numeric::applyGain(returned[side],
+      SPU2Numeric::signedSample(effectInputVolumes[core * 6 + side]));
+    const auto mastered = SPU2Numeric::applyGain(SPU2Numeric::clipSample(dry[side]),
       SPU2Numeric::fixedVolumeGain(masterVolumeControls[core * 2 + side]));
     output[side] = (coreAttributes[core] & 0x4000) != 0 ? mastered : 0;
   }

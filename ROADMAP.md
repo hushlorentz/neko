@@ -4042,7 +4042,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement and independently review the approved effect kernel and owned
       runtime state, with focused arithmetic/RAM/lifecycle/persistence tests;
       keep ATTR admission closed until sample-path integration is operational.
-- [ ] Integrate and independently review effect timing, wet routing/return and
+- [x] Integrate and independently review effect timing, wet routing/return and
       exact ATTR/live-profile admission through the existing sample owner,
       with red/green CPU and immediate shared-RAM/DMA integration coverage.
 - [ ] Add paired-core authored cold/restored, traced/plain and canonical

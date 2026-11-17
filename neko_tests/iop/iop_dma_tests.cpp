@@ -3854,7 +3854,7 @@ TEST_CASE("IOP SPU normal writes use programmed TSA and complete on real wrapped
       REQUIRE(bus.write16(base + 0x19a, image).status == IOPBusStatus::Completed);
       REQUIRE(bus.read16(base + 0x19a).value == image);
     }
-    for (const std::uint16_t image : {0x30, 0xc031, 0x22, 0x60, 0xa0})
+    for (const std::uint16_t image : {0x30, 0xc031, 0x22, 0x60, 0xe0})
       REQUIRE(bus.write16(base + 0x19a, image).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(base + 0x1a8, 0xff0f).status == IOPBusStatus::Completed);
     REQUIRE(bus.write16(base + 0x1aa, static_cast<std::uint16_t>(destination)).status ==

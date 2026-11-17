@@ -1270,19 +1270,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         spu2->writeTransferStartAddress(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2EffectStartAddress:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
-      {
-        return {};
-      }
-      spu2->writeEffectStartAddress(location.offset, static_cast<std::uint16_t>(value));
-      return {IOPBusStatus::Completed};
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeEffectStartAddress(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2EffectOffset:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
-      {
-        return {};
-      }
-      spu2->writeEffectOffset(location.offset, static_cast<std::uint16_t>(value));
-      return {IOPBusStatus::Completed};
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeEffectOffset(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2EffectCoefficient:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {
@@ -1291,12 +1285,9 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       spu2->writeEffectCoefficient(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2EffectEndAddressHigh:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
-      {
-        return {};
-      }
-      spu2->writeEffectEndAddressHigh(location.offset, static_cast<std::uint16_t>(value));
-      return {IOPBusStatus::Completed};
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeEffectEndAddressHigh(location.offset, static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2EffectInputVolume:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

@@ -113,7 +113,7 @@ class SPU2Controller final
     bool writeKeyOn(std::size_t index, std::uint16_t value);
     std::uint16_t readKeyOff(std::size_t index) const;
     void writeKeyOff(std::size_t index, std::uint16_t value);
-    // Retained bit0/bits14-15 and I/O mode; no FIFO, IRQ or DMA effects.
+    // Bit7 enables effect RAM writes; bit0/bits14-15 and I/O mode stay bounded.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
@@ -124,11 +124,11 @@ class SPU2Controller final
     std::uint16_t readEffectInputVolume(std::size_t index) const;
     void writeEffectInputVolume(std::size_t index, std::uint16_t value);
     std::uint16_t readEffectEndAddressHigh(std::size_t core) const;
-    void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
+    bool writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readEffectStartAddress(std::size_t index) const;
-    void writeEffectStartAddress(std::size_t index, std::uint16_t value);
+    bool writeEffectStartAddress(std::size_t index, std::uint16_t value);
     std::uint16_t readEffectOffset(std::size_t index) const;
-    void writeEffectOffset(std::size_t index, std::uint16_t value);
+    bool writeEffectOffset(std::size_t index, std::uint16_t value);
     std::uint16_t readEffectCoefficient(std::size_t index) const;
     void writeEffectCoefficient(std::size_t index, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
@@ -177,6 +177,7 @@ class SPU2Controller final
     void pushEffectInputs(std::size_t core, SPU2StereoSample input) noexcept;
     SPU2StereoSample filterEffectOutput(std::size_t core, EffectSide side,
       std::int16_t input) noexcept;
+    SPU2StereoSample advanceEffect(std::size_t core, SPU2StereoSample input) noexcept;
     bool hasValidEffectState() const noexcept;
     struct VoiceState
     {
@@ -201,7 +202,8 @@ class SPU2Controller final
     std::int16_t advanceVoice(std::size_t index) noexcept;
     std::array<std::int16_t, 4> renderVoiceMix(std::size_t core) noexcept;
     SPU2StereoSample renderCoreOutput(std::size_t core,
-      const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input) const noexcept;
+      const std::array<std::int16_t, 4> &mix, const SPU2InputSample &input,
+      SPU2StereoSample external) noexcept;
     void consumeCommands(std::size_t core) noexcept;
     bool isVoiceActive(std::size_t index) const noexcept;
     bool hasActiveVoices() const noexcept;

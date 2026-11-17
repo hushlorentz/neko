@@ -114,7 +114,8 @@ SPU2SampleTick SPU2Controller::advanceSampleClock() noexcept
   {
     consumeCommands(core);
     const auto mix = renderVoiceMix(core);
-    const auto output = renderCoreOutput(core, mix, result.samples[core]);
+    const auto output = renderCoreOutput(core, mix, result.samples[core],
+      core == 1 ? result.outputs[0] : SPU2StereoSample{});
     result.outputs[core] = output;
     if (core == 0)
     {
@@ -283,7 +284,8 @@ bool SPU2Controller::hasSupportedInputProfile(std::size_t core) const noexcept
 {
   return spdifConfiguration == std::array<std::uint16_t, 5>{{
       0x0900, 0x0200, 0, 0x0008, 0xc032}} &&
-    (coreAttributes[core] == 0xc000 || coreAttributes[core] == 0xc001);
+    ((coreAttributes[core] & ~0x80) == 0xc000 ||
+     (coreAttributes[core] & ~0x80) == 0xc001);
 }
 
 bool SPU2Controller::hasValidInputState() const noexcept
@@ -404,7 +406,7 @@ bool SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t val
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
-  return (value & 0x3fce) == 0 && (value & 0x30) != 0x30;
+  return (value & 0x3f4e) == 0 && (value & 0x30) != 0x30;
 }
 
 std::uint16_t SPU2Controller::readCoreAttribute(std::size_t core) const
@@ -417,6 +419,7 @@ bool SPU2Controller::writeCoreAttribute(
 {
   auto &attribute = coreAttributes.at(core);
   if (!isSupportedCoreAttribute(value) ||
+      ((value & 0x80) != 0 && effectWindow(core).size == 0) ||
       ((autoDMAWriteSelection[core] != 0 || normalWriteOpen[core]) && attribute != value))
   {
     return false;
@@ -482,11 +485,15 @@ std::uint16_t SPU2Controller::readEffectEndAddressHigh(std::size_t core) const
   return effectEndAddressHigh.at(core);
 }
 
-void SPU2Controller::writeEffectEndAddressHigh(
+bool SPU2Controller::writeEffectEndAddressHigh(
   std::size_t core, std::uint16_t value)
 {
-  effectEndAddressHigh.at(core) = value;
+  auto &address = effectEndAddressHigh.at(core);
+  if ((coreAttributes[core] & 0x80) != 0)
+    return false;
+  address = value;
   effects[core].position = 0;
+  return true;
 }
 
 std::uint16_t SPU2Controller::readEffectStartAddress(std::size_t index) const
@@ -494,10 +501,14 @@ std::uint16_t SPU2Controller::readEffectStartAddress(std::size_t index) const
   return effectStartAddresses.at(index);
 }
 
-void SPU2Controller::writeEffectStartAddress(std::size_t index, std::uint16_t value)
+bool SPU2Controller::writeEffectStartAddress(std::size_t index, std::uint16_t value)
 {
-  effectStartAddresses.at(index) = value;
+  auto &address = effectStartAddresses.at(index);
+  if ((coreAttributes[index / 2] & 0x80) != 0)
+    return false;
+  address = value;
   effects[index / 2].position = 0;
+  return true;
 }
 
 std::uint16_t SPU2Controller::readEffectOffset(std::size_t index) const
@@ -505,9 +516,13 @@ std::uint16_t SPU2Controller::readEffectOffset(std::size_t index) const
   return effectOffsets.at(index);
 }
 
-void SPU2Controller::writeEffectOffset(std::size_t index, std::uint16_t value)
+bool SPU2Controller::writeEffectOffset(std::size_t index, std::uint16_t value)
 {
-  effectOffsets.at(index) = value;
+  auto &offset = effectOffsets.at(index);
+  if ((coreAttributes[index / EFFECT_OFFSET_HALFWORDS_PER_CORE] & 0x80) != 0)
+    return false;
+  offset = value;
+  return true;
 }
 
 std::uint16_t SPU2Controller::readEffectCoefficient(std::size_t index) const

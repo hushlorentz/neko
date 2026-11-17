@@ -1647,7 +1647,7 @@ TEST_CASE("SPU2 effect parameters retain independent raw halfwords at exact CPU 
     REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
   }
   for (const auto address : coreAttributeAddresses)
-    REQUIRE(bus.write16(address, 0x80).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0x100).status == IOPBusStatus::Unmapped);
   REQUIRE(system.iopStateHash() == before);
   for (std::size_t index = 0; index < effectStartAddressAddresses.size(); ++index)
     REQUIRE(bus.read16(effectStartAddressAddresses[index]).value == effectStartAddressValues[index]);
@@ -1831,7 +1831,7 @@ TEST_CASE("SPU2 effect end addresses retain raw high halfwords without active ef
   for (const auto address : coreAttributeAddresses)
   {
     REQUIRE(bus.write16(address, 0xc001).status == IOPBusStatus::Completed);
-    REQUIRE(bus.write16(address, 0xc081).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0xc041).status == IOPBusStatus::Unmapped);
   }
   system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
   system.iopDMAController().writeAuxiliaryControl(0x12345678);
@@ -2840,7 +2840,7 @@ TEST_CASE("SPU2 core attributes retain independent bit0 and bits14-15 images",
     REQUIRE(system.iopStateHash() == programmed);
     for (std::uint32_t value = 1; value <= 0xffff; ++value)
     {
-      if (((value & 0x3fce) != 0 || (value & 0x30) == 0x30) &&
+      if (((value & 0x3f4e) != 0 || (value & 0x30) == 0x30) &&
           (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
             IOPBusStatus::Unmapped ||
            system.spu2Controller().readCoreAttribute(selected) != 0xc001))
@@ -5766,7 +5766,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   }
   for (std::size_t core = 0; core < coreAttributeAddresses.size(); ++core)
   for (std::uint16_t value : {
-      2, 3, 0x20, 0x30, 0x40, 0x80, 0x4003, 0x8003, 0xc003, 0xc081, 0xffff})
+      2, 3, 0x20, 0x30, 0x40, 0x100, 0x4003, 0x8003, 0xc003, 0xc041, 0xffff})
   {
     CAPTURE(core);
     CAPTURE(value);
