@@ -97,6 +97,11 @@ namespace SPU2Numeric
 
   std::int16_t applyGain(std::int16_t sample, std::int16_t gain) noexcept
   {
-    return clipSample(floorDivide(std::int64_t{sample} * gain, 32768));
+    return clipSample(floorQ15(std::int64_t{sample} * gain));
+  }
+
+  std::int64_t floorQ15(std::int64_t value) noexcept
+  {
+    return floorDivide(value, 32768);
   }
 }

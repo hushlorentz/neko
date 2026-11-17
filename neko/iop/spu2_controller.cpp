@@ -54,6 +54,7 @@ void SPU2Controller::reset() noexcept
   effectStartAddresses.fill(0);
   effectOffsets.fill(0);
   effectCoefficients.fill(0);
+  effects = {};
   transferStartAddress.fill(0);
   transferCursor.fill(0);
   normalWriteOpen.fill(false);
@@ -485,6 +486,7 @@ void SPU2Controller::writeEffectEndAddressHigh(
   std::size_t core, std::uint16_t value)
 {
   effectEndAddressHigh.at(core) = value;
+  effects[core].position = 0;
 }
 
 std::uint16_t SPU2Controller::readEffectStartAddress(std::size_t index) const
@@ -495,6 +497,7 @@ std::uint16_t SPU2Controller::readEffectStartAddress(std::size_t index) const
 void SPU2Controller::writeEffectStartAddress(std::size_t index, std::uint16_t value)
 {
   effectStartAddresses.at(index) = value;
+  effects[index / 2].position = 0;
 }
 
 std::uint16_t SPU2Controller::readEffectOffset(std::size_t index) const

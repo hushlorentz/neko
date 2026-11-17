@@ -4027,9 +4027,29 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved paired-core start/continuation extension with
       focused red/green, lifecycle/persistence and authored guest coverage;
       independently review before the user-owned implementation commit.
-- [ ] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
+- [x] Verify fresh unchanged-input BIOS progress with same-build cold/restored,
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.
+
+### SPU2 Core-0 ATTR Dependency
+
+- [x] Research the originating `0xc080` halfword store to `0x1f90019a`
+      through local manuals and existing SPU2/sample/RAM ownership; distinguish
+      programming from active effects and split the bounded next work.
+- [x] Select and approve the bounded paired-core effect contract, resolving
+      addressing, phase/filter arithmetic, disabled behavior, live programming
+      and PCM/DMA coexistence before admitting ATTR bit 7.
+- [x] Implement and independently review the approved effect kernel and owned
+      runtime state, with focused arithmetic/RAM/lifecycle/persistence tests;
+      keep ATTR admission closed until sample-path integration is operational.
+- [ ] Integrate and independently review effect timing, wet routing/return and
+      exact ATTR/live-profile admission through the existing sample owner,
+      with red/green CPU and immediate shared-RAM/DMA integration coverage.
+- [ ] Add paired-core authored cold/restored, traced/plain and canonical
+      conformance; resolve due broader gates and final independent block review
+      before the user-owned commit checkpoint.
+- [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

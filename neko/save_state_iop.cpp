@@ -489,6 +489,30 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", spu.effectCoefficients[index]);
       }
     }
+    {
+      auto effects = writer->scope("effects");
+      for (std::size_t core = 0; core < spu.effects.size(); ++core)
+      {
+        auto element = writer->element(core);
+        const auto &effect = spu.effects[core];
+        writer->writeFieldU32("position", effect.position);
+        const auto writeHistory = [writer](const char *name, const auto &histories)
+        {
+          auto history = writer->scope(name);
+          for (std::size_t side = 0; side < histories.size(); ++side)
+          {
+            auto channel = writer->element(side);
+            for (std::size_t slot = 0; slot < histories[side].size(); ++slot)
+            {
+              auto sample = writer->element(slot);
+              writer->writeFieldU16("value", static_cast<std::uint16_t>(histories[side][slot]));
+            }
+          }
+        };
+        writeHistory("downHistory", effect.downHistory);
+        writeHistory("upHistory", effect.upHistory);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -944,6 +968,32 @@ void NekoSaveStateCodec::readIOP(
         spu.effectCoefficients[index] = reader->readFieldU16("value");
       }
     }
+    {
+      auto effects = reader->scope("effects");
+      for (std::size_t core = 0; core < spu.effects.size(); ++core)
+      {
+        auto element = reader->element(core);
+        auto &effect = spu.effects[core];
+        effect.position = reader->readFieldU32("position");
+        const auto readHistory = [reader](const char *name, auto &histories)
+        {
+          auto history = reader->scope(name);
+          for (std::size_t side = 0; side < histories.size(); ++side)
+          {
+            auto channel = reader->element(side);
+            for (std::size_t slot = 0; slot < histories[side].size(); ++slot)
+            {
+              auto sample = reader->element(slot);
+              histories[side][slot] = SPU2Numeric::signedSample(reader->readFieldU16("value"));
+            }
+          }
+        };
+        readHistory("downHistory", effect.downHistory);
+        readHistory("upHistory", effect.upHistory);
+      }
+    }
+    reader->requireField(spu.hasValidEffectState(),
+      "SPU2 effect cursor is outside the programmed window");
     reader->requireField(spu.hasValidCommandState(),
       "SPU2 pending commands are outside the bounded profile");
     reader->requireField(spu.hasValidVoiceState(),

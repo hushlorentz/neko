@@ -153,6 +153,31 @@ class SPU2Controller final
     friend class NekoSystem;
     friend struct SPU2ObservationTestAccess;
     friend struct SPU2VoiceTestAccess;
+    friend struct SPU2EffectTestAccess;
+    enum class EffectSide : std::uint8_t { Left, Right };
+    using EffectHistory = std::array<std::int16_t, 39>;
+    struct EffectState
+    {
+      std::uint32_t position = 0;
+      std::array<EffectHistory, 2> downHistory{};
+      std::array<EffectHistory, 2> upHistory{};
+    };
+    struct EffectWindow
+    {
+      std::uint32_t start;
+      std::uint32_t size;
+    };
+    EffectWindow effectWindow(std::size_t core) const noexcept;
+    std::uint32_t effectOffset(std::size_t core, std::size_t pair) const noexcept;
+    static std::uint32_t effectTapAddress(EffectWindow window,
+      std::uint32_t position, std::int64_t offset) noexcept;
+    std::int16_t processEffectSide(std::size_t core, EffectSide side,
+      std::int16_t input) noexcept;
+    std::int16_t filterEffectInput(std::size_t core, EffectSide side) const noexcept;
+    void pushEffectInputs(std::size_t core, SPU2StereoSample input) noexcept;
+    SPU2StereoSample filterEffectOutput(std::size_t core, EffectSide side,
+      std::int16_t input) noexcept;
+    bool hasValidEffectState() const noexcept;
     struct VoiceState
     {
       SPU2Envelope::State envelope;
@@ -267,13 +292,14 @@ class SPU2Controller final
     std::array<std::uint16_t, CORE_COUNT> mainMix{};
     // Per core: EVOLL/R, AVOLL/R, BVOLL/R; core0 AVOL has no input function.
     std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
-    // Passive raw EEA high images; no decoded address or effect work area.
+    // Raw EEA high images; upper bits are retained but ignored in window decoding.
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
-    // Per core: passive raw ESA high/low images, not an effect processing cursor.
+    // Per core: raw ESA high/low images, separate from the relative processing cursor.
     std::array<std::uint16_t, EFFECT_START_HALFWORD_COUNT> effectStartAddresses{};
     // Per core, ascending raw high/low offset halves and coefficients; no active DSP.
     std::array<std::uint16_t, EFFECT_OFFSET_HALFWORD_COUNT> effectOffsets{};
     std::array<std::uint16_t, EFFECT_COEFFICIENT_COUNT> effectCoefficients{};
+    std::array<EffectState, CORE_COUNT> effects{};
     // Per core: raw programmed TSA high/low images, independent of PIO progress.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
     std::array<std::uint32_t, CORE_COUNT> transferCursor{};

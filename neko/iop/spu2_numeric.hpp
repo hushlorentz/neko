@@ -28,6 +28,8 @@ namespace SPU2Numeric
   PitchStep advancePitch(std::uint16_t fraction, std::uint16_t rawPitch) noexcept;
   std::int16_t clipSample(std::int64_t value) noexcept;
   std::int16_t signedSample(std::uint16_t value) noexcept;
+  // Wide Q15 quantization, floored toward negative infinity without clipping.
+  std::int64_t floorQ15(std::int64_t value) noexcept;
   // The caller must admit fixed controls (bit15 clear) before conversion.
   std::int16_t fixedVolumeGain(std::uint16_t control) noexcept;
   std::int16_t applyGain(std::int16_t sample, std::int16_t gain) noexcept;

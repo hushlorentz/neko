@@ -2516,10 +2516,11 @@ TEST_CASE("SPU2 inactive status excludes writes neighbors and non-CPU transports
     REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
       IOPBusStatus::Unmapped);
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
-    for (IOPAddress other : {address - 0x10,
+    for (IOPAddress other : {address - 6,
         address + 2, address + 0x800,
         address | 0x80000000u, address | 0xa0000000u})
     {
+      CAPTURE(other);
       REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write16(other, 0).status == IOPBusStatus::Unmapped);
     }
