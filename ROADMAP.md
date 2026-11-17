@@ -4079,7 +4079,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement and independently review the approved behavior through the
       existing owners, with focused red/green and immediate lifecycle,
       transport and persistence integration coverage before the user commit.
-- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+- [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
