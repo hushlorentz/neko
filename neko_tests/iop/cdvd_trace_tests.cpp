@@ -93,9 +93,9 @@ namespace
       bool overflow = false;
   };
 
-  template<std::size_t Size>
+  template<typename Program>
   void installProgram(NekoSystem &system, IOPAddress address,
-    const std::array<IOPWord, Size> &words)
+    const Program &words)
   {
     for (const auto word : words)
     {
@@ -103,6 +103,19 @@ namespace
         IOPBusStatus::Completed);
       address += 4;
     }
+  }
+
+  std::array<IOPWord, 27> bootCertifyGuest(IOPWord upper)
+  {
+    return {{
+      0x3c010000 | upper, 0x34212000,
+      0x34020002, 0xa0220017, 0xa0200017,
+      0x34020041, 0xa0220017, 0x34020043, 0xa0220017,
+      0x3402001a, 0x10000002, 0xa0220016, 0xffffffff,
+      0x90230017, 0, 0x30640080, 0x1480fffc, 0,
+      0x90280018, 0, 0x90290017, 0, 0x902a0018, 0,
+      0x902b0008, 0, 0x34140001
+    }};
   }
 
   enum class TraceMode { Disabled, Retained, Prefix, Stream };
@@ -169,6 +182,247 @@ namespace
     }
     source.runMasterCycles(remaining);
     IOPTraceTest::requireMachine(source, reference);
+  }
+}
+
+TEST_CASE("CDVD BootCertify authored guest stages submits polls and drains through each segment",
+  "[iop][cdvd-trace][cdvd-boot-certify][cdvd-boot-certify-conformance][save-state]")
+{
+  for (const IOPWord upper : {0x1f40u, 0x9f40u, 0xbf40u})
+  {
+    CAPTURE(upper);
+    const auto program = bootCertifyGuest(upper);
+    const auto prepare = [&program](NekoSystem &system) {
+      installProgram(system, 0, program);
+      system.iopCore().startExecution(0xa0000000);
+    };
+    NekoSystem reference;
+    prepare(reference);
+    const auto initial = reference.saveState();
+    reference.startTrace();
+    reference.runMasterCycles(201);
+    REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(reference.iopCore().retiredInstructions() == program.size() - 1);
+    REQUIRE(reference.iopCore().generalRegister(3) == 0);
+    REQUIRE(reference.iopCore().generalRegister(8) == 1);
+    REQUIRE(reference.iopCore().generalRegister(9) == 0x40);
+    REQUIRE(reference.iopCore().generalRegister(10) == 0);
+    REQUIRE(reference.iopCore().generalRegister(11) == 0);
+    REQUIRE(reference.iopCore().generalRegister(20) == 1);
+    REQUIRE(reference.iopInterruptController().status() == 0);
+    const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+    REQUIRE(commands.size() == 2);
+    for (unsigned index = 0; index < commands.size(); ++index)
+    {
+      REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+      REQUIRE(commands[index].masterCycle == (index == 0 ? 89 : 97));
+      const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+      REQUIRE(decoded.transport == NekoCDVDTrace::Transport::Subcommand);
+      REQUIRE(decoded.opcode == 0x1a);
+      REQUIRE(decoded.beforePhase == (index == 0 ?
+        NekoCDVDTrace::Phase::Idle : NekoCDVDTrace::Phase::Pending));
+      REQUIRE(decoded.afterPhase == (index == 0 ?
+        NekoCDVDTrace::Phase::Pending : NekoCDVDTrace::Phase::Result));
+      REQUIRE(decoded.beforeCause == 0);
+      REQUIRE(decoded.afterCause == 0);
+      REQUIRE(decoded.rtcTicks == commands[index].masterCycle);
+      const std::array<std::uint8_t, 16> expected = index == 0 ?
+        std::array<std::uint8_t, 16>{} : std::array<std::uint8_t, 16>{{1}};
+      REQUIRE(decoded.result == expected);
+    }
+    const IOPAddress base = (upper << 16) | 0x2000;
+    const std::array<std::uint64_t, 10> cycles = {{
+      25, 33, 49, 65, 89, 97, 137, 153, 169, 185
+    }};
+    const std::array<std::uint8_t, 10> values = {{
+      2, 0, 0x41, 0x43, 0x1a, 0, 1, 0x40, 0, 0
+    }};
+    const std::array<unsigned, 10> offsets = {{
+      0x17, 0x17, 0x17, 0x17, 0x16, 0x17, 0x18, 0x17, 0x18, 8
+    }};
+    std::size_t access = 0;
+    bool completed = false;
+    for (const auto &event : reference.trace())
+    {
+      if (event.subsystem == CDVD && event.type == COMPLETED)
+      {
+        completed = true;
+      }
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          (event.value0 != base + 8 &&
+           (event.value0 < base + 0x16 || event.value0 > base + 0x18)))
+      {
+        continue;
+      }
+      REQUIRE(access < cycles.size());
+      REQUIRE(event.masterCycle == cycles[access]);
+      REQUIRE(event.value0 == base + offsets[access]);
+      REQUIRE(event.value1 == values[access]);
+      if (upper == 0xbf40)
+      {
+        namespace Memory = NekoIOPTraceMemory;
+        REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+          BASE + offsets[access], 1,
+          access < 5 ? Memory::AccessKind::DataStore : Memory::AccessKind::DataLoad,
+          Memory::Outcome::Completed, Memory::CacheRoute::Uncached, true,
+          static_cast<std::uint8_t>(1u << (offsets[access] % 4))}));
+      }
+      if (access >= 5)
+      {
+        REQUIRE(completed);
+      }
+      ++access;
+    }
+    REQUIRE(access == cycles.size());
+    NekoSystem coldPlain;
+    prepare(coldPlain);
+    coldPlain.runMasterCycles(201);
+    IOPTraceTest::requireMachine(coldPlain, reference);
+    if (upper != 0xbf40)
+    {
+      continue;
+    }
+    struct Cut
+    {
+      std::uint64_t cycle;
+      std::uint8_t parameterCount;
+      std::uint8_t phase;
+    };
+    const Cut cuts[] = {
+      {25, 1, 0}, {49, 3, 0}, {81, 4, 0}, {89, 0, 1},
+      {96, 0, 1}, {97, 0, 2}, {137, 0, 0}
+    };
+    for (const auto &cut : cuts)
+    {
+      CAPTURE(cut.cycle);
+      NekoSystem source;
+      source.loadState(initial);
+      source.runMasterCycles(cut.cycle);
+      const SaveStateMutation fields(source.saveState());
+      REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") ==
+        cut.parameterCount);
+      REQUIRE(fields.readByte("system.iop.cdvd.subcommandPhase") == cut.phase);
+      if (cut.cycle == 97 || cut.cycle == 137)
+      {
+        REQUIRE(source.iopCore().delayedResultContinuation().source ==
+          IOPDelayedResultSource::Load);
+      }
+      requireContinuationModes(reference, source);
+    }
+  }
+}
+
+TEST_CASE("CDVD BootCertify authored malformed requests preserve staging and rejected branches",
+  "[iop][cdvd-trace][cdvd-boot-certify][cdvd-boot-certify-conformance][save-state]")
+{
+  const std::vector<std::vector<std::uint8_t>> requests = {
+    {2, 0, 0x41}, {2, 0, 0x41, 0x44}, {2, 0, 0x41, 0x43, 0}
+  };
+  for (const auto &parameters : requests)
+  {
+    CAPTURE(parameters.size());
+    std::vector<IOPWord> program = {0x3c01bf40, 0x34212000};
+    for (const auto byte : parameters)
+    {
+      program.push_back(0x34020000 | byte);
+      program.push_back(0xa0220017);
+    }
+    program.insert(program.end(), {
+      0x3402001a, 0x10000001, 0xa0220016, 0x34140001
+    });
+    const auto prepare = [&program](NekoSystem &system) {
+      installProgram(system, 0, program);
+      system.iopCore().startExecution(0xa0000000);
+    };
+    const std::uint64_t failureCycle = 33 + 16 * parameters.size();
+    NekoSystem reference;
+    prepare(reference);
+    const auto initial = reference.saveState();
+    reference.startTrace();
+    reference.runMasterCycles(failureCycle);
+    REQUIRE(reference.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(reference.iopCore().retiredInstructions() == program.size() - 2);
+    REQUIRE(reference.iopCore().programCounter() ==
+      0xa0000000 + (program.size() - 2) * 4);
+    REQUIRE(reference.iopCore().storeFailure().access.physicalAddress == BASE + 0x16);
+    REQUIRE(reference.iopCore().generalRegister(20) == 0);
+    REQUIRE(reference.iopInterruptController().status() == 0);
+    REQUIRE(IOPTraceTest::subsystemEvents(reference, CDVD).empty());
+    const SaveStateMutation fields(reference.saveState());
+    REQUIRE(fields.readByte("system.iop.cdvd.lastSubcommand") == 0);
+    REQUIRE(fields.readByte("system.iop.cdvd.subcommandPhase") == 0);
+    REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == parameters.size());
+    for (std::size_t index = 0; index < 16; ++index)
+    {
+      REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", index) ==
+        (index < parameters.size() ? parameters[index] : 0));
+      REQUIRE(fields.readByte("system.iop.cdvd.result", index) == 0);
+    }
+    NekoSystem coldPlain;
+    prepare(coldPlain);
+    coldPlain.runMasterCycles(failureCycle);
+    IOPTraceTest::requireMachine(coldPlain, reference);
+    for (const auto cut : {std::uint64_t{25}, failureCycle - 8})
+    {
+      CAPTURE(cut);
+      NekoSystem source;
+      source.loadState(initial);
+      source.runMasterCycles(cut);
+      requireContinuationModes(reference, source);
+    }
+  }
+}
+
+TEST_CASE("CDVD BootCertify unread result rejects guest staging across reset and restore",
+  "[iop][cdvd-trace][cdvd-boot-certify][cdvd-boot-certify-conformance][save-state]")
+{
+  auto program = bootCertifyGuest(0xbf40);
+  program[10] = 0xa0220016;
+  program[11] = 0x34020002;
+  program[12] = 0x10000001;
+  program[13] = 0xa0220017;
+  program[14] = 0x34140001;
+  const auto prepare = [&program](NekoSystem &system) {
+    installProgram(system, 0, program);
+    system.iopCore().startExecution(0xa0000000);
+  };
+  NekoSystem reference;
+  prepare(reference);
+  const auto initial = reference.saveState();
+  reference.startTrace();
+  reference.runMasterCycles(105);
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::StoreFailure);
+  REQUIRE(reference.iopCore().retiredInstructions() == 13);
+  REQUIRE(reference.iopCore().programCounter() == 0xa0000034);
+  REQUIRE(reference.iopCore().storeFailure().access.physicalAddress == BASE + 0x17);
+  REQUIRE(reference.iopCore().generalRegister(20) == 0);
+  REQUIRE(reference.iopInterruptController().status() == 0);
+  const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+  REQUIRE(commands.size() == 2);
+  REQUIRE(commands[0].masterCycle == 81);
+  REQUIRE(commands[1].masterCycle == 89);
+  const SaveStateMutation fields(reference.saveState());
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandPhase") == 2);
+  REQUIRE(fields.readByte("system.iop.cdvd.result") == 1);
+  REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == 0);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == 0);
+  NekoSystem coldPlain;
+  prepare(coldPlain);
+  coldPlain.runMasterCycles(105);
+  IOPTraceTest::requireMachine(coldPlain, reference);
+  NekoSystem fresh;
+  for (const std::uint64_t cut : {25, 81, 89, 97})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    source.loadState(initial);
+    source.runMasterCycles(cut);
+    const auto checkpoint = source.saveState();
+    source.reset();
+    IOPTraceTest::requireMachine(source, fresh);
+    source.loadState(checkpoint);
+    requireContinuationModes(reference, source);
   }
 }
 
