@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 125 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify]")
+TEST_CASE("Version 126 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,12 +662,12 @@ TEST_CASE("Version 125 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 125);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 126);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 124;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 125;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);

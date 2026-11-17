@@ -96,6 +96,7 @@ class CDVDController final
     static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
     SubcommandResult subcommandResult() const;
     static SubcommandResult versionResult() noexcept;
+    static SubcommandResult forbidDVDPResult() noexcept;
     static SubcommandResult bootCertifyResult() noexcept;
     static SubcommandResult regionResult() noexcept;
     static bool isValidSubcommandResult(std::uint8_t opcode,

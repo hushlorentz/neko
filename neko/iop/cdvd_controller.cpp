@@ -132,6 +132,7 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
     case 3:
       return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
     case 8:
+    case 0x15:
     case 0x36:
       return subcommandParameterCount == 0;
     case 0x1a:
@@ -150,6 +151,7 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 4;
     case 8:
       return 8;
+    case 0x15:
     case 0x1a:
       return 1;
     case 0x36:
@@ -162,6 +164,12 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
 CDVDController::SubcommandResult CDVDController::versionResult() noexcept
 {
   return {{3, 6, 2, 0}};
+}
+
+CDVDController::SubcommandResult CDVDController::forbidDVDPResult() noexcept
+{
+  // Approved compatibility reply, not a DVD-read permission transition.
+  return {{5}};
 }
 
 CDVDController::SubcommandResult CDVDController::bootCertifyResult() noexcept
@@ -184,6 +192,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return versionResult();
     case 8:
       return clockResult();
+    case 0x15:
+      return forbidDVDPResult();
     case 0x1a:
       return bootCertifyResult();
     case 0x36:
@@ -202,6 +212,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == versionResult();
     case 8:
       return isValidClockResult(snapshot);
+    case 0x15:
+      return snapshot == forbidDVDPResult();
     case 0x1a:
       return snapshot == bootCertifyResult();
     case 0x36:

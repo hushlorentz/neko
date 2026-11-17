@@ -4065,6 +4065,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
+
+### CD/DVD ForbidDVDP Dependency
+
+- [x] Research the originating byte store `0x15` to `0x1f402016` through
+      local manuals and the existing CD/DVD command/transport owner; distinguish
+      command semantics from endpoint admission before selecting behavior.
+- [x] Select and approve the bounded ForbidDVDP contract, separating a
+      compatibility reply from unverified DVD-read prohibition; settle inputs,
+      results, side effects, IRQs, cancellation and timing.
+- [x] Implement and independently review the approved behavior through the
+      existing owners, with focused red/green and immediate lifecycle,
+      transport and persistence integration coverage before the user commit.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
 
@@ -4082,6 +4099,9 @@ not requirements for exhaustive subsystem coverage.
 - [ ] If required by the selected shell profile, define media-image inputs,
       supported sector formats and no-media/error behavior, keeping host file
       I/O outside the device core; otherwise defer media transfer breadth.
+- [ ] Before enabling DVD-video READ or player-loading paths, define the owned
+      ForbidDVDP prohibition, re-enable and reset contract, with persistence
+      and trace coverage; do not infer permissions from a compatibility reply.
 - [ ] Plan buffered sector production and channel-3 DMA through their existing
       owners, including backpressure, transfer counts, completion, cancellation,
       emulated deadlines and deterministic restored continuation.
