@@ -298,33 +298,48 @@ def verify_scout_checkpoint(receipt, binary, bios):
         raise ValueError("Scout checkpoint identity changed; start a new cold scout")
 
 
-def prune_scout_states(directory, manifest, keep):
-    reclaimed = 0
+def prune_scout_states(directory, manifest, keep=None):
+    if keep is None:
+        keep = {Path(item["path"])
+                for item in manifest["checkpoint_receipts"][-2:]}
+    manifest.setdefault("pruned_state_bytes", 0)
     for receipt in manifest["checkpoint_receipts"]:
         path = Path(receipt["path"])
-        if path not in keep:
+        if not receipt.get("pruned") and not receipt.get("pinned") and path not in keep:
+            if campaign.artifact(directory, path.name).resolve() != path.resolve():
+                raise ValueError("Scout cleanup must stay inside its campaign")
             if file_identity(path) != receipt["state"]:
                 raise ValueError("Scout checkpoint changed before cleanup")
+            receipt["prune_pending"] = True
+            write_json(directory / "manifest.json", manifest)
             path.unlink()
+            receipt.pop("prune_pending")
             receipt["pruned"] = True
-            reclaimed += receipt["state"]["bytes"]
-    manifest["pruned_state_bytes"] = reclaimed
+            manifest["pruned_state_bytes"] += receipt["state"]["bytes"]
+            write_json(directory / "manifest.json", manifest)
     write_json(directory / "manifest.json", manifest)
 
 
 def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
-                    replay_window, invocation=None):
+                    replay_window, invocation=None, pinned_checkpoint_cycles=()):
     ceiling = uint(master_cycles, "Cycle ceiling")
     interval = uint(checkpoint_every, "Checkpoint interval")
     window = uint(replay_window, "Replay window")
     if interval == 0 or window == 0:
         raise ValueError("Checkpoint interval and replay window must be positive")
+    pins = sorted({uint(cycle, "Pinned checkpoint cycle")
+                   for cycle in pinned_checkpoint_cycles})
+    if any(cycle == 0 or cycle > ceiling or
+           (cycle % interval != 0 and cycle != ceiling) for cycle in pins):
+        raise ValueError("Pinned cycles must be positive scheduled scout checkpoints "
+                         "at or below the ceiling")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
     directory.mkdir(parents=True, exist_ok=False)
     manifest = dict(status="running", mode="scout", bios=str(bios),
                     max_master_cycles=ceiling, checkpoint_every=interval,
                     replay_window=window, commands=[], checkpoint_receipts=[],
+                    pinned_checkpoint_cycles=pins,
                     note=EVIDENCE_NOTE)
     write_json(directory / "manifest.json", manifest)
     started = time.monotonic()
@@ -369,7 +384,7 @@ def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
             receipt = dict(format="neko-bios-scout-checkpoint-v1",
                            validated=False, validation="scout_origin_only",
                            path=str(state), master_cycle=end,
-                           state=file_identity(state), **identity)
+                           state=file_identity(state), pinned=end in pins, **identity)
             write_json(Path(str(state) + ".json"), receipt)
             manifest["checkpoint_receipts"].append(receipt)
             write_json(directory / "manifest.json", manifest)
@@ -378,15 +393,14 @@ def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
                         [sys.executable, "-B", str(INSPECTOR), "summary",
                          str(directory / f"{name}.jsonl")], extension="json")
                 break
+            prune_scout_states(directory, manifest)
             checkpoint = receipt
             start = end
 
         if failure is None:
             manifest["status"] = "ceiling_reached" if limited else "cpu_stop"
             if limited:
-                keep = {Path(item["path"])
-                        for item in manifest["checkpoint_receipts"][-2:]}
-                prune_scout_states(directory, manifest, keep)
+                prune_scout_states(directory, manifest)
             write_json(directory / "manifest.json", manifest)
             return dict(artifacts=str(directory), status=manifest["status"],
                         first_failure=None, note=EVIDENCE_NOTE)
@@ -474,6 +488,8 @@ def main(argv=None):
                         help="Scout checkpoint/progress interval in master cycles (default: 5000000).")
     parser.add_argument("--replay-window", type=int,
                         help="Trace at most this many cycles before the scout failure (default: 10000).")
+    parser.add_argument("--pin-checkpoint-at", type=int, action="append",
+                        help="Retain a scheduled scout checkpoint at this absolute cycle; repeatable.")
     parser.add_argument("--failure-context", action="store_true",
                         help="Retain bounded first-failure context in traced runs.")
     checkpoints = parser.add_mutually_exclusive_group()
@@ -494,11 +510,13 @@ def main(argv=None):
                                   else arguments.checkpoint_every),
                 replay_window=(10000 if arguments.replay_window is None
                                else arguments.replay_window),
+                pinned_checkpoint_cycles=arguments.pin_checkpoint_at or (),
                 invocation=invocation)
             print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
             return 0 if report["status"] in ("equal", "ceiling_reached") else 1
-        if arguments.checkpoint_every is not None or arguments.replay_window is not None:
-            raise ValueError("Checkpoint interval and replay window require --mode scout")
+        if (arguments.checkpoint_every is not None or arguments.replay_window is not None or
+                arguments.pin_checkpoint_at is not None):
+            raise ValueError("Checkpoint interval, replay window and pins require --mode scout")
         report = run_batch(arguments.directory.resolve(), arguments.bios.resolve(),
                            master_cycles=arguments.cycles,
                            failure_context=arguments.failure_context,

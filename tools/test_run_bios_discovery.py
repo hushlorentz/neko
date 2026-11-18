@@ -33,10 +33,13 @@ class StagedDiscoveryTests(unittest.TestCase):
         self.failure_cycle = 25
         self.replay_mismatch = False
         self.capture = discovery.capture
+        self.before_scout = None
 
     def fake_capture(self, directory, manifest, name, command, **kwargs):
         if command[0] != str(self.binary):
             return self.capture(directory, manifest, name, command, **kwargs)
+        if "--scout" in command and self.before_scout is not None:
+            self.before_scout(name, manifest)
         self.commands.append(command)
         ceiling = int(command[command.index("--cycles") + 1])
         start = 0
@@ -95,14 +98,14 @@ class StagedDiscoveryTests(unittest.TestCase):
         discovery.write_json(directory / "manifest.json", manifest)
         return status
 
-    def invoke(self, expected=0, *, ceiling=30):
+    def invoke(self, expected=0, *, ceiling=30, extra_args=()):
         with patch.object(discovery, "build_neko", return_value=self.binary), \
              patch.object(discovery, "capture", side_effect=self.fake_capture), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             status = discovery.main([
                 str(self.output), "--bios", str(self.bios),
                 "--mode", "scout", "--cycles", str(ceiling),
-                "--checkpoint-every", "10", "--replay-window", "3"])
+                "--checkpoint-every", "10", "--replay-window", "3", *extra_args])
         self.assertEqual(status, expected)
         return json.loads((self.output / "manifest.json").read_text())
 
@@ -176,6 +179,144 @@ class StagedDiscoveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "identity changed"):
                     discovery.verify_scout_checkpoint(receipt, self.binary, self.bios)
                 changed.write_bytes(original)
+
+    def test_live_retention_keeps_two_recent_states_and_launch_pins(self):
+        self.failure_cycle = None
+
+        def inspect_live(name, manifest):
+            if name == "scout-60":
+                retained = {path.name for path in self.output.glob("scout-*.state")}
+                self.assertEqual(retained, {"scout-10.state", "scout-40.state",
+                                            "scout-50.state"})
+                self.assertTrue(manifest["checkpoint_receipts"][1]["pruned"])
+                self.assertTrue((self.output / "scout-20.state.json").is_file())
+
+        self.before_scout = inspect_live
+        manifest = self.invoke(ceiling=60, extra_args=("--pin-checkpoint-at", "10"))
+        self.assertEqual({path.name for path in self.output.glob("scout-*.state")},
+                         {"scout-10.state", "scout-50.state", "scout-60.state"})
+        self.assertEqual(manifest["pinned_checkpoint_cycles"], [10])
+        self.assertTrue(manifest["checkpoint_receipts"][0]["pinned"])
+        self.assertEqual(manifest["pruned_state_bytes"], sum(
+            item["state"]["bytes"] for item in manifest["checkpoint_receipts"]
+            if item.get("pruned")))
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "execution_finished")
+
+    def test_long_mismatch_preserves_recent_failure_and_pinned_evidence(self):
+        self.failure_cycle = 65
+        self.replay_mismatch = True
+        manifest = self.invoke(expected=1, ceiling=100,
+                               extra_args=("--pin-checkpoint-at", "10"))
+        self.assertEqual({path.name for path in self.output.glob("scout-*.state")},
+                         {"scout-10.state", "scout-50.state", "scout-60.state",
+                          "scout-70.state"})
+        self.assertTrue(manifest["checkpoint_receipts"][1]["pruned"])
+        self.assertTrue((self.output / "replay-final.state").is_file())
+        self.assertTrue((self.output / "plain-final.state").is_file())
+
+    def test_live_retention_preserves_recent_checkpoints_on_interruption(self):
+        self.failure_cycle = None
+
+        def interrupt(name, manifest):
+            if name == "scout-70":
+                raise KeyboardInterrupt
+
+        self.before_scout = interrupt
+        manifest = self.invoke(expected=130, ceiling=100)
+        self.assertEqual(manifest["error"], "interrupted")
+        self.assertEqual({path.name for path in self.output.glob("scout-*.state")},
+                         {"scout-50.state", "scout-60.state"})
+
+    def test_live_retention_refuses_changed_obsolete_state(self):
+        self.failure_cycle = None
+
+        def change_old_state(name, manifest):
+            if name == "scout-30":
+                (self.output / "scout-10.state").write_bytes(b"changed")
+
+        self.before_scout = change_old_state
+        manifest = self.invoke(expected=2, ceiling=40)
+        self.assertIn("changed before cleanup", manifest["error"])
+        self.assertEqual((self.output / "scout-10.state").read_bytes(), b"changed")
+        self.assertTrue((self.output / "scout-20.state").is_file())
+        self.assertTrue((self.output / "scout-30.state").is_file())
+
+    def test_live_retention_records_pending_deletion_before_unlink_error(self):
+        self.failure_cycle = None
+        unlink = Path.unlink
+
+        def fail_unlink(path, *args, **kwargs):
+            if (path.name == "scout-10.state" and
+                    path.parent.resolve() == self.output.resolve()):
+                raise PermissionError("authored cleanup denial")
+            return unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", fail_unlink):
+            manifest = self.invoke(expected=2, ceiling=40)
+        receipt = manifest["checkpoint_receipts"][0]
+        self.assertTrue(receipt["prune_pending"])
+        self.assertFalse(receipt.get("pruned", False))
+        self.assertTrue((self.output / "scout-10.state").is_file())
+        self.assertTrue((self.output / "scout-20.state").is_file())
+
+    def test_invalid_pins_fail_before_creating_a_batch(self):
+        for cycle in (0, 11, 41):
+            with self.subTest(cycle=cycle), self.assertRaises(ValueError):
+                discovery.run_scout_batch(
+                    self.output, self.bios, master_cycles=40,
+                    checkpoint_every=10, replay_window=3,
+                    pinned_checkpoint_cycles=(cycle,))
+            self.assertFalse(self.output.exists())
+
+    def test_interrupted_unlink_keeps_pending_receipt_and_recent_states(self):
+        self.failure_cycle = None
+        unlink = Path.unlink
+
+        def interrupt_after_unlink(path, *args, **kwargs):
+            result = unlink(path, *args, **kwargs)
+            if (path.name == "scout-10.state" and
+                    path.parent.resolve() == self.output.resolve()):
+                raise KeyboardInterrupt
+            return result
+
+        with patch.object(Path, "unlink", interrupt_after_unlink):
+            manifest = self.invoke(expected=130, ceiling=40)
+        receipt = manifest["checkpoint_receipts"][0]
+        self.assertTrue(receipt["prune_pending"])
+        self.assertFalse(receipt.get("pruned", False))
+        self.assertFalse((self.output / "scout-10.state").exists())
+        self.assertTrue((self.output / "scout-20.state").is_file())
+        self.assertTrue((self.output / "scout-30.state").is_file())
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "interrupted")
+
+    def test_cleanup_refuses_a_state_outside_the_campaign(self):
+        self.output.mkdir()
+        foreign = self.root / "foreign.state"
+        foreign.write_bytes(b"retain external evidence")
+        manifest = {"checkpoint_receipts": [
+            {"path": str(foreign), "state": discovery.file_identity(foreign)}]}
+        with self.assertRaises(ValueError):
+            discovery.prune_scout_states(self.output, manifest, set())
+        self.assertEqual(foreign.read_bytes(), b"retain external evidence")
+
+    def test_repeatable_pins_include_the_partial_final_interval(self):
+        self.failure_cycle = None
+        manifest = self.invoke(ceiling=35, extra_args=(
+            "--pin-checkpoint-at", "10", "--pin-checkpoint-at", "20",
+            "--pin-checkpoint-at", "35", "--pin-checkpoint-at", "10"))
+        self.assertEqual(manifest["pinned_checkpoint_cycles"], [10, 20, 35])
+        self.assertEqual({item["master_cycle"] for item in
+                          manifest["checkpoint_receipts"] if item["pinned"]},
+                         {10, 20, 35})
+        self.assertTrue(all(Path(item["path"]).is_file()
+                            for item in manifest["checkpoint_receipts"]))
+
+    def test_pins_are_rejected_outside_scout_mode(self):
+        with redirect_stderr(io.StringIO()):
+            status = discovery.main([str(self.output), "--bios", str(self.bios),
+                                     "--pin-checkpoint-at", "10"])
+        self.assertEqual(status, 2)
+        self.assertFalse(self.output.exists())
 
 
 class DiscoveryTests(unittest.TestCase):

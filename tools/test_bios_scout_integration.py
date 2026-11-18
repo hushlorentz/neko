@@ -15,6 +15,28 @@ import run_bios_discovery as discovery
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    def test_native_scout_ceiling_retains_recent_and_pinned_checkpoints(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes(bytes(4194304))
+            directory = root / "discovery"
+            with patch.object(discovery, "build_neko", return_value=binary), \
+                 redirect_stderr(io.StringIO()):
+                result = discovery.run_scout_batch(
+                    directory, bios, master_cycles=48, checkpoint_every=8,
+                    replay_window=3, pinned_checkpoint_cycles=(8,))
+            self.assertEqual(result["status"], "ceiling_reached")
+            self.assertEqual({path.name for path in directory.glob("scout-*.state")},
+                             {"scout-8.state", "scout-40.state", "scout-48.state"})
+            manifest = json.loads((directory / "manifest.json").read_text())
+            self.assertEqual(manifest["pruned_state_bytes"], sum(
+                item["state"]["bytes"] for item in manifest["checkpoint_receipts"]
+                if item.get("pruned")))
+            self.assertEqual(discovery.campaign.status(directory)["state"],
+                             "execution_finished")
+
     def test_checkpoint_conformance_preserves_native_cold_restore_equivalence(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:

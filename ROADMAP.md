@@ -4154,8 +4154,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
-- [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; attribute the next origin without claiming boot.
+
+### BIOS Campaign Throughput and Evidence Scaling
+
+- [x] Bound live scout checkpoint retention to recent usable and explicitly
+      pinned investigation states, preserving identity receipts and safe
+      interruption, mismatch and cleanup behavior.
+- [ ] Add coarse diagnostic cycle/ceiling, stage, elapsed wall/CPU time and
+      throughput reporting through maintained campaign status, without changing
+      guest timing, canonical state or trace payloads.
+- [ ] Avoid expensive component hashing when selected trace consumers do not
+      need it; preserve existing full-trace/failure-capture contracts or
+      explicitly approve/version new profiles, retaining canonical comparisons.
+- [ ] Validate retention, progress and trace-demand behavior with BIOS-free
+      regressions and bounded performance comparisons; document maintained
+      scout/replay/conformance recipes before the next real-BIOS campaign.
 
 ### Additional CD/DVD Command and Configuration Scope
 

@@ -794,6 +794,27 @@ same-cycle work and normal guest state. Runtime errors still produce an
 incomplete-cycle report and abort the helper without publishing a checkpoint.
 
 Each successful segment saves a canonical snapshot and identity receipt.
+After a successful nonterminal segment, only the two newest checkpoint states
+and explicitly pinned states are retained. The next segment can temporarily
+add one state. Terminal failures, mismatches and interruptions preserve the
+remaining diagnostic states; previously pruned states cannot be recovered.
+Compact checkpoint receipts, sidecars and command logs remain available.
+
+Use repeatable `--pin-checkpoint-at <cycle>` in scout mode to retain selected
+same-batch investigation checkpoints. Cycles must be positive multiples of
+`--checkpoint-every`, or the final absolute ceiling, and cannot exceed that
+ceiling. A pin is created only if execution reaches its requested cycle;
+the manifest retains the full requested pin list even after an earlier fault.
+For example, add `--pin-checkpoint-at 10000000` to the scout command above.
+Pins do not authorize a different input, extend execution or validate a scout
+checkpoint for conformance reuse.
+
+Cleanup verifies each obsolete state's identity and campaign-local path before
+deleting it. The manifest records `prune_pending` before unlink and confirms
+`pruned` plus cumulative reclaimed bytes afterward. An interruption between
+those operations leaves an explicit uncertain deletion, not a recovery or
+success receipt. Do not resume or infer a missing state's identity from it.
+
 Progress on helper stderr reports the absolute cycle, ceiling, elapsed time
 and measured segment throughput. All modes also report stage start/completion
 on stderr; command receipts contain UTC start time and elapsed seconds.
