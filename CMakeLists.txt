@@ -471,6 +471,7 @@ foreach(SHARD RANGE 0 ${LAST_TEST_SHARD})
     add_test(
         NAME neko_tests.${SHARD}
         COMMAND neko_tests
+            --reporter profile
             --shard-count ${NEKO_TEST_JOBS}
             --shard-index ${SHARD}
     )

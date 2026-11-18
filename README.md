@@ -145,6 +145,10 @@ tests against the headless executable from the same build. The Python suite
 shares the concurrency limit with the C++ shards rather than running serially
 before or after them.
 
+Each C++ shard reports per-case and per-file timings and assertion totals.
+CTest retains these profiles in the build directory's
+`Testing/Temporary/LastTest.log`; subsequent CTest runs replace that log.
+
 Run focused tests or collect a complete timing/assertion profile:
 
 ```sh
