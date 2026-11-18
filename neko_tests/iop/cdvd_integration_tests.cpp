@@ -27,6 +27,10 @@ namespace
     {
       write(system, 0x17, 0);
     }
+    else if (opcode == 0x24)
+    {
+      write(system, 0x17, 1);
+    }
     else if (opcode == 0x1a)
     {
       for (const auto byte : {2, 0, 0x41, 0x43})
@@ -637,9 +641,9 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 }
 
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
 {
-  for (const auto opcode : {3u, 8u, 0x15u, 0x1au, 0x22u, 0x36u, 0x40u})
+  for (const auto opcode : {3u, 8u, 0x15u, 0x1au, 0x22u, 0x24u, 0x36u, 0x40u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -668,7 +672,7 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
 }
 
 TEST_CASE("CDVD immutable queries restore pending and every result cursor",
-  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
+  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
 {
   struct Query
   {
@@ -681,6 +685,7 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
     {0x15, 1, {{5}}},
     {0x1a, 1, {{1}}},
     {0x22, 10, {}},
+    {0x24, 1, {}},
     {0x40, 1, {}},
     {0x36, 15, {{
       0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}}}
@@ -745,9 +750,9 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
 }
 
 TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutation",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
 {
-  for (const auto opcode : {0x15u, 0x1au, 0x22u, 0x40u})
+  for (const auto opcode : {0x15u, 0x1au, 0x22u, 0x24u, 0x40u})
   {
     CAPTURE(opcode);
     NekoSystem source;
@@ -803,14 +808,27 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
         REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
         REQUIRE(destination.saveState() == before);
       }
+      if (opcode == 0x24)
+      {
+        for (const auto field : {"configRequest", "configRequestBlock",
+             "configSession", "configProfile", "configNextBlock"})
+        {
+          CAPTURE(field);
+          SaveStateMutation bad(valid);
+          bad.writeScalar(std::string("system.iop.cdvd.") + field, 1);
+          bad.refreshChecksum();
+          REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+          REQUIRE(destination.saveState() == before);
+        }
+      }
     }
   }
 }
 
 TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads passive",
-  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config]")
+  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
 {
-  for (const std::uint8_t opcode : {0x15, 0x22, 0x40})
+  for (const std::uint8_t opcode : {0x15, 0x22, 0x24, 0x40})
   {
     CAPTURE(opcode);
     const unsigned size = opcode == 0x22 ? 10 : 1;
@@ -859,6 +877,96 @@ TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads 
         REQUIRE(read(system, 0x18) == (opcode == 0x15 ? 5 : 0));
       }
     }
+  }
+}
+
+TEST_CASE("CDVD RCBypass restores its lifecycle without changing SIO2 or configuration",
+  "[iop][cdvd-integration][cdvd-rc-bypass][save-state]")
+{
+  for (unsigned session = 0; session < 4; ++session)
+  {
+    CAPTURE(session);
+    NekoSystem original;
+    NekoSystem restored;
+    if (session != 0)
+    {
+      stageQueryParameters(original, 0x40);
+      write(original, 0x16, 0x40);
+      original.runMasterCycles(8);
+      REQUIRE(read(original, 0x18) == 0);
+      for (unsigned block = 0; block < session - 1; ++block)
+      {
+        write(original, 0x16, 0x41);
+        original.runMasterCycles(8);
+        for (unsigned index = 0; index < 16; ++index)
+        {
+          REQUIRE(read(original, 0x18) == (index < 15 ?
+            0x21 + block * 16 + index : (block == 0 ? 0x58 : 0x48)));
+        }
+      }
+    }
+    auto &sio2 = original.sio2Controller();
+    REQUIRE(sio2.writeCommandDescriptor(0, 0x001c0740) == SIO2AccessStatus::Accepted);
+    for (const std::uint8_t byte : {0x61, 6, 3, 0, 0, 0, 0})
+    {
+      REQUIRE(sio2.writeTransmitByte(byte) == SIO2AccessStatus::Accepted);
+    }
+    REQUIRE(original.iopBus().write32(0x1f808268, 0xb1).status ==
+      IOPBusStatus::Completed);
+    const auto sioCause = sio2.readInterruptStatus();
+    const auto checkpoint = [&]()
+    {
+      restored.loadState(original.saveState());
+      requireSame(original, restored);
+      for (auto *system : {&original, &restored})
+      {
+        REQUIRE(system->sio2Controller().readControl() == 0xb1);
+        REQUIRE(system->sio2Controller().readCommandDescriptor(0) == 0x001c0740);
+        REQUIRE(system->sio2Controller().readInterruptStatus() == sioCause);
+        const std::array<std::uint32_t, 3> status = {{0x1d100, 0xf, 0}};
+        for (unsigned index = 0; index < status.size(); ++index)
+        {
+          const auto result = system->sio2Controller().readTransferStatus(index);
+          REQUIRE(result.status == SIO2AccessStatus::Accepted);
+          REQUIRE(result.value == status[index]);
+        }
+      }
+      if (session == 0)
+      {
+        restored.reset();
+        restored.runMasterCycles(8);
+        REQUIRE(read(restored, 0x16) == 0);
+        REQUIRE(read(restored, 0x17) == 0x40);
+        restored.loadState(original.saveState());
+      }
+    };
+    write(original, 4, 0);
+    stageQueryParameters(original, 0x24);
+    checkpoint();
+    write(original, 0x16, 0x24);
+    checkpoint();
+    original.runMasterCycles(8);
+    restored.runMasterCycles(8);
+    requireSame(original, restored);
+    REQUIRE(read(original, 8) == 1);
+    checkpoint();
+    REQUIRE(read(original, 0x18) == 0);
+    checkpoint();
+    for (unsigned index = 0; index < 16; ++index)
+    {
+      write(original, 0x17, static_cast<std::uint8_t>(index));
+    }
+    checkpoint();
+    for (unsigned index = 0; index < 7; ++index)
+    {
+      REQUIRE(original.sio2Controller().readReceiveByte().value == 0xff);
+      REQUIRE(restored.sio2Controller().readReceiveByte().value == 0xff);
+    }
+    REQUIRE(original.sio2Controller().readReceiveByte().status ==
+      SIO2AccessStatus::Unsupported);
+    REQUIRE(restored.sio2Controller().readReceiveByte().status ==
+      SIO2AccessStatus::Unsupported);
+    requireSame(original, restored);
   }
 }
 

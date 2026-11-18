@@ -4133,8 +4133,29 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
-- [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
+
+### CD/DVD Post-Configuration Command Origin Scope
+
+- [x] Research the originating SCMD `0x24` with staged byte `01` through
+      local manuals and its guest caller; distinguish an independent command
+      requirement from diagnostic-configuration-dependent behavior before
+      selecting new hardware or input policy.
+
+### CD/DVD Remote-Control Bypass Dependency
+
+- [x] Select and approve a bounded bypass profile, distinguishing an opaque
+      compatibility reply from owned SIRCS-to-SIO2 conversion effects; freeze
+      inputs, status, lifecycle, reset, timing, IRQs and persistence.
+- [x] Implement and independently review the approved profile through the
+      existing owners with focused red/green, transport and versioned
+      persistence coverage before the user-owned commit checkpoint.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
+- [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; attribute the next origin without claiming boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

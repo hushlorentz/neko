@@ -1468,70 +1468,88 @@ TEST_CASE("CDVD compatibility results reject guest writes across reset and resto
   }
 }
 
-TEST_CASE("CDVD wake-up guest completes before polling on the next pulse even while halted",
-  "[iop][cdvd-trace][cdvd-wake-up]")
+TEST_CASE("CDVD opaque queries complete before polling on the next pulse even while halted",
+  "[iop][cdvd-trace][cdvd-wake-up][cdvd-rc-bypass]")
 {
-  for (const IOPWord upper : {0x1f40u, 0x9f40u, 0xbf40u})
+  for (const IOPWord opcode : {0x22u, 0x24u})
   {
-    for (const bool halted : {false, true})
+    CAPTURE(opcode);
+    for (const IOPWord upper : {0x1f40u, 0x9f40u, 0xbf40u})
     {
-      CAPTURE(upper);
-      CAPTURE(halted);
-      NekoSystem system;
-      const std::array<IOPWord, 7> words = {{
-        0x3c010000 | upper, 0x34212000, 0x34020022, 0xa0220016,
-        0x90230017, 0, 0x34040001
-      }};
-      installProgram(system, 0, words);
-      system.iopCore().startExecution(0xa0000000);
-      system.startTrace();
-      system.runMasterCycles(25);
-      REQUIRE(system.iopCore().retiredInstructions() == 4);
-      REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0xc0);
-      system.runMasterCycles(7);
-      REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0xc0);
-      if (halted)
+      for (const bool halted : {false, true})
       {
-        system.iopCore().haltExecution();
-      }
-      system.clockMasterCycle();
-      REQUIRE(system.iopCore().exception().kind == IOPException::None);
-      REQUIRE(system.iopCore().retiredInstructions() == (halted ? 4 : 5));
-      REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0);
-      REQUIRE(system.iopInterruptController().status() == 0);
-      const auto commands = IOPTraceTest::subsystemEvents(system, CDVD);
-      REQUIRE(commands.size() == 2);
-      for (std::size_t index = 0; index < commands.size(); ++index)
-      {
-        const auto decoded = nekoDecodeCDVDTrace(commands[index]);
-        REQUIRE(commands[index].masterCycle == (index == 0 ? 25 : 33));
-        REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
-        REQUIRE(decoded.opcode == 0x22);
-        const std::array<std::uint8_t, 16> empty = {};
-        REQUIRE(decoded.result == empty);
-      }
-      bool completed = false;
-      bool polled = false;
-      for (const auto &event : system.trace())
-      {
-        if (event.subsystem == CDVD && event.type == COMPLETED)
+        CAPTURE(upper);
+        CAPTURE(halted);
+        NekoSystem system;
+        if (opcode == 0x24)
         {
-          completed = true;
+          write(system, 0x17, 1);
         }
-        if (event.subsystem == NekoTraceSubsystem::IOP &&
-            event.type == NekoTraceEventType::MemoryAccess &&
-            event.value0 == ((upper << 16) | 0x2017))
+        const std::array<IOPWord, 7> words = {{
+          0x3c010000 | upper, 0x34212000, 0x34020000 | opcode, 0xa0220016,
+          0x90230017, 0, 0x34040001
+        }};
+        installProgram(system, 0, words);
+        system.iopCore().startExecution(0xa0000000);
+        system.startTrace();
+        system.runMasterCycles(25);
+        REQUIRE(system.iopCore().retiredInstructions() == 4);
+        REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0xc0);
+        system.runMasterCycles(7);
+        REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0xc0);
+        if (halted)
         {
-          REQUIRE(completed);
-          polled = true;
+          system.iopCore().haltExecution();
         }
-      }
-      REQUIRE(completed);
-      REQUIRE(polled == !halted);
-      for (unsigned index = 0; index < 10; ++index)
-      {
-        REQUIRE(system.iopBus().read8(BASE + 0x18).value == 0);
-        REQUIRE(system.iopBus().read8(BASE + 0x17).value == (index == 9 ? 0x40 : 0));
+        system.clockMasterCycle();
+        REQUIRE(system.iopCore().exception().kind == IOPException::None);
+        REQUIRE(system.iopCore().retiredInstructions() == (halted ? 4 : 5));
+        REQUIRE(system.iopBus().read8(BASE + 0x17).value == 0);
+        REQUIRE(system.iopInterruptController().status() == 0);
+        const auto commands = IOPTraceTest::subsystemEvents(system, CDVD);
+        REQUIRE(commands.size() == 2);
+        for (std::size_t index = 0; index < commands.size(); ++index)
+        {
+          const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+          REQUIRE(commands[index].masterCycle == (index == 0 ? 25 : 33));
+          REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+          REQUIRE(decoded.opcode == opcode);
+          REQUIRE(decoded.transport == NekoCDVDTrace::Transport::Subcommand);
+          REQUIRE(decoded.beforePhase == (index == 0 ?
+            NekoCDVDTrace::Phase::Idle : NekoCDVDTrace::Phase::Pending));
+          REQUIRE(decoded.afterPhase == (index == 0 ?
+            NekoCDVDTrace::Phase::Pending : NekoCDVDTrace::Phase::Result));
+          REQUIRE(decoded.beforeCause == 0);
+          REQUIRE(decoded.afterCause == 0);
+          REQUIRE(decoded.rtcTicks == commands[index].masterCycle);
+          const std::array<std::uint8_t, 16> empty = {};
+          REQUIRE(decoded.result == empty);
+        }
+        bool completed = false;
+        bool polled = false;
+        for (const auto &event : system.trace())
+        {
+          if (event.subsystem == CDVD && event.type == COMPLETED)
+          {
+            completed = true;
+          }
+          if (event.subsystem == NekoTraceSubsystem::IOP &&
+              event.type == NekoTraceEventType::MemoryAccess &&
+              event.value0 == ((upper << 16) | 0x2017))
+          {
+            REQUIRE(completed);
+            polled = true;
+          }
+        }
+        REQUIRE(completed);
+        REQUIRE(polled == !halted);
+        const unsigned size = opcode == 0x22 ? 10 : 1;
+        for (unsigned index = 0; index < size; ++index)
+        {
+          REQUIRE(system.iopBus().read8(BASE + 0x18).value == 0);
+          REQUIRE(system.iopBus().read8(BASE + 0x17).value ==
+            (index + 1 == size ? 0x40 : 0));
+        }
       }
     }
   }

@@ -133,6 +133,8 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
   {
     case 3:
       return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
+    case 0x24:
+      return subcommandParameterCount == 1 && subcommandParameters[0] == 1;
     case 8:
     case 0x15:
     case 0x22:
@@ -164,6 +166,7 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 8;
     case 0x15:
     case 0x1a:
+    case 0x24:
     case 0x40:
     case 0x43:
       return 1;
@@ -198,6 +201,12 @@ CDVDController::SubcommandResult CDVDController::bootCertifyResult() noexcept
 CDVDController::SubcommandResult CDVDController::wakeUpTimeResult() noexcept
 {
   // Approved opaque compatibility data, not a disabled timer or hardware default.
+  return {};
+}
+
+CDVDController::SubcommandResult CDVDController::remoteBypassResult() noexcept
+{
+  // Approved opaque compatibility reply, not a SIRCS-to-SIO2 mode transition.
   return {};
 }
 
@@ -327,6 +336,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return bootCertifyResult();
     case 0x22:
       return wakeUpTimeResult();
+    case 0x24:
+      return remoteBypassResult();
     case 0x36:
       return regionResult();
     case 0x40:
@@ -354,6 +365,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == bootCertifyResult();
     case 0x22:
       return snapshot == wakeUpTimeResult();
+    case 0x24:
+      return snapshot == remoteBypassResult();
     case 0x36:
       return snapshot == regionResult();
     case 0x40:

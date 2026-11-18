@@ -363,6 +363,126 @@ TEST_CASE("CDVD wake-up query publishes ten opaque bytes and drains only on the 
   REQUIRE(drain(controller) == oneSecond);
 }
 
+TEST_CASE("CDVD RCBypass publishes one opaque byte without changing configuration",
+  "[iop][cdvd-owner][cdvd-rc-bypass]")
+{
+  for (unsigned session = 0; session < 4; ++session)
+  {
+    CAPTURE(session);
+    CDVDController controller;
+    if (session != 0)
+    {
+      for (const auto byte : OPEN_CONFIG_REQUEST)
+      {
+        accept(controller, 0x17, byte);
+      }
+      accept(controller, 0x16, 0x40);
+      REQUIRE(controller.completeSubcommand());
+      REQUIRE(read(controller, 0x18) == 0);
+      for (unsigned block = 0; block < session - 1; ++block)
+      {
+        accept(controller, 0x16, 0x41);
+        REQUIRE(controller.completeSubcommand());
+        for (unsigned index = 0; index < 16; ++index)
+        {
+          REQUIRE(read(controller, 0x18) == (index < 15 ?
+            0x21 + block * 16 + index : (block == 0 ? 0x58 : 0x48)));
+        }
+      }
+    }
+    CDVDControllerTestAccess::seedClock(controller, PS2Clock::MASTER_HZ - 4);
+    for (unsigned repeat = 0; repeat < 2; ++repeat)
+    {
+      accept(controller, 4, 0);
+      accept(controller, 0x17, 1);
+      const auto ticks = CDVDControllerTestAccess::ticks(controller);
+      accept(controller, 0x16, 0x24);
+      REQUIRE(CDVDControllerTestAccess::ticks(controller) == ticks);
+      CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+      REQUIRE(read(controller, 0x16) == 0x24);
+      for (unsigned cycle = 1; cycle < 8; ++cycle)
+      {
+        REQUIRE_FALSE(masterStep(controller, cycle).completed);
+        requirePending(controller);
+      }
+      REQUIRE(masterStep(controller, 8).newCauses == 1);
+      REQUIRE(read(controller, 8) == 1);
+      REQUIRE(read(controller, 0x17) == 0);
+      CDVDControllerTestAccess::requireResult(controller, {});
+      REQUIRE_FALSE(controller.completeSubcommand());
+      REQUIRE(read(controller, 0x18) == 0);
+      REQUIRE(read(controller, 0x17) == 0x40);
+      REQUIRE(read(controller, 0x16) == 0x24);
+      CDVDControllerTestAccess::requireEmptyStorage(controller);
+      const auto drained = controller;
+      REQUIRE(read(controller, 0x18) == 0);
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x24) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, drained));
+      CDVDControllerTestAccess::requireConfigProgress(controller,
+        session == 0 ? 0 : 1, session == 0 ? 0 : session - 1);
+      accept(controller, 8, 1);
+    }
+    accept(controller, 0x16, 8);
+    REQUIRE(controller.completeSubcommand());
+    const std::array<std::uint8_t, 8> oneSecond = {{0, 1, 0, 0, 0, 1, 1, 0}};
+    REQUIRE(drain(controller) == oneSecond);
+  }
+}
+
+TEST_CASE("CDVD RCBypass rejects every unapproved request before mutation",
+  "[iop][cdvd-owner][cdvd-rc-bypass]")
+{
+  for (unsigned count = 0; count <= 16; ++count)
+  {
+    if (count == 1)
+    {
+      continue;
+    }
+    CAPTURE(count);
+    CDVDController controller;
+    accept(controller, 4, 0);
+    for (unsigned index = 0; index < count; ++index)
+    {
+      accept(controller, 0x17, index == 0 ? 1 : 0);
+    }
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x24) ==
+      CDVDAccessStatus::Unsupported);
+    if (count == 16)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x17, 1) ==
+        CDVDAccessStatus::Unsupported);
+    }
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  for (unsigned value = 0; value < 256; ++value)
+  {
+    if (value == 1)
+    {
+      continue;
+    }
+    CDVDController controller;
+    accept(controller, 0x17, static_cast<std::uint8_t>(value));
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x24) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  CDVDController controller;
+  accept(controller, 0x17, 1);
+  const auto staged = controller;
+  for (unsigned opcode = 0; opcode < 256; ++opcode)
+  {
+    if (opcode != 0x24)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x16,
+        static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, staged));
+    }
+  }
+}
+
 TEST_CASE("CDVD OpenConfig publishes its opaque ACK before session reads",
   "[iop][cdvd-owner][cdvd-open-config]")
 {
@@ -651,9 +771,9 @@ TEST_CASE("CDVD compatibility queries reject staged requests and unsupported nei
 }
 
 TEST_CASE("CDVD compatibility phase rejection and reset never enable media commands",
-  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config]")
+  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
 {
-  for (const auto query : {0x15u, 0x22u, 0x40u})
+  for (const auto query : {0x15u, 0x22u, 0x24u, 0x40u})
   {
     CAPTURE(query);
     const unsigned size = query == 0x22 ? 10 : 1;
@@ -664,6 +784,10 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
       CDVDController controller;
       if (stage != 0)
       {
+        if (query == 0x24)
+        {
+          accept(controller, 0x17, 1);
+        }
         if (query == 0x40)
         {
           for (const auto byte : OPEN_CONFIG_REQUEST)
@@ -706,6 +830,10 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
       REQUIRE(read(controller, 8) == 0);
       controller.reset();
       REQUIRE(CDVDControllerTestAccess::sameState(controller, CDVDController{}));
+      if (query == 0x24)
+      {
+        accept(controller, 0x17, 1);
+      }
       if (query == 0x40)
       {
         for (const auto byte : OPEN_CONFIG_REQUEST)
