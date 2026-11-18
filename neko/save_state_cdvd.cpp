@@ -30,6 +30,13 @@ void NekoSaveStateCodec::writeCDVDState(
     "subcommandParameterCount", controller.subcommandParameterCount);
   writer->writeFieldBytes("subcommandParameters",
     controller.subcommandParameters.data(), controller.subcommandParameters.size());
+  writer->writeFieldU8("configSession",
+    static_cast<std::uint8_t>(controller.configSession));
+  writer->writeFieldU8("configProfile", controller.configProfile);
+  writer->writeFieldU8("configNextBlock", controller.configNextBlock);
+  writer->writeFieldU8("configRequest",
+    static_cast<std::uint8_t>(controller.configRequest));
+  writer->writeFieldU8("configRequestBlock", controller.configRequestBlock);
 }
 
 template void NekoSaveStateCodec::writeCDVDState(
@@ -68,11 +75,6 @@ void NekoSaveStateCodec::readCDVD(
   {
     reader->requireField(controller->resultCursor < resultSize,
       "CD/DVD result cursor is outside the snapshot");
-    reader->requireField(CDVDController::isValidSubcommandResult(
-      controller->lastSubcommand, controller->result),
-      controller->lastSubcommand == 8 ?
-        "CD/DVD clock result is not a valid Gregorian BCD snapshot" :
-        "CD/DVD result does not match the selected immutable response");
   }
   else
   {
@@ -96,4 +98,27 @@ void NekoSaveStateCodec::readCDVD(
   reader->requireField(controller->subcommandPhase == Phase::Idle ||
     controller->subcommandParameterCount == 0,
     "CD/DVD active subcommand has staged parameters");
+  const auto session = reader->readFieldU8("configSession");
+  reader->requireField(session <=
+    static_cast<std::uint8_t>(CDVDController::ConfigSession::Open),
+    "CD/DVD configuration session is invalid");
+  controller->configSession = static_cast<CDVDController::ConfigSession>(session);
+  controller->configProfile = reader->readFieldU8("configProfile");
+  controller->configNextBlock = reader->readFieldU8("configNextBlock");
+  const auto request = reader->readFieldU8("configRequest");
+  reader->requireField(request <=
+    static_cast<std::uint8_t>(CDVDController::ConfigRequest::Close),
+    "CD/DVD configuration request is invalid");
+  controller->configRequest = static_cast<CDVDController::ConfigRequest>(request);
+  controller->configRequestBlock = reader->readFieldU8("configRequestBlock");
+  reader->requireField(controller->isValidConfigState(),
+    "CD/DVD configuration session and request are inconsistent");
+  if (controller->subcommandPhase == Phase::Result)
+  {
+    reader->requireField(controller->isValidSubcommandResult(
+      controller->lastSubcommand, controller->result),
+      controller->lastSubcommand == 8 ?
+        "CD/DVD clock result is not a valid Gregorian BCD snapshot" :
+        "CD/DVD result does not match the selected immutable response");
+  }
 }

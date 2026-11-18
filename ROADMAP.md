@@ -4127,7 +4127,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Select and approve explicit deterministic diagnostic inputs and a
       bounded session/result/reset contract; do not reinterpret ACK-only
       states as opened storage or substitute generic zero configuration.
-- [ ] Implement and independently review the approved profile through the
+- [x] Implement and independently review the approved profile through the
       existing command owner with red/green lifecycle and versioned persistence;
       reject legacy ACK-to-session promotion before the user-owned commit checkpoint.
 - [ ] Add authored cold/restored, traced/plain and canonical conformance;

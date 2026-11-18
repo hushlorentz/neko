@@ -27,6 +27,11 @@ struct CDVDControllerTestAccess
       actual.subcommandPhase == expected.subcommandPhase &&
       actual.result == expected.result &&
       actual.resultCursor == expected.resultCursor &&
+      actual.configSession == expected.configSession &&
+      actual.configProfile == expected.configProfile &&
+      actual.configNextBlock == expected.configNextBlock &&
+      actual.configRequest == expected.configRequest &&
+      actual.configRequestBlock == expected.configRequestBlock &&
       actual.subcommandParameters == expected.subcommandParameters &&
       actual.subcommandParameterCount == expected.subcommandParameterCount;
   }
@@ -36,6 +41,15 @@ struct CDVDControllerTestAccess
     const std::array<std::uint8_t, 16> empty = {};
     REQUIRE(controller.result == empty);
     REQUIRE(controller.resultCursor == 0);
+  }
+
+  static void requireConfigProgress(const CDVDController &controller,
+    std::uint8_t profile, std::uint8_t nextBlock)
+  {
+    REQUIRE(controller.configProfile == profile);
+    REQUIRE(controller.configNextBlock == nextBlock);
+    REQUIRE((controller.configSession == CDVDController::ConfigSession::Open) ==
+      (profile == 1));
   }
 
   static void requireResult(const CDVDController &controller,
@@ -349,7 +363,7 @@ TEST_CASE("CDVD wake-up query publishes ten opaque bytes and drains only on the 
   REQUIRE(drain(controller) == oneSecond);
 }
 
-TEST_CASE("CDVD OpenConfig publishes only its opaque ACK without opening storage",
+TEST_CASE("CDVD OpenConfig publishes its opaque ACK before session reads",
   "[iop][cdvd-owner][cdvd-open-config]")
 {
   CDVDController controller;
@@ -386,7 +400,7 @@ TEST_CASE("CDVD OpenConfig publishes only its opaque ACK without opening storage
     REQUIRE(read(controller, 8) == 0);
     CDVDControllerTestAccess::requireEmptyStorage(controller);
     const auto drained = controller;
-    for (const auto opcode : {0x3f, 0x41, 0x42, 0x43, 0x44})
+    for (const auto opcode : {0x3f, 0x42, 0x44})
     {
       REQUIRE(controller.writeByte(BASE + 0x16, opcode) ==
         CDVDAccessStatus::Unsupported);
@@ -397,6 +411,149 @@ TEST_CASE("CDVD OpenConfig publishes only its opaque ACK without opening storage
   REQUIRE(controller.completeSubcommand());
   const std::array<std::uint8_t, 8> oneSecond = {{0, 1, 0, 0, 0, 1, 1, 0}};
   REQUIRE(drain(controller) == oneSecond);
+}
+
+TEST_CASE("CDVD diagnostic session drains two distinct immutable packets and restarts",
+  "[iop][cdvd-owner][cdvd-config-session]")
+{
+  CDVDController controller;
+  const auto reject = [&](std::uint8_t opcode)
+  {
+    const auto before = controller.stateHash();
+    REQUIRE(controller.writeByte(BASE + 0x16, opcode) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(controller.stateHash() == before);
+  };
+  reject(0x41);
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    for (const auto byte : OPEN_CONFIG_REQUEST)
+    {
+      accept(controller, 0x17, byte);
+    }
+    accept(controller, 0x16, 0x40);
+    CDVDControllerTestAccess::requireConfigProgress(controller,
+      repeat == 0 ? 0 : 1, repeat == 0 ? 0 : 2);
+    reject(0x41);
+    REQUIRE(controller.completeSubcommand());
+    CDVDControllerTestAccess::requireConfigProgress(controller, 1, 0);
+    reject(0x41);
+    REQUIRE(read(controller, 0x18) == 0);
+    for (unsigned block = 0; block < 2; ++block)
+    {
+      accept(controller, 0x16, 0x41);
+      CDVDControllerTestAccess::requireConfigProgress(controller, 1,
+        static_cast<std::uint8_t>(block));
+      REQUIRE(read(controller, 0x18) == 0);
+      reject(0x43);
+      REQUIRE(controller.completeSubcommand());
+      CDVDControllerTestAccess::requireConfigProgress(controller, 1,
+        static_cast<std::uint8_t>(block + 1));
+      REQUIRE_FALSE(controller.completeSubcommand());
+      unsigned sum = 0;
+      for (unsigned index = 0; index < 16; ++index)
+      {
+        REQUIRE(read(controller, 0x17) == 0);
+        reject(0x41);
+        reject(0x43);
+        REQUIRE(controller.writeByte(BASE + 0x17, 0) ==
+          CDVDAccessStatus::Unsupported);
+        const auto expected = index < 15 ? 0x21 + block * 16 + index :
+          (sum & 255);
+        REQUIRE(read(controller, 0x18) == expected);
+        if (index < 15)
+        {
+          sum += expected;
+        }
+        controller.advanceMasterTick();
+        CDVDControllerTestAccess::requireConfigProgress(controller, 1,
+          static_cast<std::uint8_t>(block + 1));
+      }
+      REQUIRE(read(controller, 0x17) == 0x40);
+      REQUIRE(read(controller, 0x18) == 0);
+      accept(controller, 0x16, 8);
+      REQUIRE(controller.completeSubcommand());
+      drain(controller);
+    }
+    reject(0x41);
+    reject(0x42);
+  }
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    accept(controller, 0x16, 0x43);
+    CDVDControllerTestAccess::requireConfigProgress(controller,
+      repeat == 0 ? 1 : 0, repeat == 0 ? 2 : 0);
+    reject(0x41);
+    REQUIRE(controller.completeSubcommand());
+    CDVDControllerTestAccess::requireConfigProgress(controller, 0, 0);
+    REQUIRE(read(controller, 0x18) == 0);
+    reject(0x41);
+  }
+  REQUIRE(read(controller, 8) == 0);
+}
+
+TEST_CASE("CDVD diagnostic session rejects all read and close parameters before mutation",
+  "[iop][cdvd-owner][cdvd-config-session]")
+{
+  for (const auto opcode : {0x41, 0x43})
+  {
+    for (unsigned count = 1; count <= 16; ++count)
+    {
+      CDVDController controller;
+      for (const auto byte : OPEN_CONFIG_REQUEST)
+      {
+        accept(controller, 0x17, byte);
+      }
+      accept(controller, 0x16, 0x40);
+      REQUIRE(controller.completeSubcommand());
+      read(controller, 0x18);
+      for (unsigned index = 0; index < count; ++index)
+      {
+        accept(controller, 0x17, 0);
+      }
+      const auto before = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16,
+        static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+    }
+  }
+}
+
+TEST_CASE("CDVD diagnostic session reset cancels every pending and result operation",
+  "[iop][cdvd-owner][cdvd-config-session]")
+{
+  for (const auto opcode : {0x40, 0x41, 0x43})
+  {
+    for (unsigned consumed = 0; consumed <= 16; ++consumed)
+    {
+      CDVDController controller;
+      const auto reset = controller.stateHash();
+      for (const auto byte : OPEN_CONFIG_REQUEST)
+      {
+        accept(controller, 0x17, byte);
+      }
+      accept(controller, 0x16, 0x40);
+      if (opcode != 0x40)
+      {
+        REQUIRE(controller.completeSubcommand());
+        read(controller, 0x18);
+        accept(controller, 0x16, static_cast<std::uint8_t>(opcode));
+      }
+      if (consumed != 0)
+      {
+        REQUIRE(controller.completeSubcommand());
+        for (unsigned index = 0; index < consumed - 1; ++index)
+        {
+          read(controller, 0x18);
+        }
+      }
+      controller.reset();
+      REQUIRE(controller.stateHash() == reset);
+      REQUIRE_FALSE(controller.completeSubcommand());
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x41) ==
+        CDVDAccessStatus::Unsupported);
+    }
+  }
 }
 
 TEST_CASE("CDVD OpenConfig rejects every wrong request byte and count atomically",
@@ -967,7 +1124,8 @@ TEST_CASE("CDVD owner admits only selected parameterless commands in their avail
         auto probe = controller;
         const bool available = offset == 0x04 ? stage != 1 : stage == 0;
         const bool supported = offset == 0x04 ? opcode == 0 :
-          (opcode == 8 || opcode == 0x15 || opcode == 0x22 || opcode == 0x36);
+          (opcode == 8 || opcode == 0x15 || opcode == 0x22 ||
+            opcode == 0x36 || opcode == 0x43);
         const auto status = probe.writeByte(BASE + offset,
           static_cast<std::uint8_t>(opcode));
         if (available && supported)

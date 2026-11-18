@@ -118,6 +118,7 @@ CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
   {
     return CDVDAccessStatus::Unsupported;
   }
+  captureConfigRequest(opcode);
   lastSubcommand = opcode;
   clearSubcommandParameters();
   subcommandPhase = SubcommandPhase::Pending;
@@ -136,7 +137,11 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
     case 0x15:
     case 0x22:
     case 0x36:
+    case 0x43:
       return subcommandParameterCount == 0;
+    case 0x41:
+      return subcommandParameterCount == 0 &&
+        configSession == ConfigSession::Open && configNextBlock < 2;
     case 0x1a:
       return subcommandParameterCount == bootRomName.size() &&
         std::equal(bootRomName.begin(), bootRomName.end(), subcommandParameters.begin());
@@ -160,7 +165,10 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
     case 0x15:
     case 0x1a:
     case 0x40:
+    case 0x43:
       return 1;
+    case 0x41:
+      return 16;
     case 0x22:
       return 10;
     case 0x36:
@@ -195,8 +203,108 @@ CDVDController::SubcommandResult CDVDController::wakeUpTimeResult() noexcept
 
 CDVDController::SubcommandResult CDVDController::openConfigResult() noexcept
 {
-  // Approved opaque acknowledgement, not an opened configuration session.
+  // Opaque diagnostic-session acknowledgement, not physical-console success.
   return {};
+}
+
+CDVDController::SubcommandResult CDVDController::configPacket(
+  std::uint8_t block) noexcept
+{
+  // Approved opaque diagnostic input, not measured or default console settings.
+  constexpr std::array<SubcommandResult, 2> packets = {{
+    {{0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+      0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x58}},
+    {{0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+      0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x48}}
+  }};
+  return packets[block];
+}
+
+void CDVDController::captureConfigRequest(std::uint8_t opcode) noexcept
+{
+  switch (opcode)
+  {
+    case 0x40:
+      configRequest = ConfigRequest::OpenV1;
+      break;
+    case 0x41:
+      configRequest = ConfigRequest::ReadV1;
+      configRequestBlock = configNextBlock;
+      break;
+    case 0x43:
+      configRequest = ConfigRequest::Close;
+      break;
+    default:
+      break;
+  }
+}
+
+void CDVDController::completeConfigRequest() noexcept
+{
+  switch (configRequest)
+  {
+    case ConfigRequest::OpenV1:
+      configSession = ConfigSession::Open;
+      configProfile = 1;
+      configNextBlock = 0;
+      break;
+    case ConfigRequest::ReadV1:
+      configNextBlock = static_cast<std::uint8_t>(configRequestBlock + 1);
+      break;
+    case ConfigRequest::Close:
+      configSession = ConfigSession::Closed;
+      configProfile = 0;
+      configNextBlock = 0;
+      break;
+    case ConfigRequest::None:
+      break;
+  }
+  configRequest = ConfigRequest::None;
+  configRequestBlock = 0;
+}
+
+bool CDVDController::isValidConfigState() const noexcept
+{
+  const bool closed = configSession == ConfigSession::Closed;
+  const bool open = configSession == ConfigSession::Open;
+  if ((!closed && !open) ||
+      (closed && (configProfile != 0 || configNextBlock != 0)) ||
+      (open && (configProfile != 1 || configNextBlock > 2)))
+  {
+    return false;
+  }
+  if (subcommandPhase == SubcommandPhase::Pending)
+  {
+    switch (lastSubcommand)
+    {
+      case 0x40:
+        return configRequest == ConfigRequest::OpenV1 && configRequestBlock == 0;
+      case 0x41:
+        return configRequest == ConfigRequest::ReadV1 && open &&
+          configNextBlock < 2 && configRequestBlock == configNextBlock;
+      case 0x43:
+        return configRequest == ConfigRequest::Close && configRequestBlock == 0;
+      default:
+        return configRequest == ConfigRequest::None && configRequestBlock == 0;
+    }
+  }
+  if (configRequest != ConfigRequest::None || configRequestBlock != 0)
+  {
+    return false;
+  }
+  switch (lastSubcommand)
+  {
+    case 0:
+      return subcommandPhase == SubcommandPhase::Idle && closed;
+    case 0x40:
+      return open && configNextBlock == 0;
+    case 0x41:
+      return open && configNextBlock >= 1;
+    case 0x43:
+      return closed;
+    default:
+      return true;
+  }
 }
 
 CDVDController::SubcommandResult CDVDController::regionResult() noexcept
@@ -222,7 +330,10 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
     case 0x36:
       return regionResult();
     case 0x40:
+    case 0x43:
       return openConfigResult();
+    case 0x41:
+      return configPacket(configRequestBlock);
     default:
       throw std::logic_error("CD/DVD pending subcommand is unsupported.");
   }
@@ -246,7 +357,12 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
     case 0x36:
       return snapshot == regionResult();
     case 0x40:
+    case 0x43:
       return snapshot == openConfigResult();
+    case 0x41:
+      return configSession == ConfigSession::Open &&
+        configNextBlock >= 1 && configNextBlock <= 2 &&
+        snapshot == configPacket(static_cast<std::uint8_t>(configNextBlock - 1));
     default:
       return false;
   }
@@ -301,6 +417,7 @@ bool CDVDController::completeSubcommand()
     return false;
   }
   result = subcommandResult();
+  completeConfigRequest();
   subcommandPhase = SubcommandPhase::Result;
   recordCommand(ObservationKind::Completed, Transport::Subcommand,
     SubcommandPhase::Pending, deviceCause);
@@ -384,6 +501,11 @@ void CDVDController::reset() noexcept
   subcommandPhase = SubcommandPhase::Idle;
   clearResult();
   clearSubcommandParameters();
+  configSession = ConfigSession::Closed;
+  configProfile = 0;
+  configNextBlock = 0;
+  configRequest = ConfigRequest::None;
+  configRequestBlock = 0;
 }
 
 void CDVDController::enableObservations(NekoObservationOrder *order) noexcept

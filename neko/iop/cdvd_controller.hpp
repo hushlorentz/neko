@@ -56,6 +56,8 @@ class CDVDController final
 
     enum class ObservationKind : std::uint8_t { Accepted, Completed };
     enum class Transport : std::uint8_t { Normal, Subcommand };
+    enum class ConfigSession : std::uint8_t { Closed, Open };
+    enum class ConfigRequest : std::uint8_t { None, OpenV1, ReadV1, Close };
     using SubcommandResult = std::array<std::uint8_t, 16>;
     struct Observation
     {
@@ -93,6 +95,10 @@ class CDVDController final
     CDVDAccessStatus acceptNormalCommand(std::uint8_t opcode);
     CDVDAccessStatus acceptSubcommand(std::uint8_t opcode);
     bool isValidSubcommandRequest(std::uint8_t opcode) const noexcept;
+    void captureConfigRequest(std::uint8_t opcode) noexcept;
+    void completeConfigRequest() noexcept;
+    bool isValidConfigState() const noexcept;
+    static SubcommandResult configPacket(std::uint8_t block) noexcept;
     static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
     SubcommandResult subcommandResult() const;
     static SubcommandResult versionResult() noexcept;
@@ -101,7 +107,7 @@ class CDVDController final
     static SubcommandResult wakeUpTimeResult() noexcept;
     static SubcommandResult openConfigResult() noexcept;
     static SubcommandResult regionResult() noexcept;
-    static bool isValidSubcommandResult(std::uint8_t opcode,
+    bool isValidSubcommandResult(std::uint8_t opcode,
       const SubcommandResult &snapshot) noexcept;
     CDVDAccessStatus appendSubcommandParameter(std::uint8_t value) noexcept;
     void clearSubcommandParameters() noexcept;
@@ -120,6 +126,11 @@ class CDVDController final
     std::uint8_t resultCursor = 0;
     std::array<std::uint8_t, 16> subcommandParameters = {};
     std::uint8_t subcommandParameterCount = 0;
+    ConfigSession configSession = ConfigSession::Closed;
+    std::uint8_t configProfile = 0;
+    std::uint8_t configNextBlock = 0;
+    ConfigRequest configRequest = ConfigRequest::None;
+    std::uint8_t configRequestBlock = 0;
 };
 
 #endif

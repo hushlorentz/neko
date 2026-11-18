@@ -862,7 +862,7 @@ TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads 
   }
 }
 
-TEST_CASE("CDVD OpenConfig restores staged requests without inventing a session",
+TEST_CASE("CDVD OpenConfig restores staged requests before opening a session",
   "[iop][cdvd-integration][cdvd-open-config][save-state]")
 {
   for (unsigned count = 0; count <= 3; ++count)
@@ -896,7 +896,7 @@ TEST_CASE("CDVD OpenConfig restores staged requests without inventing a session"
       REQUIRE(read(*system, 0x18) == 0);
       REQUIRE(read(*system, 0x17) == 0x40);
       const auto drained = system->saveState();
-      for (const auto opcode : {0x41, 0x42, 0x43})
+      for (const auto opcode : {0x42})
       {
         REQUIRE(system->iopBus().write8(BASE + 0x16, opcode).status ==
           IOPBusStatus::Unmapped);
@@ -905,6 +905,179 @@ TEST_CASE("CDVD OpenConfig restores staged requests without inventing a session"
     }
     requireSame(original, restored);
   }
+}
+
+TEST_CASE("CDVD diagnostic session restores every lifecycle cut and packet prefix",
+  "[iop][cdvd-integration][cdvd-config-session][save-state]")
+{
+  NekoSystem original;
+  NekoSystem restored;
+  const auto checkpoint = [&]()
+  {
+    restored.loadState(original.saveState());
+    requireSame(original, restored);
+  };
+  const auto command = [&](std::uint8_t opcode)
+  {
+    write(original, 0x16, opcode);
+    checkpoint();
+    original.runMasterCycles(8);
+    restored.runMasterCycles(8);
+    requireSame(original, restored);
+    checkpoint();
+  };
+  const auto consume = [&](std::uint8_t expected)
+  {
+    REQUIRE(read(original, 0x18) == expected);
+    REQUIRE(read(restored, 0x18) == expected);
+    requireSame(original, restored);
+    checkpoint();
+  };
+  for (const auto byte : {0, 1, 2})
+  {
+    write(original, 0x17, static_cast<std::uint8_t>(byte));
+    checkpoint();
+  }
+  command(0x40);
+  consume(0);
+  for (unsigned block = 0; block < 2; ++block)
+  {
+    command(0x41);
+    for (unsigned index = 0; index < 16; ++index)
+    {
+      consume(static_cast<std::uint8_t>(index < 15 ?
+        0x21 + block * 16 + index : (block == 0 ? 0x58 : 0x48)));
+    }
+    command(8);
+    for (const auto byte : EPOCH)
+    {
+      consume(byte);
+    }
+  }
+  const auto exhausted = original.saveState();
+  REQUIRE(original.iopBus().write8(BASE + 0x16, 0x41).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(original.saveState() == exhausted);
+  for (const auto byte : {0, 1, 2})
+  {
+    write(original, 0x17, static_cast<std::uint8_t>(byte));
+  }
+  command(0x40);
+  consume(0);
+  command(0x41);
+  for (unsigned index = 0; index < 16; ++index)
+  {
+    consume(static_cast<std::uint8_t>(index < 15 ? 0x21 + index : 0x58));
+  }
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    command(0x43);
+    consume(0);
+  }
+  original.reset();
+  checkpoint();
+  REQUIRE(original.iopInterruptController().status() == 0);
+}
+
+TEST_CASE("CDVD diagnostic reads complete before CPU consumption through every alias",
+  "[iop][cdvd-integration][cdvd-config-session]")
+{
+  for (const IOPWord upper : {0x1f40u, 0x9f40u, 0xbf40u})
+  {
+    NekoSystem system;
+    stageQueryParameters(system, 0x40);
+    write(system, 0x16, 0x40);
+    system.runMasterCycles(8);
+    REQUIRE(read(system, 0x18) == 0);
+    startProgram(system, std::array<IOPWord, 6>{{
+      0x3c010000 | upper, 0x34212000, 0x34020041,
+      0xa0220016, 0x90230018, 0
+    }});
+    system.runMasterCycles(25);
+    REQUIRE(read(system, 0x17) == 0xc0);
+    REQUIRE(system.iopCore().retiredInstructions() == 4);
+    system.runMasterCycles(16);
+    REQUIRE(system.iopCore().retiredInstructions() == 6);
+    REQUIRE(system.iopCore().generalRegister(3) == 0x21);
+    REQUIRE(system.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(read(system, 8) == 0);
+    REQUIRE(system.iopInterruptController().status() == 0);
+    for (unsigned index = 1; index < 16; ++index)
+    {
+      REQUIRE(read(system, 0x18) == (index < 15 ? 0x21 + index : 0x58));
+    }
+    REQUIRE(read(system, 0x17) == 0x40);
+  }
+}
+
+TEST_CASE("CDVD diagnostic session rejects malformed canonical relationships transactionally",
+  "[iop][cdvd-integration][cdvd-config-session][save-state]")
+{
+  NekoSystem source;
+  NekoSystem destination;
+  write(destination, 4, 0);
+  destination.clockMasterCycle();
+  const auto before = destination.saveState();
+  const auto reject = [&](const char *field, std::uint8_t value)
+  {
+    CAPTURE(field);
+    CAPTURE(value);
+    SaveStateMutation bad(source.saveState());
+    bad.writeScalar(std::string("system.iop.cdvd.") + field, value);
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  };
+  reject("configSession", 2);
+  reject("configProfile", 1);
+  reject("configNextBlock", 1);
+  reject("configRequest", 1);
+  reject("configRequest", 4);
+  reject("configRequestBlock", 1);
+  for (const auto byte : {0, 1, 2})
+  {
+    write(source, 0x17, static_cast<std::uint8_t>(byte));
+  }
+  write(source, 0x16, 0x40);
+  reject("configRequest", 0);
+  reject("configRequest", 2);
+  reject("configRequestBlock", 1);
+  source.clockMasterCycle();
+  reject("configSession", 0);
+  reject("configProfile", 0);
+  reject("configProfile", 2);
+  reject("configNextBlock", 1);
+  reject("configRequest", 1);
+  read(source, 0x18);
+  reject("configNextBlock", 1);
+  write(source, 0x16, 0x41);
+  reject("configRequest", 0);
+  reject("configRequest", 3);
+  reject("configRequestBlock", 1);
+  reject("configNextBlock", 2);
+  source.runMasterCycles(8);
+  reject("configNextBlock", 0);
+  reject("configNextBlock", 2);
+  reject("configNextBlock", 3);
+  reject("configRequest", 2);
+  reject("resultCursor", 16);
+  for (unsigned index = 0; index < 16; ++index)
+  {
+    SaveStateMutation bad(source.saveState());
+    bad.writeByte("system.iop.cdvd.result", index, 0);
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    read(source, 0x18);
+  }
+  write(source, 0x16, 0x43);
+  reject("configRequest", 0);
+  reject("configRequestBlock", 1);
+  source.runMasterCycles(8);
+  reject("configSession", 1);
+  reject("configProfile", 1);
+  read(source, 0x18);
+  reject("configNextBlock", 1);
 }
 
 TEST_CASE("CDVD OpenConfig guest stores complete before polling through every CPU alias",
