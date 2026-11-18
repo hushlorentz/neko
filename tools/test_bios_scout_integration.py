@@ -80,7 +80,8 @@ class ScoutIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             bios = root / "authored.bin"
-            words = [0] * 16 + [0x3c02ba00, 0x34420008, 0x24040003, 0xa4440000]
+            # Store into read-only boot ROM, not an unimplemented MMIO register.
+            words = [0] * 16 + [0x3c02bfc0, 0x34420008, 0x24040003, 0xa4440000]
             image = b"".join(word.to_bytes(4, "little") for word in words)
             bios.write_bytes(image + bytes(4194304 - len(image)))
             directory = root / "discovery"
@@ -93,7 +94,7 @@ class ScoutIntegrationTests(unittest.TestCase):
             failure = result["first_failure"]
             self.assertEqual(failure["cpu"], "ee")
             self.assertEqual(failure["access"]["width"], 2)
-            self.assertEqual(failure["access"]["physical_address"], "0x1a000008")
+            self.assertEqual(failure["access"]["physical_address"], "0x1fc00008")
             self.assertEqual(failure["access"]["data"], [3, 0])
             self.assertLess(failure["master_cycle"], 100)
             manifest = json.loads((directory / "manifest.json").read_text())

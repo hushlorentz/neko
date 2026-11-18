@@ -457,6 +457,14 @@ include(cmake/CheckJobs.cmake)
 set(NEKO_TEST_JOBS 4 CACHE STRING "Parallel test shards (1-64)")
 neko_validate_test_jobs(NEKO_TEST_JOBS)
 math(EXPR LAST_TEST_SHARD "${NEKO_TEST_JOBS} - 1")
+add_test(
+    NAME neko_python_tests
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DNEKO_TEST_BINARY=$<TARGET_FILE:neko>"
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPython.cmake
+)
 foreach(SHARD RANGE 0 ${LAST_TEST_SHARD})
     set(SHARD_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-shards/${SHARD}/$<CONFIG>")
     file(GENERATE OUTPUT "${SHARD_DIRECTORY}/.workdir" CONTENT "")
@@ -482,7 +490,7 @@ add_custom_target(check
         ${CMAKE_COMMAND}
         -P
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyRepository.cmake
-    DEPENDS neko_tests
+    DEPENDS neko neko_tests
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     USES_TERMINAL
 )

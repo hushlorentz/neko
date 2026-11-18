@@ -15,6 +15,7 @@ See [ROADMAP.md](ROADMAP.md) for implementation status and planned work.
   - Visual Studio 2022 on Windows
   - Clang or GCC on Linux
 - Git
+- Python 3 for the complete check (not required for ordinary builds)
 
 The optional desktop frontend downloads a pinned SDL3 release during its first
 CMake configuration.
@@ -138,6 +139,11 @@ cmake -DNEKO_CHECK_JOBS=1 -P cmake/Check.cmake
 `CMAKE_BUILD_PARALLEL_LEVEL`, when set, overrides build concurrency only.
 For ordinary configured builds, `-DNEKO_TEST_JOBS=<count>` controls the shards
 used by the `check` target and registered with CTest.
+
+CTest also runs the Python tooling tests and BIOS-free native integration
+tests against the headless executable from the same build. The Python suite
+shares the concurrency limit with the C++ shards rather than running serially
+before or after them.
 
 Run focused tests or collect a complete timing/assertion profile:
 

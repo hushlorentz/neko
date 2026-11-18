@@ -862,6 +862,11 @@ NEKO_TEST_BINARY="$PWD/out/check/neko" python3 -B -m unittest discover -s tools 
 
 This uses only an ephemeral, independently authored synthetic ROM, never the
 local integration BIOS, and does not build the executable.
+The complete `cmake -P cmake/Check.cmake` and `cmake -P cmake/Sanitize.cmake`
+workflows run all Python tests, including these integration cases, against
+their own built executable. CTest schedules the Python suite alongside the
+C++ shards under the same concurrency limit. Plain Python discovery without
+`NEKO_TEST_BINARY` skips the native cases.
 
 ### Validated checkpoint workflow
 
