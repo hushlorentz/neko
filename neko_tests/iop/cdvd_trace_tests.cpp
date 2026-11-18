@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "catch.hpp"
@@ -846,8 +847,8 @@ TEST_CASE("CDVD OpenConfig authored guest stages its exact request and drains on
   }
 }
 
-TEST_CASE("CDVD diagnostic session guest checks packets and restores its full lifecycle",
-  "[iop][cdvd-trace][cdvd-config-session][cdvd-config-session-conformance][save-state]")
+TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its lifecycle",
+  "[iop][cdvd-trace][cdvd-config-session][cdvd-config-session-conformance][cdvd-rc-bypass][cdvd-rc-bypass-conformance][save-state]")
 {
   const std::array<std::array<std::uint8_t, 16>, 3> packets = {{
     {{0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
@@ -886,6 +887,7 @@ TEST_CASE("CDVD diagnostic session guest checks packets and restores its full li
       std::uint8_t request = 0;
       std::uint8_t block = 0;
       std::uint8_t parameters = 0;
+      std::array<std::uint8_t, 3> parameterBytes = {{0, 1, 2}};
     };
     std::vector<Access> accesses;
     std::vector<Command> commands;
@@ -933,6 +935,20 @@ TEST_CASE("CDVD diagnostic session guest checks packets and restores its full li
       load(0x90290017, 0x17, 0x40);
       return cycle;
     };
+    const auto bypass = [&](std::uint8_t profile, std::uint8_t next)
+    {
+      program.push_back(0x34020001);
+      const auto staged = access(0xa0220017, 0x17, 1,
+        NekoIOPTraceMemory::AccessKind::DataStore);
+      cuts.push_back({staged, profile, next, 0, 0, 0, 0, 1, {{1, 0, 0}}});
+      const auto accepted = submit(0x24, {});
+      cuts.push_back({accepted, profile, next, 1});
+      cuts.push_back({accepted + 7, profile, next, 1});
+      cuts.push_back({accepted + 8, profile, next, 2});
+      cuts.push_back({drainAck(0), profile, next, 0});
+      load(0x902c0016, 0x16, 0x24);
+      load(0x902d0018, 0x18, 0);
+    };
     const auto readPacket = [&](unsigned packet, std::uint8_t next)
     {
       const auto cycle = submit(0x41, packets[packet]);
@@ -968,18 +984,22 @@ TEST_CASE("CDVD diagnostic session guest checks packets and restores its full li
       }
       load(0x90280018, 0x18, 0);
     };
+    bypass(0, 0);
     openParameters(0, 0);
     const auto opened = submit(0x40, {});
     cuts.push_back({opened, 0, 0, 1, 0, 1});
     cuts.push_back({opened + 7, 0, 0, 1, 0, 1});
     cuts.push_back({opened + 8, 1, 0, 2});
     cuts.push_back({drainAck(0), 1, 0, 0});
+    bypass(1, 0);
     readPacket(0, 1);
     const auto interleaved = submit(0x15, {{5}});
     cuts.push_back({interleaved, 1, 1, 1});
     cuts.push_back({interleaved + 8, 1, 1, 2});
     drainAck(5);
+    bypass(1, 1);
     readPacket(1, 2);
+    bypass(1, 2);
     openParameters(1, 2);
     const auto reopened = submit(0x40, {});
     cuts.push_back({reopened, 1, 2, 1, 0, 1});
@@ -1012,6 +1032,8 @@ TEST_CASE("CDVD diagnostic session guest checks packets and restores its full li
     REQUIRE(reference.iopCore().retiredInstructions() == program.size());
     REQUIRE(reference.iopCore().generalRegister(20) == 0);
     REQUIRE(reference.iopCore().generalRegister(21) == 1);
+    REQUIRE(reference.iopCore().generalRegister(12) == 0x24);
+    REQUIRE(reference.iopCore().generalRegister(13) == 0);
     REQUIRE(reference.iopInterruptController().status() == 0);
     for (unsigned packet = 0; packet < packets.size(); ++packet)
     {
@@ -1116,12 +1138,19 @@ TEST_CASE("CDVD diagnostic session guest checks packets and restores its full li
       REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == cut.cursor);
       REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") ==
         cut.parameters);
+      for (unsigned index = 0; index < 16; ++index)
+      {
+        REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", index) ==
+          (index < cut.parameters ? cut.parameterBytes[index] : 0));
+      }
       if (cut.cursor != 0)
       {
         REQUIRE(source.iopCore().delayedResultContinuation().source ==
           IOPDelayedResultSource::Load);
       }
-      if (cut.phase == 1 || cut.cursor == 15)
+      const bool bypassResult = cut.phase == 2 &&
+        fields.readByte("system.iop.cdvd.lastSubcommand") == 0x24;
+      if (cut.phase == 1 || cut.parameters != 0 || cut.cursor == 15 || bypassResult)
       {
         source.reset();
         source.startTrace();
@@ -1275,6 +1304,191 @@ TEST_CASE("CDVD diagnostic session guest rejects forbidden requests without sess
       source.loadState(initial);
       source.runMasterCycles(cut);
       const auto checkpoint = source.saveState();
+      source.reset();
+      source.startTrace();
+      source.runMasterCycles(9);
+      IOPTraceTest::requireMachine(source, resetReference);
+      REQUIRE(IOPTraceTest::subsystemEvents(source, CDVD).empty());
+      source.stopTrace();
+      source.loadState(checkpoint);
+      requireContinuationModes(reference, source);
+    }
+  }
+}
+
+TEST_CASE("CDVD RCBypass authored forbidden requests preserve state across reset and restore",
+  "[iop][cdvd-trace][cdvd-rc-bypass][cdvd-rc-bypass-conformance][save-state]")
+{
+  enum class Scenario
+  {
+    Empty, EnableMode, UnknownMode, ExtraParameter, Overflow,
+    UnreadCommand, UnreadParameter, MissingRestage, Neighbor
+  };
+  for (const auto scenario : {Scenario::Empty, Scenario::EnableMode,
+       Scenario::UnknownMode, Scenario::ExtraParameter, Scenario::Overflow,
+       Scenario::UnreadCommand, Scenario::UnreadParameter,
+       Scenario::MissingRestage, Scenario::Neighbor})
+  {
+    CAPTURE(scenario);
+    const bool submitted = scenario == Scenario::UnreadCommand ||
+      scenario == Scenario::UnreadParameter || scenario == Scenario::MissingRestage;
+    std::vector<std::uint8_t> parameters;
+    if (scenario == Scenario::EnableMode)
+    {
+      parameters = {0};
+    }
+    else if (scenario == Scenario::UnknownMode)
+    {
+      parameters = {2};
+    }
+    else if (scenario != Scenario::Empty)
+    {
+      parameters = {1};
+      if (scenario == Scenario::ExtraParameter)
+      {
+        parameters.push_back(0);
+      }
+      else if (scenario == Scenario::Overflow)
+      {
+        parameters.resize(16, 0);
+      }
+    }
+    std::vector<IOPWord> program = {0x3c01bf40, 0x34212000};
+    for (const auto byte : parameters)
+    {
+      program.insert(program.end(), {0x34020000u | byte, 0xa0220017});
+    }
+    std::uint64_t acceptedCycle = 0;
+    if (submitted)
+    {
+      acceptedCycle = (program.size() + 1) * 8 + 1;
+      program.insert(program.end(), {0x34020024, 0xa0220016, 0});
+      if (scenario == Scenario::MissingRestage)
+      {
+        program.insert(program.end(), {0x90280018, 0});
+      }
+    }
+    const IOPWord offset = scenario == Scenario::UnreadParameter ||
+      scenario == Scenario::Overflow ? 0x17 : 0x16;
+    const IOPWord rejected = offset == 0x17 ? 1 :
+      (scenario == Scenario::UnreadCommand ? 8 :
+        (scenario == Scenario::Neighbor ? 0x25 : 0x24));
+    program.insert(program.end(), {
+      0x34020000 | rejected, 0x10000001, 0xa0220000 | offset, 0x34140001
+    });
+    const auto failureCycle = (program.size() - 2) * 8 + 1;
+    const auto prepare = [&program](NekoSystem &system)
+    {
+      installProgram(system, 0, program);
+      system.iopCore().startExecution(0xa0000000);
+    };
+    NekoSystem reference;
+    prepare(reference);
+    const auto initial = reference.saveState();
+    reference.startTrace();
+    reference.runMasterCycles(failureCycle);
+    REQUIRE(reference.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(reference.iopCore().exception().kind == IOPException::None);
+    REQUIRE(reference.iopCore().retiredInstructions() == program.size() - 2);
+    REQUIRE(reference.iopCore().programCounter() ==
+      0xa0000000 + (program.size() - 2) * 4);
+    REQUIRE(reference.iopCore().storeFailure().access.physicalAddress == BASE + offset);
+    REQUIRE(reference.iopCore().generalRegister(20) == 0);
+    REQUIRE(reference.iopInterruptController().status() == 0);
+    const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+    REQUIRE(commands.size() == (submitted ? 2 : 0));
+    for (unsigned index = 0; index < commands.size(); ++index)
+    {
+      REQUIRE(commands[index].masterCycle == acceptedCycle + index * 8);
+      REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+      const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+      REQUIRE(decoded.opcode == 0x24);
+      REQUIRE(decoded.transport == NekoCDVDTrace::Transport::Subcommand);
+      REQUIRE(decoded.beforePhase == (index == 0 ?
+        NekoCDVDTrace::Phase::Idle : NekoCDVDTrace::Phase::Pending));
+      REQUIRE(decoded.afterPhase == (index == 0 ?
+        NekoCDVDTrace::Phase::Pending : NekoCDVDTrace::Phase::Result));
+      REQUIRE(decoded.beforeCause == 0);
+      REQUIRE(decoded.afterCause == 0);
+      const std::array<std::uint8_t, 16> empty = {};
+      REQUIRE(decoded.result == empty);
+    }
+    const SaveStateMutation fields(reference.saveState());
+    REQUIRE(fields.readByte("system.iop.cdvd.lastSubcommand") == (submitted ? 0x24 : 0));
+    REQUIRE(fields.readByte("system.iop.cdvd.subcommandPhase") ==
+      (submitted && scenario != Scenario::MissingRestage ? 2 : 0));
+    REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == 0);
+    REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") ==
+      (submitted ? 0 : parameters.size()));
+    for (const auto field : {"normalPending", "deviceCause", "configSession",
+         "configProfile", "configNextBlock", "configRequest", "configRequestBlock"})
+    {
+      REQUIRE(fields.readByte(std::string("system.iop.cdvd.") + field) == 0);
+    }
+    for (unsigned index = 0; index < 16; ++index)
+    {
+      REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", index) ==
+        (!submitted && index < parameters.size() ? parameters[index] : 0));
+      REQUIRE(fields.readByte("system.iop.cdvd.result", index) == 0);
+    }
+    bool failedStore = false;
+    for (const auto &event : reference.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.masterCycle == failureCycle && event.value0 == 0xbf402000 + offset)
+      {
+        REQUIRE_FALSE(failedStore);
+        REQUIRE(event.value1 == rejected);
+        namespace Memory = NekoIOPTraceMemory;
+        REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+          BASE + offset, 1, Memory::AccessKind::DataStore, Memory::Outcome::Unmapped,
+          Memory::CacheRoute::Uncached, true,
+          static_cast<std::uint8_t>(1u << (offset % 4))}));
+        failedStore = true;
+      }
+    }
+    REQUIRE(failedStore);
+    NekoSystem coldPlain;
+    prepare(coldPlain);
+    coldPlain.runMasterCycles(failureCycle);
+    REQUIRE(coldPlain.trace().empty());
+    IOPTraceTest::requireMachine(coldPlain, reference);
+    NekoSystem resetReference;
+    resetReference.runMasterCycles(9);
+    std::vector<std::uint64_t> cuts = {failureCycle - 8, failureCycle - 1};
+    if (submitted)
+    {
+      cuts.push_back(acceptedCycle);
+      cuts.push_back(acceptedCycle + 8);
+    }
+    for (const auto cut : cuts)
+    {
+      CAPTURE(cut);
+      NekoSystem source;
+      source.loadState(initial);
+      source.runMasterCycles(cut);
+      const auto checkpoint = source.saveState();
+      if (cut == failureCycle - 1)
+      {
+        const SaveStateMutation before(checkpoint);
+        for (const auto field : {"normalPending", "deviceCause", "lastSubcommand",
+             "subcommandPhase", "resultCursor", "subcommandParameterCount",
+             "configSession", "configProfile", "configNextBlock",
+             "configRequest", "configRequestBlock"})
+        {
+          const auto path = std::string("system.iop.cdvd.") + field;
+          REQUIRE(before.readByte(path) == fields.readByte(path));
+        }
+        for (const auto field : {"result", "subcommandParameters"})
+        {
+          const auto path = std::string("system.iop.cdvd.") + field;
+          for (unsigned index = 0; index < 16; ++index)
+          {
+            REQUIRE(before.readByte(path, index) == fields.readByte(path, index));
+          }
+        }
+      }
       source.reset();
       source.startTrace();
       source.runMasterCycles(9);
