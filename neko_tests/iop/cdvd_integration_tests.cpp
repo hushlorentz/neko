@@ -34,6 +34,13 @@ namespace
         write(system, 0x17, static_cast<std::uint8_t>(byte));
       }
     }
+    else if (opcode == 0x40)
+    {
+      for (const auto byte : {0, 1, 2})
+      {
+        write(system, 0x17, static_cast<std::uint8_t>(byte));
+      }
+    }
   }
 
   std::uint8_t read(NekoSystem &system, unsigned offset)
@@ -630,9 +637,9 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 }
 
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
 {
-  for (const auto opcode : {3u, 8u, 0x15u, 0x1au, 0x22u, 0x36u})
+  for (const auto opcode : {3u, 8u, 0x15u, 0x1au, 0x22u, 0x36u, 0x40u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -661,7 +668,7 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
 }
 
 TEST_CASE("CDVD immutable queries restore pending and every result cursor",
-  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][save-state]")
+  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
 {
   struct Query
   {
@@ -674,6 +681,7 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
     {0x15, 1, {{5}}},
     {0x1a, 1, {{1}}},
     {0x22, 10, {}},
+    {0x40, 1, {}},
     {0x36, 15, {{
       0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}}}
   };
@@ -737,9 +745,9 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
 }
 
 TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutation",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][save-state]")
 {
-  for (const auto opcode : {0x15u, 0x1au, 0x22u})
+  for (const auto opcode : {0x15u, 0x1au, 0x22u, 0x40u})
   {
     CAPTURE(opcode);
     NekoSystem source;
@@ -800,13 +808,14 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
 }
 
 TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads passive",
-  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up]")
+  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config]")
 {
-  for (const std::uint8_t opcode : {0x15, 0x22})
+  for (const std::uint8_t opcode : {0x15, 0x22, 0x40})
   {
     CAPTURE(opcode);
-    const unsigned size = opcode == 0x15 ? 1 : 10;
+    const unsigned size = opcode == 0x22 ? 10 : 1;
     NekoSystem system;
+    stageQueryParameters(system, opcode);
     for (unsigned stage = 0; stage < size + 3; ++stage)
     {
       CAPTURE(stage);
@@ -849,8 +858,86 @@ TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads 
       {
         REQUIRE(read(system, 0x18) == (opcode == 0x15 ? 5 : 0));
       }
+    }
+  }
+}
+
+TEST_CASE("CDVD OpenConfig restores staged requests without inventing a session",
+  "[iop][cdvd-integration][cdvd-open-config][save-state]")
+{
+  for (unsigned count = 0; count <= 3; ++count)
+  {
+    CAPTURE(count);
+    NekoSystem original;
+    for (unsigned index = 0; index < count; ++index)
+    {
+      write(original, 0x17, static_cast<std::uint8_t>(index));
+    }
+    NekoSystem restored;
+    write(restored, 0x16, 8);
+    restored.loadState(original.saveState());
+    requireSame(original, restored);
+    for (auto *system : {&original, &restored})
+    {
+      if (count != 3)
+      {
+        const auto before = system->saveState();
+        REQUIRE(system->iopBus().write8(BASE + 0x16, 0x40).status ==
+          IOPBusStatus::Unmapped);
+        REQUIRE(system->saveState() == before);
+      }
+      for (unsigned index = count; index < 3; ++index)
+      {
+        write(*system, 0x17, static_cast<std::uint8_t>(index));
+      }
+      write(*system, 0x16, 0x40);
+      system->clockMasterCycle();
+      REQUIRE(read(*system, 0x17) == 0);
+      REQUIRE(read(*system, 0x18) == 0);
+      REQUIRE(read(*system, 0x17) == 0x40);
+      const auto drained = system->saveState();
+      for (const auto opcode : {0x41, 0x42, 0x43})
+      {
+        REQUIRE(system->iopBus().write8(BASE + 0x16, opcode).status ==
+          IOPBusStatus::Unmapped);
+        REQUIRE(system->saveState() == drained);
       }
     }
+    requireSame(original, restored);
+  }
+}
+
+TEST_CASE("CDVD OpenConfig guest stores complete before polling through every CPU alias",
+  "[iop][cdvd-integration][cdvd-open-config]")
+{
+  for (const IOPWord upper : {0x1f40u, 0x9f40u, 0xbf40u})
+  {
+    CAPTURE(upper);
+    NekoSystem system;
+    startProgram(system, std::array<IOPWord, 13>{{
+      0x3c010000 | upper, 0x34212000, 0xa0200017,
+      0x34020001, 0xa0220017, 0x34020002, 0xa0220017,
+      0x34020040, 0xa0220016, 0x90230017, 0, 0x90240018, 0
+    }});
+    system.runMasterCycles(65);
+    REQUIRE(system.iopCore().retiredInstructions() == 9);
+    REQUIRE(read(system, 0x16) == 0x40);
+    REQUIRE(read(system, 0x17) == 0xc0);
+    system.runMasterCycles(7);
+    REQUIRE(read(system, 0x17) == 0xc0);
+    system.clockMasterCycle();
+    REQUIRE(read(system, 0x17) == 0);
+    REQUIRE(system.iopCore().retiredInstructions() == 10);
+    system.runMasterCycles(24);
+    REQUIRE(system.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().retiredInstructions() == 13);
+    REQUIRE(system.iopCore().generalRegister(3) == 0);
+    REQUIRE(system.iopCore().generalRegister(4) == 0);
+    REQUIRE(read(system, 0x17) == 0x40);
+    REQUIRE(read(system, 8) == 0);
+    REQUIRE(system.iopInterruptController().status() == 0);
+  }
 }
 
 TEST_CASE("CDVD BootCertify rejects malformed delay-slot stores without consuming staging",

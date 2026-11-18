@@ -61,6 +61,7 @@ namespace
   const std::array<std::uint8_t, 8> LAST_SECOND =
     {{0, 0x59, 0x59, 0x23, 0, 0x31, 0x12, 0x99}};
   const std::array<std::uint8_t, 4> BOOT_ROM_NAME = {{2, 0, 0x41, 0x43}};
+  const std::array<std::uint8_t, 3> OPEN_CONFIG_REQUEST = {{0, 1, 2}};
 
   std::uint8_t read(CDVDController &controller, std::uint32_t offset)
   {
@@ -348,6 +349,117 @@ TEST_CASE("CDVD wake-up query publishes ten opaque bytes and drains only on the 
   REQUIRE(drain(controller) == oneSecond);
 }
 
+TEST_CASE("CDVD OpenConfig publishes only its opaque ACK without opening storage",
+  "[iop][cdvd-owner][cdvd-open-config]")
+{
+  CDVDController controller;
+  CDVDControllerTestAccess::seedClock(controller, PS2Clock::MASTER_HZ - 4);
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    REQUIRE_FALSE(masterStep(controller, 0).completed);
+    for (const auto byte : OPEN_CONFIG_REQUEST)
+    {
+      accept(controller, 0x17, byte);
+    }
+    const auto ticks = CDVDControllerTestAccess::ticks(controller);
+    accept(controller, 0x16, 0x40);
+    REQUIRE(CDVDControllerTestAccess::ticks(controller) == ticks);
+    REQUIRE(read(controller, 0x16) == 0x40);
+    CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+    for (unsigned cycle = 1; cycle < 8; ++cycle)
+    {
+      REQUIRE_FALSE(masterStep(controller, cycle).completed);
+      REQUIRE(read(controller, 0x17) == 0xc0);
+      const auto pending = controller;
+      REQUIRE(read(controller, 0x18) == 0);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, pending));
+      CDVDControllerTestAccess::requireEmptyStorage(controller);
+    }
+    REQUIRE_FALSE(masterStep(controller, 8).completed);
+    CDVDControllerTestAccess::requireResult(controller, {});
+    REQUIRE_FALSE(controller.completeSubcommand());
+    REQUIRE(read(controller, 0x17) == 0);
+    REQUIRE(read(controller, 0x18) == 0);
+    REQUIRE(read(controller, 0x17) == 0x40);
+    REQUIRE(read(controller, 0x18) == 0);
+    REQUIRE(read(controller, 0x16) == 0x40);
+    REQUIRE(read(controller, 8) == 0);
+    CDVDControllerTestAccess::requireEmptyStorage(controller);
+    const auto drained = controller;
+    for (const auto opcode : {0x3f, 0x41, 0x42, 0x43, 0x44})
+    {
+      REQUIRE(controller.writeByte(BASE + 0x16, opcode) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, drained));
+    }
+  }
+  accept(controller, 0x16, 8);
+  REQUIRE(controller.completeSubcommand());
+  const std::array<std::uint8_t, 8> oneSecond = {{0, 1, 0, 0, 0, 1, 1, 0}};
+  REQUIRE(drain(controller) == oneSecond);
+}
+
+TEST_CASE("CDVD OpenConfig rejects every wrong request byte and count atomically",
+  "[iop][cdvd-owner][cdvd-open-config]")
+{
+  for (unsigned count = 0; count <= 16; ++count)
+  {
+    if (count == OPEN_CONFIG_REQUEST.size())
+    {
+      continue;
+    }
+    CAPTURE(count);
+    CDVDController controller;
+    accept(controller, 4, 0);
+    for (unsigned index = 0; index < count; ++index)
+    {
+      accept(controller, 0x17,
+        index < OPEN_CONFIG_REQUEST.size() ? OPEN_CONFIG_REQUEST[index] : 0);
+    }
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x40) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  for (std::size_t changed = 0; changed < OPEN_CONFIG_REQUEST.size(); ++changed)
+  {
+    for (unsigned value = 0; value < 256; ++value)
+    {
+      if (value == OPEN_CONFIG_REQUEST[changed])
+      {
+        continue;
+      }
+      CAPTURE(changed);
+      CAPTURE(value);
+      CDVDController controller;
+      for (std::size_t index = 0; index < OPEN_CONFIG_REQUEST.size(); ++index)
+      {
+        accept(controller, 0x17, index == changed ?
+          static_cast<std::uint8_t>(value) : OPEN_CONFIG_REQUEST[index]);
+      }
+      const auto before = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x40) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+    }
+  }
+  CDVDController controller;
+  for (const auto byte : OPEN_CONFIG_REQUEST)
+  {
+    accept(controller, 0x17, byte);
+  }
+  const auto staged = controller;
+  for (unsigned opcode = 0; opcode < 256; ++opcode)
+  {
+    if (opcode != 0x40)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x16,
+        static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, staged));
+    }
+  }
+}
+
 TEST_CASE("CDVD compatibility queries reject staged requests and unsupported neighbors atomically",
   "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up]")
 {
@@ -382,12 +494,12 @@ TEST_CASE("CDVD compatibility queries reject staged requests and unsupported nei
 }
 
 TEST_CASE("CDVD compatibility phase rejection and reset never enable media commands",
-  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up]")
+  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config]")
 {
-  for (const auto query : {0x15u, 0x22u})
+  for (const auto query : {0x15u, 0x22u, 0x40u})
   {
     CAPTURE(query);
-    const unsigned size = query == 0x15 ? 1 : 10;
+    const unsigned size = query == 0x22 ? 10 : 1;
     const std::uint8_t response = query == 0x15 ? 5 : 0;
     for (unsigned stage = 0; stage < size + 3; ++stage)
     {
@@ -395,6 +507,13 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
       CDVDController controller;
       if (stage != 0)
       {
+        if (query == 0x40)
+        {
+          for (const auto byte : OPEN_CONFIG_REQUEST)
+          {
+            accept(controller, 0x17, byte);
+          }
+        }
         accept(controller, 0x16, static_cast<std::uint8_t>(query));
         if (stage >= 2)
         {
@@ -430,6 +549,13 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
       REQUIRE(read(controller, 8) == 0);
       controller.reset();
       REQUIRE(CDVDControllerTestAccess::sameState(controller, CDVDController{}));
+      if (query == 0x40)
+      {
+        for (const auto byte : OPEN_CONFIG_REQUEST)
+        {
+          accept(controller, 0x17, byte);
+        }
+      }
       accept(controller, 0x16, static_cast<std::uint8_t>(query));
       REQUIRE(controller.completeSubcommand());
       REQUIRE(read(controller, 0x18) == response);

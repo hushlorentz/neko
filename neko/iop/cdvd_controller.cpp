@@ -9,6 +9,7 @@ constexpr std::uint64_t CDVDController::RTC_PERIOD_TICKS;
 namespace
 {
   constexpr std::array<std::uint8_t, 4> bootRomName = {{2, 0, 0x41, 0x43}};
+  constexpr std::array<std::uint8_t, 3> openConfigRequest = {{0, 1, 2}};
 
   bool isLeapYear(unsigned year) noexcept
   {
@@ -139,6 +140,10 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
     case 0x1a:
       return subcommandParameterCount == bootRomName.size() &&
         std::equal(bootRomName.begin(), bootRomName.end(), subcommandParameters.begin());
+    case 0x40:
+      return subcommandParameterCount == openConfigRequest.size() &&
+        std::equal(openConfigRequest.begin(), openConfigRequest.end(),
+          subcommandParameters.begin());
     default:
       return false;
   }
@@ -154,6 +159,7 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 8;
     case 0x15:
     case 0x1a:
+    case 0x40:
       return 1;
     case 0x22:
       return 10;
@@ -187,6 +193,12 @@ CDVDController::SubcommandResult CDVDController::wakeUpTimeResult() noexcept
   return {};
 }
 
+CDVDController::SubcommandResult CDVDController::openConfigResult() noexcept
+{
+  // Approved opaque acknowledgement, not an opened configuration session.
+  return {};
+}
+
 CDVDController::SubcommandResult CDVDController::regionResult() noexcept
 {
   // Approved compatibility profile, not measured SCPH-70012 NVM contents.
@@ -209,6 +221,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return wakeUpTimeResult();
     case 0x36:
       return regionResult();
+    case 0x40:
+      return openConfigResult();
     default:
       throw std::logic_error("CD/DVD pending subcommand is unsupported.");
   }
@@ -231,6 +245,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == wakeUpTimeResult();
     case 0x36:
       return snapshot == regionResult();
+    case 0x40:
+      return snapshot == openConfigResult();
     default:
       return false;
   }

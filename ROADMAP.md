@@ -4099,6 +4099,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
+
+### CD/DVD OpenConfig Dependency
+
+- [x] Research the originating byte store `0x40` to `0x1f402016` through
+      local manuals and existing command ownership; establish identity,
+      parameter staging, result semantics and shared-family dependencies.
+- [x] Select and approve the bounded command profile and explicit inputs,
+      including side effects, IRQs, cancellation, reset and timing; retain
+      unsupported behavior where evidence does not justify a finite profile.
+- [x] Implement and independently review the approved behavior with focused
+      red/green and immediate lifecycle, transport and persistence coverage
+      before the user-owned commit checkpoint.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
 
