@@ -4116,6 +4116,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored, traced/plain and canonical conformance;
       resolve due broader gates and final independent block review before
       the user-owned commit checkpoint.
+- [x] Verify fresh unchanged-input BIOS progress with same-build conformance
+      after user commits; identify the next origin without claiming boot.
+
+### CD/DVD Configuration Read/Session Dependency
+
+- [x] Research the originating SCMD `0x41` and coherent `0x40`–`0x43`
+      family through local manuals and existing ownership; establish request/
+      session dependencies and API/raw data, status and checksum layouts.
+- [x] Select and approve explicit deterministic diagnostic inputs and a
+      bounded session/result/reset contract; do not reinterpret ACK-only
+      states as opened storage or substitute generic zero configuration.
+- [ ] Implement and independently review the approved profile through the
+      existing command owner with red/green lifecycle and versioned persistence;
+      reject legacy ACK-to-session promotion before the user-owned commit checkpoint.
+- [ ] Add authored cold/restored, traced/plain and canonical conformance;
+      resolve due broader gates and final independent block review before
+      the user-owned commit checkpoint.
 - [ ] Verify fresh unchanged-input BIOS progress with same-build conformance
       after user commits; identify the next origin without claiming boot.
 
