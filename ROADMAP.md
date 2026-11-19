@@ -4165,7 +4165,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add coarse diagnostic cycle/ceiling, stage, elapsed wall/CPU time and
       throughput reporting through maintained campaign status, without changing
       guest timing, canonical state or trace payloads.
-- [ ] Avoid expensive component hashing when selected trace consumers do not
+- [x] Avoid expensive component hashing when selected trace consumers do not
       need it; preserve existing full-trace/failure-capture contracts or
       explicitly approve/version new profiles, retaining canonical comparisons.
 - [ ] Validate retention, progress and trace-demand behavior with BIOS-free
@@ -4387,3 +4387,9 @@ compatibility policy into a frontend.
 - [ ] Compare every optimized execution path continuously against the
       cycle-oriented interpreter, including the floating-point integration
       corpus
+
+### Deferred Validation Optimization
+
+- [ ] Add conservative test-impact selection from source/dependency mappings,
+      contract tags, measured runtimes and optional per-test coverage; broaden
+      uncertain selections and retain complete optimized/ASan gates.

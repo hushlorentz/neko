@@ -450,9 +450,15 @@ CPU stop precedence, snapshots, and host exit status remain unchanged.
 
 The limit bounds retained event count at insertion, not just output size.
 It does not preallocate the requested ceiling, shrink previously allocated
-vector capacity, or impose a byte budget. Enabled tracing still incurs normal
-observation costs after the prefix fills. Output is formatted one record at a
-time after execution rather than building another complete trace in memory.
+vector capacity, or impose a byte budget. After truncation is established,
+EE state and presentation hashes are skipped only when no observer is attached:
+those discarded events have no remaining consumer. Other observation and
+failure-detection costs remain, including first-failure stopping beyond the
+prefix. An attached observer, including `--failure-context`, retains the full
+event stream and its hashing costs even after its recording window freezes.
+Clearing or restarting collection restores hashing; exact-fit and truncation
+semantics are unchanged. Output is formatted one record at a time after
+execution rather than building another complete trace in memory.
 Runtime errors export the retained prefix when tracing was requested. This is
 best-effort reporting: allocation, inspection, or output failure can still
 prevent some evidence from being emitted. The original execution error is

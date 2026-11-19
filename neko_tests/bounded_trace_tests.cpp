@@ -108,6 +108,105 @@ TEST_CASE("Bounded trace lifecycle resets loss metadata without changing machine
   REQUIRE(system.traceEventLimit() == 0);
 }
 
+TEST_CASE("Saturated trace prefixes preserve failure stops and recorder streams",
+  "[bounded-trace][startup-failure]")
+{
+  for (const bool iopFailure : {false, true})
+  {
+    CAPTURE(iopFailure);
+    const auto prepare = [&](NekoSystem &system)
+    {
+      startLoops(system);
+      if (iopFailure)
+      {
+        REQUIRE(system.iopBus().write32(0, 0).status == IOPBusStatus::Completed);
+        REQUIRE(system.iopBus().write32(0x80, 0x8c020001).status ==
+          IOPBusStatus::Completed);
+      }
+      else
+      {
+        system.eeBus().write32(0, 0);
+        system.eeBus().write32(0x80, 0x8c020001);
+      }
+    };
+    NekoSystem reference;
+    prepare(reference);
+    reference.startTrace(4096, {}, NekoTraceStopPolicy::FirstFailure);
+    const auto result = reference.runDualCPU(512);
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE_FALSE(reference.traceTruncated());
+    const auto failure = firstStartupFailure(reference.trace());
+    REQUIRE(failure.found);
+    REQUIRE(failure.event.subsystem ==
+      (iopFailure ? NekoTraceSubsystem::IOP : NekoTraceSubsystem::EE));
+    const auto state = reference.saveState();
+
+    for (const std::uint64_t limit : {UINT64_C(0), UINT64_C(1)})
+    {
+      CAPTURE(limit);
+      NekoSystem bounded;
+      prepare(bounded);
+      bounded.startTrace(limit, {}, NekoTraceStopPolicy::FirstFailure);
+      REQUIRE(bounded.runDualCPU(512).masterCycles == result.masterCycles);
+      REQUIRE(bounded.traceTruncated());
+      const IOPTraceTest::Events prefix(
+        reference.trace().begin(), reference.trace().begin() + limit);
+      IOPTraceTest::requireEvents(bounded.trace(), prefix);
+      REQUIRE(bounded.saveState() == state);
+
+      NekoSystem recorded;
+      prepare(recorded);
+      auto capture = std::make_shared<StartupFailureCapture>();
+      recorded.startTrace(limit, capture, NekoTraceStopPolicy::FirstFailure);
+      REQUIRE(recorded.runDualCPU(512).masterCycles == result.masterCycles);
+      REQUIRE(recorded.traceTruncated());
+      IOPTraceTest::requireEvents(recorded.trace(), prefix);
+      IOPTraceTest::requireEvents(capture->events(), reference.trace());
+      REQUIRE(capture->observedEvents() == reference.trace().size());
+      REQUIRE(recorded.saveState() == state);
+    }
+  }
+}
+
+TEST_CASE("Clearing saturated traces restores hash-bearing component suffixes",
+  "[bounded-trace]")
+{
+  NekoSystem reference;
+  NekoSystem bounded;
+  for (auto *system : {&reference, &bounded})
+  {
+    startLoops(*system);
+    system->gsDisplay().configureTiming({4, 6, {1, 2, 1}});
+  }
+  reference.startTrace();
+  bounded.startTrace(16);
+  reference.runDualCPU(63);
+  bounded.runDualCPU(63);
+  REQUIRE(bounded.traceTruncated());
+  const IOPTraceTest::Events prefix(
+    reference.trace().begin(), reference.trace().begin() + 16);
+  IOPTraceTest::requireEvents(bounded.trace(), prefix);
+
+  reference.clearTrace();
+  bounded.clearTrace();
+  REQUIRE_FALSE(bounded.traceTruncated());
+  reference.runDualCPU(1);
+  bounded.runDualCPU(1);
+  REQUIRE_FALSE(bounded.traceTruncated());
+  IOPTraceTest::requireEvents(bounded.trace(), reference.trace());
+  REQUIRE(std::any_of(bounded.trace().begin(), bounded.trace().end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.type == NekoTraceEventType::StateSnapshot;
+    }));
+  REQUIRE(std::any_of(bounded.trace().begin(), bounded.trace().end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.type == NekoTraceEventType::PresentationBoundary;
+    }));
+  IOPTraceTest::requireMachine(bounded, reference);
+}
+
 TEST_CASE("Loading canonical state preserves destination bounded trace controls and history",
   "[bounded-trace]")
 {

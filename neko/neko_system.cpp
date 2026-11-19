@@ -1935,23 +1935,27 @@ void NekoSystem::publishComponentTrace(
   std::uint64_t cycle, const CycleObservationSnapshot &beforeCycle,
   const DMAObservations &dma)
 {
-  const std::uint64_t currentEEStateHash =
-    eeCoreComponent.stateHash();
-  if (currentEEStateHash != lastTracedEEStateHash)
+  // After overflow, only an attached observer can consume hash-bearing events.
+  if (!truncatedTrace || traceObserver)
   {
-    appendTrace(
-      cycle,
-      NekoTraceSubsystem::EE,
-      NekoTraceEventType::StateSnapshot,
-      currentEEStateHash,
-      eeCoreComponent.elapsedCycles(),
-      eeCoreComponent.programCounter(),
-      (static_cast<std::uint64_t>(
-        eeCoreComponent.cop0Register(
-          EECOP0Register::Status)) << 32) |
-        eeCoreComponent.cop0Register(
-          EECOP0Register::Cause));
-    lastTracedEEStateHash = currentEEStateHash;
+    const std::uint64_t currentEEStateHash =
+      eeCoreComponent.stateHash();
+    if (currentEEStateHash != lastTracedEEStateHash)
+    {
+      appendTrace(
+        cycle,
+        NekoTraceSubsystem::EE,
+        NekoTraceEventType::StateSnapshot,
+        currentEEStateHash,
+        eeCoreComponent.elapsedCycles(),
+        eeCoreComponent.programCounter(),
+        (static_cast<std::uint64_t>(
+          eeCoreComponent.cop0Register(
+            EECOP0Register::Status)) << 32) |
+          eeCoreComponent.cop0Register(
+            EECOP0Register::Cause));
+      lastTracedEEStateHash = currentEEStateHash;
+    }
   }
   if (vu0Component.elapsedCycles() != beforeCycle.vu0Cycles)
   {
@@ -2048,8 +2052,9 @@ void NekoSystem::publishComponentTrace(
       interruptControllerComponent.mask());
   }
   publishIOPDeviceTrace(cycle, dma);
-  if (gsDisplayComponent.presentationBoundaryCount() !=
-      beforeCycle.presentationBoundary)
+  if ((!truncatedTrace || traceObserver) &&
+      gsDisplayComponent.presentationBoundaryCount() !=
+        beforeCycle.presentationBoundary)
   {
     appendTrace(
       cycle,
