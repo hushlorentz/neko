@@ -83,7 +83,8 @@ enum class VIFCommandKind : std::uint8_t
   MPG,
   DIRECT,
   DIRECTHL,
-  UNPACK
+  UNPACK,
+  Undefined
 };
 
 enum class VIFUnpackFormat : std::uint8_t
@@ -121,5 +122,8 @@ struct VIFCommand
 };
 
 VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type);
+VIFCommandKind classifyVIFCommand(std::uint32_t code);
+VIFCommand decodeVIFCommandEncoding(
+  std::uint32_t code, VIFType type);
 
 #endif

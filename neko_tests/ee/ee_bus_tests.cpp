@@ -1402,7 +1402,7 @@ TEST_CASE("EE VIF ERR unmasked word programming preserves live state",
   REQUIRE(system.sifStateHash() == sifHash);
 }
 
-TEST_CASE("EE VIF ERR rejects every active mask without changing partial work",
+TEST_CASE("EE VIF ERR programs mask fields without changing partial work",
   "[ee][bus][vif-err]")
 {
   NekoSystem system;
@@ -1426,11 +1426,12 @@ TEST_CASE("EE VIF ERR rejects every active mask without changing partial work",
     {
       CAPTURE(address);
       CAPTURE(mask);
-      REQUIRE_FALSE(bus.writeData32(address, mask));
-      REQUIRE_FALSE(bus.writeData32(address, 0xfffffff8u | mask));
-      REQUIRE_THROWS_AS(bus.write32(address, mask), std::out_of_range);
-      REQUIRE(bus.read32(address) == 0);
+      REQUIRE(bus.writeData32(address, mask));
+      REQUIRE(bus.writeData32(address, 0xfffffff8u | mask));
+      bus.write32(address, mask);
+      REQUIRE(bus.read32(address) == mask);
     }
+    REQUIRE(bus.writeData32(address, 0));
   }
   REQUIRE(system.eeStateHash() == hash);
 }
@@ -1484,12 +1485,12 @@ TEST_CASE("EE VIF ERR excludes split widths and non CPU routes",
   REQUIRE(system.eeStateHash() == hash);
 }
 
-TEST_CASE("EE guest VIF ERR admits only full unmasked word stores",
+TEST_CASE("EE guest VIF ERR admits only full word stores",
   "[ee][bus][vif-err][guest]")
 {
   for (const auto address : {0x10003820u, 0x10003c20u})
   {
-    for (const auto value : {0u, 0xfffffff8u, 1u, 2u, 4u})
+    for (const auto value : {0u, 0xfffffff8u, 1u, 2u, 4u, 6u, 7u})
     {
       for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
       {
@@ -1509,7 +1510,7 @@ TEST_CASE("EE guest VIF ERR admits only full unmasked word stores",
           core.setCOP0Register(EECOP0Register::Status, 0);
           core.startExecution(EEMemoryMap::KSEG1_BASE);
           const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
-          const bool admitted = full && (value & 7) == 0;
+          const bool admitted = full;
           const auto result = system.stepEEInstruction(16);
           REQUIRE(result.pendingException ==
             (admitted ? EEException::None : EEException::DataBusErrorStore));
@@ -1547,7 +1548,7 @@ TEST_CASE("EE VIF ERR restored guest programming preserves interrupt continuatio
   bus.write32(8, immediateInstruction(0x2b, 4, 3));
   auto &core = original.eeCore();
   core.setGeneralRegister(1, {0xb0003c20, 0});
-  core.setGeneralRegister(2, {0xfffffff8, 0});
+  core.setGeneralRegister(2, {0xfffffffe, 0});
   core.setGeneralRegister(4, {0x90003820, 0});
   core.setCOP0Register(EECOP0Register::Status, 0);
   core.startExecution(0xa0000000);
@@ -1569,11 +1570,11 @@ TEST_CASE("EE VIF ERR restored guest programming preserves interrupt continuatio
   }
   for (auto *system : {&plain, &traced})
   {
-    REQUIRE(system->eeCore().generalRegister(3).low == 0);
+    REQUIRE(system->eeCore().generalRegister(3).low == 6);
     for (const auto address : {0x10003820u, 0x10003c20u})
     {
       auto &vif = address == 0x10003820 ? system->vif0() : system->vif1();
-      REQUIRE(system->eeBus().read32(address) == 0);
+      REQUIRE(system->eeBus().read32(address) == 6);
       REQUIRE(vif.interruptPending());
       REQUIRE(vif.markDetected());
       REQUIRE(vif.submitQuadword({0x87004321, 0, 0, 0}));
@@ -1581,7 +1582,7 @@ TEST_CASE("EE VIF ERR restored guest programming preserves interrupt continuatio
       vif.advanceFIFO();
       REQUIRE(vif.mark() == 0x4321);
       REQUIRE(vif.interruptPending());
-      REQUIRE(system->eeBus().read32(address) == 0);
+      REQUIRE(system->eeBus().read32(address) == 6);
       REQUIRE(system->eeBus().writeData32(address - 0x10, 1));
       REQUIRE(system->eeBus().read32(address) == 0);
       REQUIRE_FALSE(vif.interruptPending());
@@ -1590,6 +1591,71 @@ TEST_CASE("EE VIF ERR restored guest programming preserves interrupt continuatio
   REQUIRE(plain.eeStateHash() == traced.eeStateHash());
   REQUIRE(plain.saveState() == traced.saveState());
   REQUIRE_FALSE(traced.trace().empty());
+}
+
+TEST_CASE("EE VIF ERR masks captured i-bit requests and owns code error stalls",
+  "[ee][bus][vif-err]")
+{
+  NekoSystem system;
+  for (const auto address : {0x10003820u, 0x10003c20u})
+  {
+    auto &vif = address == 0x10003820 ? system.vif0() : system.vif1();
+    auto &bus = system.eeBus();
+    REQUIRE(bus.writeData32(address, 1));
+    vif.processCode(0x80000000);
+    REQUIRE_FALSE(vif.interruptPending());
+    vif.ingestWord(0xa0000000);
+    REQUIRE(bus.writeData32(address, 0));
+    vif.ingestWord(0x12345678);
+    REQUIRE_FALSE(vif.interruptPending());
+    REQUIRE(vif.mask() == 0x12345678);
+    vif.ingestWord(0xa0000000);
+    REQUIRE(bus.writeData32(address, 1));
+    vif.ingestWord(0x87654321);
+    REQUIRE(vif.interruptPending());
+    REQUIRE(bus.writeData32(address - 0x10, 8));
+
+    REQUIRE(bus.writeData32(address, 0));
+    REQUIRE_NOTHROW(vif.ingestWord(0x08000000));
+    REQUIRE((bus.read32(address - 0x20) & (1u << 13)) != 0);
+    REQUIRE(vif.ingestWord(0x07004321).stalled);
+    REQUIRE(bus.writeData32(address, 4));
+    REQUIRE(vif.ingestWord(0x07004321).stalled);
+    REQUIRE(bus.writeData32(address - 0x10, 8));
+    REQUIRE_FALSE(vif.ingestWord(0x08000000).stalled);
+    REQUIRE((bus.read32(address - 0x20) & (1u << 13)) == 0);
+    REQUIRE_FALSE(vif.ingestWord(0x07004321).stalled);
+    REQUIRE(vif.mark() == 0x4321);
+    REQUIRE_THROWS(vif.ingestWord(0x63000000));
+    REQUIRE_THROWS(vif.processCode(0x05000003));
+    if (vif.unitType() == VIFType::VIF0)
+    {
+      REQUIRE_THROWS(vif.ingestWord(0x03000000));
+    }
+    vif.ingestWord(0x88000000);
+    REQUIRE(vif.interruptPending());
+    REQUIRE(vif.lastCode() == 0x88000000);
+    REQUIRE(vif.errorStatus() == 0);
+    REQUIRE(bus.writeData32(address - 0x10, 8));
+    REQUIRE(bus.writeData32(address, 5));
+    vif.processCode(0x88000000);
+    REQUIRE_FALSE(vif.interruptPending());
+    REQUIRE(vif.errorStatus() == 0);
+    REQUIRE(bus.writeData32(address, 0));
+    vif.ingestWord(0xa0000000);
+    REQUIRE(vif.submitDMATag({}));
+    vif.advanceFIFO();
+    REQUIRE(vif.errorStatus() == (1u << 12));
+    REQUIRE(bus.writeData32(address, 6));
+    REQUIRE(bus.writeData32(address - 0x10, 1));
+    REQUIRE(bus.read32(address) == 0);
+    REQUIRE(vif.errorStatus() == 0);
+    REQUIRE(vif.fifoQuadwordCount() == 0);
+    REQUIRE_FALSE(vif.awaitingPayload());
+    vif.ingestWord(0x20000000);
+    vif.ingestWord(0);
+    REQUIRE_FALSE(vif.interruptPending());
+  }
 }
 
 TEST_CASE("EE IPU reset latches only its interrupt and preserves programmed peers",

@@ -138,7 +138,7 @@ bool VIF1DMACChannel::submitQuadword(std::uint32_t address)
 bool VIF1DMACChannel::submitTag(std::uint32_t address)
 {
   const GIFQuadword tag = eeBus->readQuadword(address);
-  return submitValue({{0, 0, tag[2], tag[3]}});
+  return eeBus->submitVIF1DMATag(tag);
 }
 
 void VIF1DMACChannel::transferQuadword()

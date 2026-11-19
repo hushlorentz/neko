@@ -135,6 +135,46 @@ TEST_CASE("VIF1 DMAC normal transfers feed the VIF1 FIFO")
   REQUIRE_FALSE(system.interruptPending());
 }
 
+TEST_CASE("VIF1 DMAC tag mismatch masks preserve actual payload and cancellation",
+  "[ee][dma][vif-err]")
+{
+  for (const auto mask : {0u, 2u})
+  {
+    CAPTURE(mask);
+    NekoSystem system;
+    auto &bus = system.eeBus();
+    auto &vif = system.vif1();
+    REQUIRE(bus.writeData32(0x10003c20, mask));
+    vif.ingestWord(0x30000000);
+    vif.ingestWord(0x11111111);
+    REQUIRE(bus.writeQuadword(0x1000,
+      dmaTag(GIFDMATagID::End, 0, 0, false, 0x22222222, 0x33333333)));
+    startSourceChain(&bus, 0x1000, GIFDMACChannelControl::TAG_TRANSFER_ENABLE);
+    system.vif1DMAC().clock();
+    vif.advanceFIFO();
+    if (mask == 0)
+    {
+      REQUIRE(vif.payloadWordsRemaining() == 3);
+      REQUIRE((bus.read32(0x10003c00) & (1u << 12)) != 0);
+      REQUIRE(bus.writeData32(0x10003c20, 2));
+      vif.advanceFIFO();
+      REQUIRE(vif.payloadWordsRemaining() == 3);
+      REQUIRE(bus.writeData32(0x10003c10, 8));
+      vif.advanceFIFO();
+    }
+    REQUIRE(vif.payloadWordsRemaining() == 1);
+    REQUIRE(vif.row(0) == 0x11111111);
+    REQUIRE(vif.row(1) == 0x22222222);
+    REQUIRE(vif.row(2) == 0x33333333);
+    REQUIRE(vif.submitQuadword({0x44444444, 0x07001234, 0, 0}));
+    vif.advanceFIFO();
+    REQUIRE_FALSE(vif.awaitingPayload());
+    REQUIRE(vif.row(3) == 0x44444444);
+    REQUIRE(vif.mark() == 0x1234);
+    REQUIRE((bus.read32(0x10003c00) & (3u << 12)) == 0);
+  }
+}
+
 TEST_CASE("VIF1 DMAC preserves progress while its FIFO is full",
   "[ee][dma][active-stop]")
 {

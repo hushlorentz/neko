@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 130 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
+TEST_CASE("Version 131 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,18 +662,40 @@ TEST_CASE("Version 130 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 130);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 131);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 129;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 130;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 701 + appendedSpuStateSize);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 707 + appendedSpuStateSize);
   const auto snapshot = inspectSaveState(state);
+  const auto *vif0Mask = snapshot.find("system.vif0.errorMask");
+  const auto *vif1Mask = snapshot.find("system.vif1.errorMask");
+  REQUIRE(vif0Mask != nullptr);
+  REQUIRE(vif1Mask != nullptr);
+  for (const auto *prefix : {"system.vif0.", "system.vif1."})
+  {
+    const auto path = std::string(prefix);
+    const auto *mask = snapshot.find(path + "errorMask");
+    const auto *flags = snapshot.find(path + "errorFlags");
+    const auto *request = snapshot.find(path + "streamInterruptRequest");
+    const auto *fifoCount = snapshot.find(path + "fifoWordCount");
+    REQUIRE(mask != nullptr);
+    REQUIRE(flags != nullptr);
+    REQUIRE(request != nullptr);
+    REQUIRE(fifoCount != nullptr);
+    REQUIRE(flags->containerOffset == mask->containerOffset + 1);
+    REQUIRE(request->containerOffset == mask->containerOffset + 2);
+    REQUIRE(mask->scalarValue == 0);
+    REQUIRE(flags->scalarValue == 0);
+    REQUIRE(request->scalarValue == 0);
+    REQUIRE(fifoCount->scalarValue == 0);
+  }
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
   const auto *outputControl = snapshot.find(
@@ -951,6 +973,10 @@ TEST_CASE("Version 130 save-state layout is byte-stable",
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
     previousVersion.begin() + core0->containerOffset);
+  previousVersion.erase(previousVersion.begin() + vif1Mask->containerOffset,
+    previousVersion.begin() + vif1Mask->containerOffset + 3);
+  previousVersion.erase(previousVersion.begin() + vif0Mask->containerOffset,
+    previousVersion.begin() + vif0Mask->containerOffset + 3);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 107;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -962,12 +988,14 @@ TEST_CASE("Version 130 save-state layout is byte-stable",
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
-      appendedSpuStateSize](std::size_t offset)
+      appendedSpuStateSize, vif0Mask, vif1Mask](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
       (offset >= voiceStateOffset + appendedSpuStateSize ? appendedSpuStateSize : 0) -
-      (offset >= configSession->containerOffset + 5 ? 5 : 0);
+      (offset >= configSession->containerOffset + 5 ? 5 : 0) -
+      (offset >= vif0Mask->containerOffset + 3 ? 3 : 0) -
+      (offset >= vif1Mask->containerOffset + 3 ? 3 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(
@@ -2949,6 +2977,145 @@ TEST_CASE("GIF reset keeps canonical mask mirrors consistent and rejects mismatc
     REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
     REQUIRE(restored.saveState() == before);
     REQUIRE(restored.eeStateHash() == hash);
+  }
+}
+
+TEST_CASE("VIF ERR requests and tag framing preserve cold restored trace continuation",
+  "[vif-err][save-state]")
+{
+  for (int phase = 0; phase < 3; ++phase)
+  {
+    CAPTURE(phase);
+    NekoSystem cold;
+    NekoSystem coldTraced;
+    for (auto *system : {&cold, &coldTraced})
+    {
+      system->eeBus().write32(0, 0x8c230000);
+      system->eeCore().setGeneralRegister(1, {0xb0003c20, 0});
+      system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+      system->eeCore().startExecution(0xa0000000);
+      if (phase == 2)
+      {
+        system->vif0().ingestWord(0x08000000);
+      }
+      else
+      {
+        system->vif0().ingestWord(0xa0000000);
+        REQUIRE(system->vif0().writeErrorRegister(1));
+      }
+      system->vif1().ingestWord(0x30000000);
+      system->vif1().ingestWord(0x11111111);
+      REQUIRE(system->vif1().submitDMATag({0xffffffff, 0xffffffff,
+        0x22222222, 0x33333333}));
+      if (phase == 1)
+      {
+        system->vif1().advanceFIFO();
+        REQUIRE(system->vif1().errorStatus() == (1u << 12));
+      }
+    }
+    const auto saved = cold.saveState();
+    NekoSystem plain;
+    NekoSystem traced;
+    plain.loadState(saved);
+    traced.loadState(saved);
+    REQUIRE(plain.saveState() == saved);
+    REQUIRE(traced.saveState() == saved);
+    coldTraced.startTrace();
+    traced.startTrace();
+    for (auto *system : {&cold, &coldTraced, &plain, &traced})
+    {
+      auto &vif0 = system->vif0();
+      if (phase == 2)
+      {
+        REQUIRE(vif0.errorStatus() == (1u << 13));
+        REQUIRE(vif0.ingestWord(0x07005678).stalled);
+        vif0.cancelStall();
+        REQUIRE_FALSE(vif0.ingestWord(0x07005678).stalled);
+        REQUIRE(vif0.mark() == 0x5678);
+      }
+      else
+      {
+        vif0.ingestWord(0x12345678);
+        REQUIRE(vif0.mask() == 0x12345678);
+        REQUIRE(vif0.interruptPending());
+      }
+      auto &vif1 = system->vif1();
+      vif1.advanceFIFO();
+      REQUIRE(vif1.errorStatus() == (1u << 12));
+      REQUIRE(vif1.payloadWordsRemaining() == 3);
+      REQUIRE(vif1.writeErrorRegister(6));
+      vif1.advanceFIFO();
+      REQUIRE(vif1.payloadWordsRemaining() == 3);
+      vif1.cancelStall();
+      vif1.advanceFIFO();
+      REQUIRE(vif1.payloadWordsRemaining() == 1);
+      REQUIRE(vif1.submitQuadword({0x44444444, 0x08000000, 0x07001234, 0}));
+      vif1.advanceFIFO();
+      REQUIRE(vif1.row(0) == 0x11111111);
+      REQUIRE(vif1.row(1) == 0x22222222);
+      REQUIRE(vif1.row(2) == 0x33333333);
+      REQUIRE(vif1.row(3) == 0x44444444);
+      REQUIRE(vif1.mark() == 0x1234);
+      REQUIRE(vif1.errorStatus() == 0);
+      const auto result = system->stepEEInstruction(16);
+      REQUIRE(result.pendingException == EEException::None);
+      REQUIRE(result.instructions == 1);
+      REQUIRE(system->eeCore().generalRegister(3).low == 6);
+    }
+    REQUIRE(cold.saveState() == plain.saveState());
+    REQUIRE(coldTraced.saveState() == plain.saveState());
+    REQUIRE(plain.saveState() == traced.saveState());
+    REQUIRE_FALSE(traced.trace().empty());
+    REQUIRE(coldTraced.trace().size() == traced.trace().size());
+    for (std::size_t index = 0; index < traced.trace().size(); ++index)
+    {
+      const auto &left = coldTraced.trace()[index];
+      const auto &right = traced.trace()[index];
+      REQUIRE(left.masterCycle == right.masterCycle);
+      REQUIRE(left.subsystem == right.subsystem);
+      REQUIRE(left.type == right.type);
+      REQUIRE(left.value0 == right.value0);
+      REQUIRE(left.value1 == right.value1);
+      REQUIRE(left.value2 == right.value2);
+      REQUIRE(left.value3 == right.value3);
+    }
+  }
+}
+
+TEST_CASE("VIF ERR malformed masks requests and tag framing reject transactionally",
+  "[vif-err][save-state]")
+{
+  NekoSystem source;
+  source.vif0().ingestWord(0xa0000000);
+  REQUIRE(source.vif1().submitDMATag({0, 0, 0, 0}));
+  const auto saved = source.saveState();
+  NekoSystem destination;
+  destination.eeBus().write32(0x1000, 0x12345678);
+  const auto before = destination.saveState();
+  const auto hash = destination.eeStateHash();
+  const std::pair<const char *, std::uint64_t> invalidFields[] = {
+    {"system.vif0.errorMask", 8},
+    {"system.vif1.errorFlags", 3},
+    {"system.vif0.errorFlags", 2},
+    {"system.vif1.errorFlags", 1},
+    {"system.vif1.errorFlags", 2},
+    {"system.vif0.streamCommand.interrupt", 0},
+    {"system.vif1.streamInterruptRequest", 1},
+    {"system.vif1.fifoWords[0].kind", 3},
+    {"system.vif1.fifoWords[0].value", 1},
+    {"system.vif1.fifoWords[1].kind", 0},
+    {"system.vif1.fifoWords[2].kind", 2},
+    {"system.vif1.fifoWords[0].kind", 2}
+  };
+  for (const auto &field : invalidFields)
+  {
+    CAPTURE(field.first);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(field.first, field.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.eeStateHash() == hash);
   }
 }
 

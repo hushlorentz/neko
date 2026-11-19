@@ -76,12 +76,20 @@ namespace
       case DIRECT: return VIFCommandKind::DIRECT;
       case DIRECTHL: return VIFCommandKind::DIRECTHL;
       default:
-        throw std::runtime_error("Unsupported VIF command.");
+        return VIFCommandKind::Undefined;
     }
   }
 }
 
-VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type)
+VIFCommandKind classifyVIFCommand(std::uint32_t code)
+{
+  const std::uint8_t command = (code >> 24) & VIF_COMMAND_MASK;
+  return (command & VIF_UNPACK_COMMAND_MASK) == VIFCommandEncoding::UNPACK
+    ? VIFCommandKind::UNPACK : commandKind(command);
+}
+
+VIFCommand decodeVIFCommandEncoding(
+  std::uint32_t code, VIFType type)
 {
   VIFCommand decoded;
   decoded.raw = code;
@@ -93,11 +101,10 @@ VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type)
   decoded.interrupt =
     (encodedCommand & VIFCommandEncoding::Interrupt) != 0;
   decoded.command = encodedCommand & VIF_COMMAND_MASK;
+  decoded.kind = classifyVIFCommand(code);
 
-  if ((decoded.command & VIF_UNPACK_COMMAND_MASK) ==
-      VIFCommandEncoding::UNPACK)
+  if (decoded.kind == VIFCommandKind::UNPACK)
   {
-    decoded.kind = VIFCommandKind::UNPACK;
     decoded.unpackFormat = unpackFormat(
       decoded.command & VIF_UNPACK_FORMAT_MASK);
     decoded.masked =
@@ -112,7 +119,10 @@ VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type)
   }
   else
   {
-    decoded.kind = commandKind(decoded.command);
+    if (decoded.kind == VIFCommandKind::Undefined)
+    {
+      return decoded;
+    }
   }
 
   if (type == VIFType::VIF0 && vif1Only(decoded.kind))
@@ -126,5 +136,15 @@ VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type)
     throw std::runtime_error("Unsupported VIF addition mode.");
   }
 
+  return decoded;
+}
+
+VIFCommand decodeVIFCommand(std::uint32_t code, VIFType type)
+{
+  const auto decoded = decodeVIFCommandEncoding(code, type);
+  if (decoded.kind == VIFCommandKind::Undefined)
+  {
+    throw std::runtime_error("Unsupported VIF command.");
+  }
   return decoded;
 }

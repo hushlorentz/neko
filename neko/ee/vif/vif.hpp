@@ -43,12 +43,15 @@ class VIF : public VUVIFRegisterSource
     void writeStatus(std::uint32_t value);
     std::uint32_t errorRegister() const;
     bool writeErrorRegister(std::uint32_t value);
+    std::uint32_t errorStatus() const;
+    void cancelStall();
     void attachVPU(VPU *attachedVPU);
     void attachGIFDecoder(GIFDecoder *attachedGIFDecoder);
     void attachGIFPathArbiter(GIFPathArbiter *attachedArbiter);
     VIFCommand processCode(std::uint32_t code);
     VIFStreamWord ingestWord(std::uint32_t word);
     bool submitQuadword(const GIFQuadword &quadword);
+    bool submitDMATag(const GIFQuadword &tag);
     void advanceFIFO();
     std::size_t fifoQuadwordCount() const;
     std::size_t fifoCapacity() const;
@@ -83,6 +86,21 @@ class VIF : public VUVIFRegisterSource
   private:
     friend class NekoSaveStateCodec;
 
+    enum class FIFOInputKind : std::uint8_t
+    {
+      Data,
+      TagStart,
+      TagContinuation
+    };
+
+    struct FIFOWord
+    {
+      std::uint32_t value = 0;
+      FIFOInputKind kind = FIFOInputKind::Data;
+    };
+
+    bool submitWords(const std::array<FIFOWord, 4> &words);
+    VIFCommand processUndefinedCode(std::uint32_t code);
     std::uint32_t payloadWordCount(const VIFCommand &command) const;
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);
@@ -120,6 +138,9 @@ class VIF : public VUVIFRegisterSource
     bool unattachedPath3Mask = false;
     bool markFlag = false;
     bool interruptFlag = false;
+    std::uint8_t errorMask = 0;
+    std::uint8_t errorFlags = 0;
+    bool streamInterruptRequest = false;
     std::uint32_t codeRegister = 0;
     VIFCommand streamCommand;
     std::uint32_t streamPayloadWordCount = 0;
@@ -129,7 +150,7 @@ class VIF : public VUVIFRegisterSource
     bool mpgLowerInstructionPending = false;
     GIFQuadword directQuadword = {};
     std::vector<std::uint32_t> unpackPayload;
-    std::deque<std::uint32_t> fifoWords;
+    std::deque<FIFOWord> fifoWords;
 };
 
 #endif

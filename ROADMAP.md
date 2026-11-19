@@ -4172,6 +4172,14 @@ not requirements for exhaustive subsystem coverage.
       regressions and bounded performance comparisons; document maintained
       scout/replay/conformance recipes before the next real-BIOS campaign.
 
+### EE VIF Error-Mask Programming Dependency
+
+- [x] Extend paired-VIF ERR semantics through the existing owner, with researched
+      masks, strict unsupported-work boundaries, focused/authored restored-trace
+      conformance, risk-based review and due validation before user commits.
+- [ ] Verify fresh unchanged-input BIOS progress after the user-owned commit,
+      with bounded same-build conformance and attribution of the next origin.
+
 ### Additional CD/DVD Command and Configuration Scope
 
 - [ ] Expand command dependencies required by the selected shell profile into

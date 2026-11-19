@@ -605,8 +605,8 @@ void EEBus::attachGSDisplay(GSDisplay *gsDisplay)
 std::uint32_t EEBus::vifStatus(const VIF &vif) const
 {
   std::uint32_t status =
-    static_cast<std::uint32_t>(vif.fifoQuadwordCount()) <<
-    24;
+    (static_cast<std::uint32_t>(vif.fifoQuadwordCount()) << 24) |
+    vif.errorStatus();
   if (vif.awaitingPayload())
   {
     status |= EEVIFStatus::WAITING_FOR_PAYLOAD;
@@ -648,7 +648,7 @@ void EEBus::writeVIFControl(VIF &vif, std::uint32_t value)
       return;
     }
     case VIF_STALL_CANCEL:
-      vif.clearInterrupt();
+      vif.cancelStall();
       return;
     default:
       throw std::invalid_argument("Unsupported VIF FBRST operation.");
@@ -1328,6 +1328,11 @@ bool EEBus::writeScratchpadDMAC128(
   }
   writeVUQuadword(*vpu, quadwordIndex, value);
   return true;
+}
+
+bool EEBus::submitVIF1DMATag(const GIFQuadword &tag)
+{
+  return vif1Component->submitDMATag(tag);
 }
 
 EEDataWriteResult EEBus::writeGuestData128(

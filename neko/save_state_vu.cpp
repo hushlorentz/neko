@@ -1005,6 +1005,9 @@ void NekoSaveStateCodec::writeVIF(
   writer->writeFieldBool("path3Mask", vif.path3Masked());
   writer->writeFieldBool("markFlag", vif.markFlag);
   writer->writeFieldBool("interruptFlag", vif.interruptFlag);
+  writer->writeFieldU8("errorMask", vif.errorMask);
+  writer->writeFieldU8("errorFlags", vif.errorFlags);
+  writer->writeFieldBool("streamInterruptRequest", vif.streamInterruptRequest);
   writer->writeFieldU32("codeRegister", vif.codeRegister);
   writeVIFCommand(writer, vif.streamCommand);
   writer->writeFieldU32(
@@ -1047,10 +1050,11 @@ void NekoSaveStateCodec::writeVIF(
   {
     auto words = writer->scope("fifoWords");
     std::size_t index = 0;
-    for (std::uint32_t value : vif.fifoWords)
+    for (const auto &word : vif.fifoWords)
     {
       auto element = writer->element(index++);
-      writer->writeFieldU32("value", value);
+      writer->writeFieldU32("value", word.value);
+      writer->writeFieldU8("kind", static_cast<std::uint8_t>(word.kind));
     }
   }
 }
@@ -1104,6 +1108,11 @@ void NekoSaveStateCodec::readVIF(
   vif->unattachedPath3Mask = reader->readFieldBool("path3Mask");
   vif->markFlag = reader->readFieldBool("markFlag");
   vif->interruptFlag = reader->readFieldBool("interruptFlag");
+  vif->errorMask = reader->readFieldU8("errorMask");
+  vif->errorFlags = reader->readFieldU8("errorFlags");
+  vif->streamInterruptRequest = reader->readFieldBool("streamInterruptRequest");
+  require(vif->errorMask <= 7, "VIF error mask is invalid");
+  require(vif->errorFlags <= 2, "VIF error flags are invalid");
   vif->codeRegister = reader->readFieldU32("codeRegister");
   vif->streamCommand = readVIFCommand(reader);
   vif->streamPayloadWordCount =
@@ -1149,7 +1158,7 @@ void NekoSaveStateCodec::readVIF(
   require(
     fifoWordCount <= vif->fifoCapacity() * 4,
     "VIF FIFO size is invalid");
-  std::deque<std::uint32_t> fifoWords;
+  std::deque<VIF::FIFOWord> fifoWords;
   {
     auto words = reader->scope("fifoWords");
     for (std::uint32_t index = 0;
@@ -1157,10 +1166,40 @@ void NekoSaveStateCodec::readVIF(
          ++index)
     {
       auto element = reader->element(index);
-      fifoWords.push_back(reader->readFieldU32("value"));
+      VIF::FIFOWord word;
+      word.value = reader->readFieldU32("value");
+      word.kind = readEnum<VIF::FIFOInputKind>(
+        reader, static_cast<std::uint8_t>(VIF::FIFOInputKind::TagContinuation),
+        "kind");
+      require(word.kind == VIF::FIFOInputKind::Data || word.value == 0,
+        "VIF tag framing word is invalid");
+      fifoWords.push_back(word);
     }
   }
   vif->fifoWords.swap(fifoWords);
+  for (std::size_t index = 0; index < vif->fifoWords.size(); ++index)
+  {
+    const auto kind = vif->fifoWords[index].kind;
+    if (kind == VIF::FIFOInputKind::TagStart)
+    {
+      require(index + 3 < vif->fifoWords.size(),
+        "VIF queued tag is incomplete");
+      require(vif->fifoWords[index + 1].kind ==
+          VIF::FIFOInputKind::TagContinuation &&
+        vif->fifoWords[index + 2].kind == VIF::FIFOInputKind::Data &&
+        vif->fifoWords[index + 3].kind == VIF::FIFOInputKind::Data,
+        "VIF queued tag framing is invalid");
+    }
+    if (kind == VIF::FIFOInputKind::TagContinuation)
+    {
+      require((index == 0 ||
+          vif->fifoWords[index - 1].kind == VIF::FIFOInputKind::TagStart) &&
+        index + 2 < vif->fifoWords.size() &&
+        vif->fifoWords[index + 1].kind == VIF::FIFOInputKind::Data &&
+        vif->fifoWords[index + 2].kind == VIF::FIFOInputKind::Data,
+        "VIF queued tag continuation is invalid");
+    }
+  }
 
   require(vif->modeRegister <= 2, "VIF mode is invalid");
   require(
@@ -1168,6 +1207,21 @@ void NekoSaveStateCodec::readVIF(
     vif->streamPayloadWordsRemaining <=
       vif->streamPayloadWordCount,
     "VIF payload progress is invalid");
+  require(!vif->streamInterruptRequest ||
+      (vif->awaitingPayload() && vif->streamCommand.interrupt),
+    "VIF captured interrupt request is invalid");
+  require(vif->errorFlags != 1 || vif->awaitingPayload(),
+    "VIF tag error has no pending payload");
+  require(vif->errorFlags != 1 || (!vif->fifoWords.empty() &&
+      vif->fifoWords.front().kind == VIF::FIFOInputKind::TagContinuation),
+    "VIF tag error has no retained tag");
+  require(vif->errorFlags != 2 || !vif->awaitingPayload(),
+    "VIF code error has a pending payload");
+  require(vif->errorFlags != 2 ||
+      classifyVIFCommand(vif->codeRegister) == VIFCommandKind::Undefined,
+    "VIF code error has no undefined command");
+  require(vif->errorFlags == 0 || !vif->interruptFlag,
+    "VIF error and interrupt stalls overlap");
 }
 
 void NekoSaveStateCodec::commitVIF(
@@ -1190,6 +1244,9 @@ void NekoSaveStateCodec::commitVIF(
   destination->unattachedPath3Mask = source->unattachedPath3Mask;
   destination->markFlag = source->markFlag;
   destination->interruptFlag = source->interruptFlag;
+  destination->errorMask = source->errorMask;
+  destination->errorFlags = source->errorFlags;
+  destination->streamInterruptRequest = source->streamInterruptRequest;
   destination->codeRegister = source->codeRegister;
   destination->streamCommand = source->streamCommand;
   destination->streamPayloadWordCount =

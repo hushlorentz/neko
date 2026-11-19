@@ -321,6 +321,7 @@ class EEBus
     EEDataWriteResult writeGuestData128(
       std::uint32_t address,
       const EEQuadword &value);
+    bool submitVIF1DMATag(const GIFQuadword &tag);
     bool guestData128WriteReady(
       std::uint32_t address) const;
     void advanceGuestFIFOs();

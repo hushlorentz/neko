@@ -35,6 +35,11 @@ namespace
   constexpr std::uint64_t VIF_DIRECT_ALIGNMENT_WORDS = 4;
   constexpr std::uint32_t VIF_FIFO_REVERSE_DIRECTION = 1u << 23;
   constexpr std::uint32_t VIF_ERROR_MASK_FIELDS = 0x7;
+  constexpr std::uint8_t VIF_MASK_INTERRUPT = 1;
+  constexpr std::uint8_t VIF_MASK_TAG_ERROR = 2;
+  constexpr std::uint8_t VIF_MASK_CODE_ERROR = 4;
+  constexpr std::uint8_t VIF_TAG_ERROR = 1;
+  constexpr std::uint8_t VIF_CODE_ERROR = 2;
 
   bool ownsPayload(VIFCommandKind kind)
   {
@@ -78,13 +83,24 @@ void VIF::writeStatus(std::uint32_t value)
 
 std::uint32_t VIF::errorRegister() const
 {
-  return 0;
+  return errorMask;
 }
 
 bool VIF::writeErrorRegister(std::uint32_t value)
 {
-  // Masked interrupt/error execution is unsupported; only unmasked is admitted.
-  return (value & VIF_ERROR_MASK_FIELDS) == 0;
+  errorMask = value & VIF_ERROR_MASK_FIELDS;
+  return true;
+}
+
+std::uint32_t VIF::errorStatus() const
+{
+  return static_cast<std::uint32_t>(errorFlags) << 12;
+}
+
+void VIF::cancelStall()
+{
+  clearInterrupt();
+  errorFlags = 0;
 }
 
 void VIF::reset()
@@ -96,10 +112,13 @@ void VIF::reset()
       "VIF reset during a GIF PATH2 transfer is unsupported.");
   }
 
-  // Runtime reset preserves programming registers and committed VU writes.
+  // Runtime reset preserves transfer programming and committed VU writes.
   dbf = false;
   markFlag = false;
   interruptFlag = false;
+  errorMask = 0;
+  errorFlags = 0;
+  streamInterruptRequest = false;
   streamCommand = {};
   streamPayloadWordCount = 0;
   streamPayloadWordsRemaining = 0;
@@ -213,7 +232,22 @@ VIFCommand VIF::processCode(std::uint32_t code)
       "Cannot process a VIFcode while a payload is in progress.");
   }
 
-  const VIFCommand command = decodeVIFCommand(code, type);
+  if (errorFlags != 0)
+  {
+    throw std::runtime_error(
+      "VIF command processing is stalled by an error.");
+  }
+  const auto decoded = decodeVIFCommandEncoding(code, type);
+  if (decoded.kind == VIFCommandKind::Undefined)
+  {
+    if (interruptFlag)
+    {
+      throw std::runtime_error(
+        "VIF command processing is stalled by an interrupt.");
+    }
+    return processUndefinedCode(code);
+  }
+  const VIFCommand command = decoded;
   if (interruptFlag &&
       command.kind != VIFCommandKind::MARK)
   {
@@ -288,11 +322,27 @@ VIFCommand VIF::processCode(std::uint32_t code)
         "VIF command execution requires its owning subsystem.");
   }
 
-  if (command.interrupt)
+  if (command.interrupt && (errorMask & VIF_MASK_INTERRUPT) == 0)
   {
     interruptFlag = true;
   }
   return command;
+}
+
+VIFCommand VIF::processUndefinedCode(std::uint32_t code)
+{
+  // CODE retains the original word; the effective NOP retains only its i bit.
+  const VIFCommand nop = decodeVIFCommand(code & 0x80000000u, type);
+  codeRegister = code;
+  if ((errorMask & VIF_MASK_CODE_ERROR) == 0)
+  {
+    errorFlags = VIF_CODE_ERROR;
+  }
+  else if (nop.interrupt && (errorMask & VIF_MASK_INTERRUPT) == 0)
+  {
+    interruptFlag = true;
+  }
+  return nop;
 }
 
 void VIF::startMicroProgram(const VIFCommand &command)
@@ -355,6 +405,11 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 {
   VIFStreamWord streamWord;
   streamWord.raw = word;
+  if (errorFlags != 0)
+  {
+    streamWord.stalled = true;
+    return streamWord;
+  }
 
   if (awaitingPayload())
   {
@@ -379,7 +434,24 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
     return streamWord;
   }
 
-  const VIFCommand command = decodeVIFCommand(word, type);
+  const auto decoded = decodeVIFCommandEncoding(word, type);
+  if (decoded.kind == VIFCommandKind::Undefined)
+  {
+    if (interruptFlag)
+    {
+      streamWord.stalled = true;
+      return streamWord;
+    }
+    streamCommand = processUndefinedCode(word);
+    streamPayloadWordCount = 0;
+    streamPayloadWordsRemaining = 0;
+    streamInterruptRequest = false;
+    ++streamWordsIngested;
+    streamWord.command = streamCommand;
+    streamWord.packetComplete = true;
+    return streamWord;
+  }
+  const VIFCommand command = decoded;
   streamWord.kind = VIFStreamWordKind::Command;
   streamWord.command = command;
   if ((interruptFlag &&
@@ -404,6 +476,9 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
   streamCommand = command;
   streamPayloadWordCount = commandPayloadWordCount;
   streamPayloadWordsRemaining = streamPayloadWordCount;
+  streamInterruptRequest =
+    ownsPayload(command.kind) && command.interrupt &&
+    (errorMask & VIF_MASK_INTERRUPT) == 0;
   ++streamWordsIngested;
 
   streamWord.command = streamCommand;
@@ -426,15 +501,35 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
 bool VIF::submitQuadword(const GIFQuadword &quadword)
 {
+  std::array<FIFOWord, 4> words;
+  for (std::size_t index = 0; index < words.size(); ++index)
+  {
+    words[index].value = quadword[index];
+  }
+  return submitWords(words);
+}
+
+bool VIF::submitDMATag(const GIFQuadword &tag)
+{
+  return submitWords({{
+    {0, FIFOInputKind::TagStart},
+    {0, FIFOInputKind::TagContinuation},
+    {tag[2], FIFOInputKind::Data},
+    {tag[3], FIFOInputKind::Data}
+  }});
+}
+
+bool VIF::submitWords(const std::array<FIFOWord, 4> &words)
+{
   const std::size_t capacityWords = fifoCapacity() * 4;
-  if (fifoWords.size() > capacityWords - quadword.size())
+  if (fifoWords.size() > capacityWords - words.size())
   {
     return false;
   }
   fifoWords.insert(
     fifoWords.end(),
-    quadword.begin(),
-    quadword.end());
+    words.begin(),
+    words.end());
   return true;
 }
 
@@ -442,7 +537,29 @@ void VIF::advanceFIFO()
 {
   while (!fifoWords.empty())
   {
-    const VIFStreamWord result = ingestWord(fifoWords.front());
+    if (errorFlags != 0)
+    {
+      return;
+    }
+    const FIFOWord word = fifoWords.front();
+    if (word.kind != FIFOInputKind::Data)
+    {
+      // Tag control words occupy alignment slots, not payload words.
+      if (interruptFlag)
+      {
+        return;
+      }
+      if (word.kind == FIFOInputKind::TagStart &&
+          awaitingPayload() &&
+          (errorMask & VIF_MASK_TAG_ERROR) == 0)
+      {
+        errorFlags = VIF_TAG_ERROR;
+      }
+      ++streamWordsIngested;
+      fifoWords.pop_front();
+      continue;
+    }
+    const VIFStreamWord result = ingestWord(word.value);
     if (result.stalled)
     {
       return;
@@ -625,10 +742,11 @@ bool VIF::commandReady(const VIFCommand &command) const
 
 void VIF::completePayloadCommand()
 {
-  if (streamCommand.interrupt)
+  if (streamInterruptRequest)
   {
     interruptFlag = true;
   }
+  streamInterruptRequest = false;
 }
 
 void VIF::executeUNPACK()
