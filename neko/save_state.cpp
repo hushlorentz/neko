@@ -500,6 +500,7 @@ void NekoSaveStateCodec::writeSystem(
     writer->writeFieldU16("ba0Status06", ba0State.status06);
     writer->writeFieldU8("ba0DeviceRegisterB1", ba0State.deviceRegisterB1);
     writer->writeFieldU8("ba0DeviceRegister33", ba0State.deviceRegister33);
+    writer->writeFieldU8("ba0DeviceRegister32", ba0State.deviceRegister32);
   }
   {
     auto component = writer->scope("vu0");
@@ -742,6 +743,7 @@ void NekoSaveStateCodec::readSystem(
     ba0State.status06 = reader->readFieldU16("ba0Status06");
     ba0State.deviceRegisterB1 = reader->readFieldU8("ba0DeviceRegisterB1");
     ba0State.deviceRegister33 = reader->readFieldU8("ba0DeviceRegister33");
+    ba0State.deviceRegister32 = reader->readFieldU8("ba0DeviceRegister32");
     reader->requireField(
       EEBA0Registers::validState(ba0State),
       "EE BA0 selector/status/device state is unsupported");

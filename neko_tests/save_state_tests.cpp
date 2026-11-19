@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 132 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model]")
+TEST_CASE("Version 133 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model][ba0-write32]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,21 +662,26 @@ TEST_CASE("Version 132 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 132);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 133);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 131;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 132;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 709 + appendedSpuStateSize);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize);
   const SaveStateMutation fields(state);
   REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
   REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
   const auto snapshot = inspectSaveState(state);
+  const auto *ba0Device32 = snapshot.find("system.eeBus.ba0DeviceRegister32");
+  REQUIRE(ba0Device32 != nullptr);
+  REQUIRE(ba0Device32->kind == SaveStateFieldKind::U8);
+  REQUIRE(ba0Device32->size == 1);
+  REQUIRE(ba0Device32->scalarValue == 0);
   const auto *vif0Mask = snapshot.find("system.vif0.errorMask");
   const auto *vif1Mask = snapshot.find("system.vif1.errorMask");
   REQUIRE(vif0Mask != nullptr);
@@ -980,6 +985,7 @@ TEST_CASE("Version 132 save-state layout is byte-stable",
     previousVersion.begin() + vif1Mask->containerOffset + 3);
   previousVersion.erase(previousVersion.begin() + vif0Mask->containerOffset,
     previousVersion.begin() + vif0Mask->containerOffset + 3);
+  previousVersion.erase(previousVersion.begin() + ba0Device32->containerOffset);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 107;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -991,14 +997,15 @@ TEST_CASE("Version 132 save-state layout is byte-stable",
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
-      appendedSpuStateSize, vif0Mask, vif1Mask](std::size_t offset)
+      appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
       (offset >= voiceStateOffset + appendedSpuStateSize ? appendedSpuStateSize : 0) -
       (offset >= configSession->containerOffset + 7 ? 7 : 0) -
       (offset >= vif0Mask->containerOffset + 3 ? 3 : 0) -
-      (offset >= vif1Mask->containerOffset + 3 ? 3 : 0);
+      (offset >= vif1Mask->containerOffset + 3 ? 3 : 0) -
+      (offset > ba0Device32->containerOffset ? 1 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(
@@ -1297,6 +1304,7 @@ TEST_CASE("Version 132 save-state layout is byte-stable",
   REQUIRE(ba0Device33->size == 1);
   REQUIRE(ba0Device33->scalarValue == 0);
   REQUIRE(ba0Device33->containerOffset == ba0DeviceB1->containerOffset + 1);
+  REQUIRE(ba0Device32->containerOffset == ba0Device33->containerOffset + 1);
   const auto *dmaControl = snapshot.find("system.gifDMAC.controllerControlRegister");
   const auto *dmaHold = snapshot.find("system.gifDMAC.controllerHoldControlRegister");
   const auto *dmaStatus = snapshot.find("system.gifDMAC.controllerStatusRegister");

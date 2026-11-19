@@ -923,6 +923,21 @@ execution with or without progress.
 
 Choose the maintained capture by its evidence requirement:
 
+Use risk-based BIOS gates rather than full cold/restored conformance after
+every small hardware change. Routine low-risk changes retain focused/authored
+tests, a fresh post-commit cold scout and bounded traced/plain replay evidence.
+Require full conformance for persistence/save-state/schema, timing/ordering,
+tracing/determinism or cross-cutting changes, at milestone boundaries, and for
+suspicious or unexplained scout results or disagreements. Record the selected
+scope and rationale before launch; this policy does not change helper defaults,
+authorization, comparison strength or finalization requirements.
+
+Confirm direct retirement of the former fault as well as the next origin.
+The automatic scout replay may retain only the latter when the failures are
+far apart. Inspect actual coverage; if necessary select the smallest supported
+bounded capture or a full gate. Do not infer direct evidence from cycle advance
+or promote scout checkpoints/receipts to cold/restore conformance.
+
 | Workflow | Hash demand and bounds |
 | --- | --- |
 | Cold scout (`--mode scout`) | Failure-only observation omits full component hashes. Retain the two recent states plus necessary launch-time pins; inspect pruning receipts. |

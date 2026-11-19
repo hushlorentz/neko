@@ -159,6 +159,9 @@ bool EEBA0Registers::submitDeviceWrite() noexcept
   }
   switch (target)
   {
+    case 0x32:
+      registers.deviceRegister32 = static_cast<std::uint8_t>(value);
+      break;
     case 0x33:
       registers.deviceRegister33 = static_cast<std::uint8_t>(value);
       break;
@@ -188,7 +191,8 @@ bool EEBA0Registers::validState(const EEBA0RegistersState &state) noexcept
   if (!state.selectorValid)
   {
     return state.selector == 0 && state.status06 == 0 &&
-      state.deviceRegisterB1 == 0 && state.deviceRegister33 == 0;
+      state.deviceRegisterB1 == 0 && state.deviceRegister33 == 0 &&
+      state.deviceRegister32 == 0;
   }
   return state.control02 != 0 &&
     (state.status06 == 0 || state.status06 == 2);

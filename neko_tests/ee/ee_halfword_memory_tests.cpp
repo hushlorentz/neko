@@ -161,7 +161,7 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read][ba0-read7f][ba0-write]")
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read][ba0-read7f][ba0-write][ba0-write32]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
@@ -205,6 +205,12 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
     physical = 0x1a000000;
     selected = 0x82;
     selector = 0xb1;
+  }
+  SECTION("device register32 write command")
+  {
+    physical = 0x1a000000;
+    selected = 0x82;
+    selector = 0x32;
   }
   SECTION("first staging halfword")
   {

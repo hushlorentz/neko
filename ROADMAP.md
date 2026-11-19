@@ -4180,7 +4180,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Verify fresh unchanged-input BIOS progress after the user-owned commit,
       with bounded same-build conformance and attribution of the next origin.
 
-### Additional CD/DVD Command and Configuration Scope
+### CD/DVD Model-Name Read Dependency
 
 - [x] Research the originating SCMD `0x17` through local manuals, retained
       guest arguments/consumer and authorized secondary evidence; identify
@@ -4192,8 +4192,24 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored cold/restored traced/plain canonical conformance, resolve
       due validation and final independent review before the user-owned
       implementation commit.
-- [ ] Verify fresh unchanged-input BIOS progress after user commits with bounded
+- [x] Verify fresh unchanged-input BIOS progress after user commits with bounded
       same-build conformance and attribution of the next originating dependency.
+
+### EE BA0 Device-Register 0x32 Write Dependency
+
+- [x] Research the originating target `0x32` write of `00` through BA0 command
+      `0x82`/control `0x42`, local manuals and its guest caller; select the
+      existing-owner boundary and any policy approval before implementation.
+- [x] Freeze and approve the bounded write-only byte policy, including reset,
+      selector/completion lifecycle and excluded encoder effects/readback.
+- [x] Implement the approved policy with focused and authored restored/trace
+      conformance, versioned persistence, due optimized/ASan gates and independent
+      review before the user-owned implementation commit.
+- [ ] Verify fresh unchanged-input BIOS progress after user commits, including
+      the required persistence-related cold/restored conformance gate.
+
+### Additional CD/DVD Command and Configuration Scope
+
 - [ ] Expand command dependencies required by the selected shell profile into
       independent transport and command-family blocks; select parameters,
       results, busy/error behavior, IRQs, cancellation and timing.

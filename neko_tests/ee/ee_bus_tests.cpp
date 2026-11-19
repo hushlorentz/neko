@@ -4377,12 +4377,15 @@ TEST_CASE("EE BA0 B1 writes retain byte data without changing staging",
   REQUIRE(system.eeStateHash() == resetHash);
 }
 
-TEST_CASE("EE BA0 malformed B1 writes preserve the complete pending owner",
-  "[ee][bus][ba0-write]")
+TEST_CASE("EE BA0 malformed device writes preserve the complete pending owner",
+  "[ee][bus][ba0-write][ba0-write32]")
 {
+  std::uint16_t device = 0xb1;
+  SECTION("B1") {}
+  SECTION("register32") { device = 0x32; }
   NekoSystem system;
   auto &bus = system.eeBus();
-  REQUIRE(bus.writeData16(0x1a000010, 0xb1));
+  REQUIRE(bus.writeData16(0x1a000010, device));
   REQUIRE(bus.writeData16(0x1a000012, 0xa5));
   const auto unselectedHash = system.eeStateHash();
   REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x82));
@@ -4399,7 +4402,7 @@ TEST_CASE("EE BA0 malformed B1 writes preserve the complete pending owner",
       REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x82));
       REQUIRE(system.eeStateHash() == hash);
     }
-    REQUIRE(bus.writeData16(0x1a000010, 0xb1));
+    REQUIRE(bus.writeData16(0x1a000010, device));
     for (const std::uint16_t data : {0x100u, 0x1a5u, 0xff00u, 0xffffu})
     {
       REQUIRE(bus.writeData16(0x1a000012, data));
@@ -4436,7 +4439,8 @@ TEST_CASE("EE BA0 malformed B1 writes preserve the complete pending owner",
     REQUIRE(system.iopBus().write16(0x1a000000, 0x82).status == IOPBusStatus::Unmapped);
     REQUIRE(system.eeStateHash() == hash);
     REQUIRE(SaveStateMutation(system.saveState()).readByte(
-      "system.eeBus.ba0DeviceRegisterB1") == 0xa5);
+      device == 0xb1 ? "system.eeBus.ba0DeviceRegisterB1"
+                     : "system.eeBus.ba0DeviceRegister32") == 0xa5);
     std::uint16_t status = 0xffff;
     REQUIRE(bus.readData16(0x1a000006, &status));
     REQUIRE(status == (acknowledged == 0 ? 2 : 0));
@@ -4526,26 +4530,66 @@ TEST_CASE("EE BA0 B1 write phases have canonical transactional persistence",
   }
 }
 
-TEST_CASE("EE BA0 register-33 writes retain an independent bounded byte",
-  "[ee][bus][ba0-write]")
+TEST_CASE("EE BA0 register-32 accepts every byte without a prior selector",
+  "[ee][bus][ba0-write][ba0-write32]")
 {
+  EEBA0Registers owner;
+  REQUIRE(owner.writeHalfword(0x02, 0x42));
+  REQUIRE(owner.writeHalfword(0x10, 0x32));
+  for (std::uint16_t byte = 0; byte <= 0xff; ++byte)
+  {
+    CAPTURE(byte);
+    REQUIRE(owner.writeHalfword(0x12, byte));
+    REQUIRE(owner.writeHalfword(0x00, 0x82));
+    REQUIRE(owner.state().deviceRegister32 == byte);
+    REQUIRE(owner.state().selectorValid);
+    REQUIRE(owner.state().selector == 0x32);
+    std::uint16_t status = 0xffff;
+    REQUIRE(owner.readHalfword(0x06, status));
+    REQUIRE(status == 2);
+    REQUIRE(owner.readHalfword(0x06, status));
+    REQUIRE(status == 2);
+  }
+}
+
+TEST_CASE("EE BA0 selected device writes retain independent bounded bytes",
+  "[ee][bus][ba0-write][ba0-write32]")
+{
+  std::uint16_t device = 0x33;
+  SECTION("register33") {}
+  SECTION("register32") { device = 0x32; }
+  const auto *field = device == 0x33
+    ? "system.eeBus.ba0DeviceRegister33" : "system.eeBus.ba0DeviceRegister32";
+  const auto *otherField = device == 0x33
+    ? "system.eeBus.ba0DeviceRegister32" : "system.eeBus.ba0DeviceRegister33";
   NekoSystem system;
   auto &bus = system.eeBus();
   const auto resetHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  REQUIRE(bus.writeData16(0x1a000004, 0xcafe));
+  REQUIRE(bus.writeData16(0x1a000008, 0x1357));
+  for (std::uint32_t index = 2; index < 8; ++index)
+  {
+    REQUIRE(bus.writeData16(0x1a000010 + index * 2, 0x8000 + index));
+  }
   REQUIRE(bus.writeData16(0x1a000002, 0x42));
   REQUIRE(bus.writeData16(0x1a000010, 0xb1));
   REQUIRE(bus.writeData16(0x1a000012, 0xa5));
   REQUIRE(bus.writeData16(0x1a000000, 0x82));
-  for (const std::uint16_t byte : {0u, 2u, 0x80u, 0xffu})
+  REQUIRE(bus.writeData16(0x1a000010, device == 0x33 ? 0x32 : 0x33));
+  REQUIRE(bus.writeData16(0x1a000012, 0x5a));
+  REQUIRE(bus.writeData16(0x1a000000, 0x82));
+  for (const std::uint16_t byte : {0u, 1u, 0x80u, 0xffu})
   {
     CAPTURE(byte);
-    REQUIRE(bus.writeData16(0x1a000010, 0x33));
+    REQUIRE(bus.writeData16(0x1a000010, device));
     REQUIRE(bus.writeData16(0x1a000012, byte));
     SaveStateMutation expected(system.saveState());
     REQUIRE(bus.writeData16(0x1a000000, 0x82));
-    expected.writeScalar("system.eeBus.ba0DeviceRegister33", byte);
+    expected.writeScalar(field, byte);
     expected.writeScalar("system.eeBus.ba0SelectorValid", 1);
-    expected.writeScalar("system.eeBus.ba0Selector", 0x33);
+    expected.writeScalar("system.eeBus.ba0Selector", device);
     expected.writeScalar("system.eeBus.ba0Status06", 2);
     expected.refreshChecksum();
     REQUIRE(system.saveState() == expected.bytes());
@@ -4555,15 +4599,15 @@ TEST_CASE("EE BA0 register-33 writes retain an independent bounded byte",
     REQUIRE(bus.readData16(0x1a000006, &status));
     REQUIRE(status == 2);
     REQUIRE(system.eeStateHash() == completedHash);
-    for (const std::uint16_t target : {0x30u, 0x31u, 0x32u, 0x34u, 0x38u,
-           0x63u, 0x133u, 0x3300u})
+    for (const std::uint16_t target : {0x30u, 0x31u, 0x34u, 0x38u,
+           0x63u, 0x132u, 0x133u, 0x3200u, 0x3300u})
     {
       REQUIRE(bus.writeData16(0x1a000010, target));
       const auto hash = system.eeStateHash();
       REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x82));
       REQUIRE(system.eeStateHash() == hash);
     }
-    REQUIRE(bus.writeData16(0x1a000010, 0x33));
+    REQUIRE(bus.writeData16(0x1a000010, device));
     for (const std::uint16_t data : {0x100u, 0x102u, 0xffffu})
     {
       REQUIRE(bus.writeData16(0x1a000012, data));
@@ -4578,25 +4622,34 @@ TEST_CASE("EE BA0 register-33 writes retain an independent bounded byte",
     REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x82));
     REQUIRE(system.eeStateHash() == hash);
     const SaveStateMutation retained(system.saveState());
-    REQUIRE(retained.readByte("system.eeBus.ba0DeviceRegister33") == byte);
+    REQUIRE(retained.readByte(field) == byte);
+    REQUIRE(retained.readByte(otherField) == 0x5a);
     REQUIRE(retained.readByte("system.eeBus.ba0DeviceRegisterB1") == 0xa5);
     REQUIRE(bus.writeData16(0x1a000002, 0x42));
   }
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
   system.reset();
   REQUIRE(system.eeStateHash() == resetHash);
 }
 
-TEST_CASE("EE BA0 register-33 state restores transactionally",
-  "[ee][bus][save-state][ba0-write]")
+TEST_CASE("EE BA0 selected device bytes restore transactionally",
+  "[ee][bus][save-state][ba0-write][ba0-write32]")
 {
   unsigned phase = 0;
+  std::uint16_t device = 0x33;
   SECTION("pending completion") {}
   SECTION("acknowledged") { phase = 1; }
   SECTION("reselected and overwritten staging") { phase = 2; }
+  SECTION("register32 pending completion") { device = 0x32; }
+  SECTION("register32 acknowledged") { device = 0x32; phase = 1; }
+  SECTION("register32 reselected and overwritten staging") { device = 0x32; phase = 2; }
+  const auto *field = device == 0x33
+    ? "system.eeBus.ba0DeviceRegister33" : "system.eeBus.ba0DeviceRegister32";
   NekoSystem original;
   auto &bus = original.eeBus();
   REQUIRE(bus.writeData16(0x1a000002, 0x42));
-  REQUIRE(bus.writeData16(0x1a000010, 0x33));
+  REQUIRE(bus.writeData16(0x1a000010, device));
   REQUIRE(bus.writeData16(0x1a000012, 2));
   REQUIRE(bus.writeData16(0x1a000000, 0x82));
   if (phase > 0)
@@ -4619,7 +4672,7 @@ TEST_CASE("EE BA0 register-33 state restores transactionally",
   REQUIRE(restored.saveState() == saved);
   REQUIRE(restored.eeStateHash() == original.eeStateHash());
   SaveStateMutation changed(saved);
-  changed.writeScalar("system.eeBus.ba0DeviceRegister33", 0xff);
+  changed.writeScalar(field, 0xff);
   changed.refreshChecksum();
   restored.loadState(changed.bytes());
   REQUIRE(restored.saveState() == changed.bytes());
@@ -4642,7 +4695,7 @@ TEST_CASE("EE BA0 register-33 state restores transactionally",
     }
     else
     {
-      invalid.writeScalar("container.version", 64);
+      invalid.writeScalar("container.version", 132);
     }
     invalid.refreshChecksum();
     REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
@@ -4651,12 +4704,11 @@ TEST_CASE("EE BA0 register-33 state restores transactionally",
   }
   restored.loadState(saved);
   REQUIRE(restored.eeBus().writeData16(0x1a000000, phase == 2 ? 0x81 : 0x82));
-  REQUIRE(SaveStateMutation(restored.saveState()).readByte(
-    "system.eeBus.ba0DeviceRegister33") == 2);
+  REQUIRE(SaveStateMutation(restored.saveState()).readByte(field) == 2);
 }
 
 TEST_CASE("EE BA0 guest device writes preserve restored traced continuation",
-  "[ee][bus][guest][trace][save-state][ba0-write]")
+  "[ee][bus][guest][trace][save-state][ba0-write][ba0-write32]")
 {
   unsigned checkpoint = 2;
   std::uint16_t target = 0xb1;
@@ -4668,8 +4720,14 @@ TEST_CASE("EE BA0 guest device writes preserve restored traced continuation",
   SECTION("register33 after write command") { target = 0x33; checkpoint = 3; }
   SECTION("register33 after acknowledgement") { target = 0x33; checkpoint = 5; }
   SECTION("register33 after reselecting") { target = 0x33; checkpoint = 8; }
+  SECTION("register32 before write command") { target = 0x32; }
+  SECTION("register32 after write command") { target = 0x32; checkpoint = 3; }
+  SECTION("register32 after acknowledgement") { target = 0x32; checkpoint = 5; }
+  SECTION("register32 after reselecting") { target = 0x32; checkpoint = 8; }
   const auto *deviceField = target == 0xb1
-    ? "system.eeBus.ba0DeviceRegisterB1" : "system.eeBus.ba0DeviceRegister33";
+    ? "system.eeBus.ba0DeviceRegisterB1"
+    : target == 0x33 ? "system.eeBus.ba0DeviceRegister33"
+                     : "system.eeBus.ba0DeviceRegister32";
   const std::array<std::uint32_t, 12> program = {
     0xa4680010, 0xa4690012, 0xa4620000, 0x94640006,
     0xa4650006, 0x94660006, 0xa46a0010, 0xa46b0000,
@@ -4678,28 +4736,35 @@ TEST_CASE("EE BA0 guest device writes preserve restored traced continuation",
   const std::array<std::uint16_t, 12> values = {
     target, 0xa5, 0x82, 2, 3, 0, 0x7e, 0x81, 0x43, 0x81, 0x1c, 0x82
   };
-  NekoSystem original;
-  for (std::size_t index = 0; index < program.size(); ++index)
+  const auto prepare = [&](NekoSystem &system)
   {
-    original.eeBus().write32(static_cast<std::uint32_t>(index * 4), program[index]);
-  }
-  REQUIRE(original.eeBus().writeData16(0x1a000002, 0x42));
-  REQUIRE(original.eeBus().writeData16(0x1a000010, 0x7f));
-  REQUIRE(original.eeBus().writeData16(0x1a000000, 0x81));
-  REQUIRE(original.eeBus().writeData16(0x1a000006, 3));
-  auto &core = original.eeCore();
-  core.setCOP0Register(EECOP0Register::Status, 0);
-  for (const auto &entry : std::array<std::array<std::uint32_t, 2>, 9>{{
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      system.eeBus().write32(static_cast<std::uint32_t>(index * 4), program[index]);
+    }
+    REQUIRE(system.eeBus().writeData16(0x1a000002, 0x42));
+    REQUIRE(system.eeBus().writeData16(0x1a000010, 0x7f));
+    REQUIRE(system.eeBus().writeData16(0x1a000000, 0x81));
+    REQUIRE(system.eeBus().writeData16(0x1a000006, 3));
+    auto &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    for (const auto &entry : std::array<std::array<std::uint32_t, 2>, 9>{{
       {{2, 0x82}}, {{3, 0xba000000}}, {{5, 3}}, {{8, target}}, {{9, 0xa5}},
       {{10, 0x7e}}, {{11, 0x81}}, {{12, 0x43}}, {{4, 0}}
     }})
-  {
-    core.setGeneralRegister(entry[0], {entry[1], 0});
-  }
-  core.startExecution(EEMemoryMap::KSEG1_BASE);
+    {
+      core.setGeneralRegister(entry[0], {entry[1], 0});
+    }
+    core.startExecution(EEMemoryMap::KSEG1_BASE);
+  };
+  NekoSystem original;
+  NekoSystem originalPlain;
+  prepare(original);
+  prepare(originalPlain);
   for (unsigned index = 0; index < checkpoint; ++index)
   {
     REQUIRE(original.stepEEInstruction(16).pendingException == EEException::None);
+    REQUIRE(originalPlain.stepEEInstruction(16).pendingException == EEException::None);
   }
   const auto saved = original.saveState();
   NekoSystem restored;
@@ -4708,7 +4773,7 @@ TEST_CASE("EE BA0 guest device writes preserve restored traced continuation",
   plain.loadState(saved);
   original.startTrace(100);
   restored.startTrace(100);
-  for (auto *machine : {&original, &restored, &plain})
+  for (auto *machine : {&original, &originalPlain, &restored, &plain})
   {
     for (unsigned index = checkpoint; index < program.size(); ++index)
     {
@@ -4753,9 +4818,11 @@ TEST_CASE("EE BA0 guest device writes preserve restored traced continuation",
   REQUIRE(original.traceHash() == restored.traceHash());
   REQUIRE(original.eeStateHash() == restored.eeStateHash());
   REQUIRE(original.eeStateHash() == plain.eeStateHash());
+  REQUIRE(original.eeStateHash() == originalPlain.eeStateHash());
   const auto ending = original.saveState();
   REQUIRE(restored.saveState() == ending);
   REQUIRE(plain.saveState() == ending);
+  REQUIRE(originalPlain.saveState() == ending);
 }
 
 TEST_CASE("EE BA0 control selection retains only supported transfer modes",
