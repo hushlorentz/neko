@@ -58,6 +58,7 @@ class CDVDController final
     enum class Transport : std::uint8_t { Normal, Subcommand };
     enum class ConfigSession : std::uint8_t { Closed, Open };
     enum class ConfigRequest : std::uint8_t { None, OpenV1, ReadV1, Close };
+    enum class ModelRequest : std::uint8_t { None, FirstHalfV1, SecondHalfV1 };
     using SubcommandResult = std::array<std::uint8_t, 16>;
     struct Observation
     {
@@ -98,6 +99,9 @@ class CDVDController final
     void captureConfigRequest(std::uint8_t opcode) noexcept;
     void completeConfigRequest() noexcept;
     bool isValidConfigState() const noexcept;
+    bool isValidModelState() const noexcept;
+    static std::uint8_t modelProfileId() noexcept;
+    static SubcommandResult modelResult(ModelRequest request);
     static SubcommandResult configPacket(std::uint8_t block) noexcept;
     static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
     SubcommandResult subcommandResult() const;
@@ -132,6 +136,7 @@ class CDVDController final
     std::uint8_t configNextBlock = 0;
     ConfigRequest configRequest = ConfigRequest::None;
     std::uint8_t configRequestBlock = 0;
+    ModelRequest modelRequest = ModelRequest::None;
 };
 
 #endif

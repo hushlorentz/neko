@@ -10,6 +10,15 @@ namespace
 {
   constexpr std::array<std::uint8_t, 4> bootRomName = {{2, 0, 0x41, 0x43}};
   constexpr std::array<std::uint8_t, 3> openConfigRequest = {{0, 1, 2}};
+  struct ModelProfile
+  {
+    std::uint8_t id;
+    std::array<std::uint8_t, 16> bytes;
+  };
+  // Approved synthetic diagnostic identity, not measured console NVM.
+  constexpr ModelProfile modelProfile = {
+    1, {{'S', 'C', 'P', 'H', '-', '7', '0', '0', '1', '2'}}
+  };
 
   bool isLeapYear(unsigned year) noexcept
   {
@@ -119,6 +128,11 @@ CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
     return CDVDAccessStatus::Unsupported;
   }
   captureConfigRequest(opcode);
+  if (opcode == 0x17)
+  {
+    modelRequest = subcommandParameters[0] == 0 ?
+      ModelRequest::FirstHalfV1 : ModelRequest::SecondHalfV1;
+  }
   lastSubcommand = opcode;
   clearSubcommandParameters();
   subcommandPhase = SubcommandPhase::Pending;
@@ -135,6 +149,9 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
       return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
     case 0x24:
       return subcommandParameterCount == 1 && subcommandParameters[0] == 1;
+    case 0x17:
+      return subcommandParameterCount == 1 &&
+        (subcommandParameters[0] == 0 || subcommandParameters[0] == 8);
     case 8:
     case 0x15:
     case 0x22:
@@ -164,6 +181,8 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 4;
     case 8:
       return 8;
+    case 0x17:
+      return 9;
     case 0x15:
     case 0x1a:
     case 0x24:
@@ -316,6 +335,40 @@ bool CDVDController::isValidConfigState() const noexcept
   }
 }
 
+std::uint8_t CDVDController::modelProfileId() noexcept
+{
+  return modelProfile.id;
+}
+
+bool CDVDController::isValidModelState() const noexcept
+{
+  if (lastSubcommand == 0x17 && subcommandPhase != SubcommandPhase::Idle)
+  {
+    return modelRequest == ModelRequest::FirstHalfV1 ||
+      modelRequest == ModelRequest::SecondHalfV1;
+  }
+  return modelRequest == ModelRequest::None;
+}
+
+CDVDController::SubcommandResult CDVDController::modelResult(ModelRequest request)
+{
+  std::size_t offset;
+  switch (request)
+  {
+    case ModelRequest::FirstHalfV1:
+      offset = 0;
+      break;
+    case ModelRequest::SecondHalfV1:
+      offset = 8;
+      break;
+    default:
+      throw std::logic_error("CD/DVD model reply has no captured request.");
+  }
+  SubcommandResult snapshot = {};
+  std::copy_n(modelProfile.bytes.begin() + offset, 8, snapshot.begin() + 1);
+  return snapshot;
+}
+
 CDVDController::SubcommandResult CDVDController::regionResult() noexcept
 {
   // Approved compatibility profile, not measured SCPH-70012 NVM contents.
@@ -332,6 +385,8 @@ CDVDController::SubcommandResult CDVDController::subcommandResult() const
       return clockResult();
     case 0x15:
       return forbidDVDPResult();
+    case 0x17:
+      return modelResult(modelRequest);
     case 0x1a:
       return bootCertifyResult();
     case 0x22:
@@ -361,6 +416,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return isValidClockResult(snapshot);
     case 0x15:
       return snapshot == forbidDVDPResult();
+    case 0x17:
+      return isValidModelState() && snapshot == modelResult(modelRequest);
     case 0x1a:
       return snapshot == bootCertifyResult();
     case 0x22:
@@ -447,6 +504,7 @@ std::uint8_t CDVDController::consumeResult() noexcept
   if (resultCursor == subcommandResultSize(lastSubcommand))
   {
     clearResult();
+    modelRequest = ModelRequest::None;
     subcommandPhase = SubcommandPhase::Idle;
   }
   return byte;
@@ -519,6 +577,7 @@ void CDVDController::reset() noexcept
   configNextBlock = 0;
   configRequest = ConfigRequest::None;
   configRequestBlock = 0;
+  modelRequest = ModelRequest::None;
 }
 
 void CDVDController::enableObservations(NekoObservationOrder *order) noexcept

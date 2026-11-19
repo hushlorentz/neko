@@ -32,6 +32,7 @@ struct CDVDControllerTestAccess
       actual.configNextBlock == expected.configNextBlock &&
       actual.configRequest == expected.configRequest &&
       actual.configRequestBlock == expected.configRequestBlock &&
+      actual.modelRequest == expected.modelRequest &&
       actual.subcommandParameters == expected.subcommandParameters &&
       actual.subcommandParameterCount == expected.subcommandParameterCount;
   }
@@ -361,6 +362,128 @@ TEST_CASE("CDVD wake-up query publishes ten opaque bytes and drains only on the 
   REQUIRE(controller.completeSubcommand());
   const std::array<std::uint8_t, 8> oneSecond = {{0, 1, 0, 0, 0, 1, 1, 0}};
   REQUIRE(drain(controller) == oneSecond);
+}
+
+TEST_CASE("CDVD model reads capture either half and drain nine immutable bytes",
+  "[iop][cdvd-owner][cdvd-model]")
+{
+  const std::array<std::array<std::uint8_t, 16>, 2> replies = {{
+    {{0, 'S', 'C', 'P', 'H', '-', '7', '0', '0'}},
+    {{0, '1', '2'}}
+  }};
+  CDVDController controller;
+  for (const unsigned half : {1u, 0u, 1u, 1u})
+  {
+    CAPTURE(half);
+    accept(controller, 4, 0);
+    accept(controller, 0x17, static_cast<std::uint8_t>(half * 8));
+    accept(controller, 0x16, 0x17);
+    CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+    for (unsigned cycle = 1; cycle < 8; ++cycle)
+    {
+      REQUIRE_FALSE(masterStep(controller, cycle).completed);
+      requirePending(controller);
+    }
+    REQUIRE(masterStep(controller, 8).newCauses == 1);
+    CDVDControllerTestAccess::requireResult(controller, replies[half]);
+    REQUIRE_FALSE(controller.completeSubcommand());
+    for (unsigned index = 0; index < 9; ++index)
+    {
+      const auto before = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x17) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(controller.writeByte(BASE + 0x17, 0) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+      REQUIRE(read(controller, 0x17) == 0);
+      REQUIRE(read(controller, 0x18) == replies[half][index]);
+    }
+    REQUIRE(read(controller, 0x17) == 0x40);
+    REQUIRE(read(controller, 0x16) == 0x17);
+    CDVDControllerTestAccess::requireEmptyStorage(controller);
+    const auto drained = controller;
+    REQUIRE(read(controller, 0x18) == 0);
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x17) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, drained));
+    accept(controller, 8, 1);
+    accept(controller, 0x16, 0x22);
+    REQUIRE(controller.completeSubcommand());
+    for (unsigned index = 0; index < 10; ++index)
+    {
+      REQUIRE(read(controller, 0x18) == 0);
+    }
+  }
+}
+
+TEST_CASE("CDVD model reads reject unapproved tuples and reset every lifecycle cut",
+  "[iop][cdvd-owner][cdvd-model]")
+{
+  for (unsigned value = 0; value < 256; ++value)
+  {
+    if (value == 0 || value == 8)
+    {
+      continue;
+    }
+    CDVDController controller;
+    accept(controller, 0x17, static_cast<std::uint8_t>(value));
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x17) ==
+      CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  for (unsigned count = 0; count <= 16; ++count)
+  {
+    if (count == 1)
+    {
+      continue;
+    }
+    CDVDController controller;
+    for (unsigned index = 0; index < count; ++index)
+    {
+      accept(controller, 0x17, 8);
+    }
+    const auto before = controller;
+    REQUIRE(controller.writeByte(BASE + 0x16, 0x17) ==
+      CDVDAccessStatus::Unsupported);
+    if (count == 16)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x17, 8) ==
+        CDVDAccessStatus::Unsupported);
+    }
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+  }
+  for (const std::uint8_t offset : {0, 8})
+  {
+    for (unsigned cut = 0; cut < 12; ++cut)
+    {
+      CDVDController controller;
+      accept(controller, 0x17, offset);
+      const auto staged = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x18) ==
+        CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, staged));
+      if (cut != 0)
+      {
+        accept(controller, 0x16, 0x17);
+        const auto pending = controller;
+        REQUIRE(controller.writeByte(BASE + 0x17, offset) ==
+          CDVDAccessStatus::Unsupported);
+        REQUIRE(CDVDControllerTestAccess::sameState(controller, pending));
+      }
+      if (cut >= 2)
+      {
+        REQUIRE(controller.completeSubcommand());
+        for (unsigned index = 0; index < cut - 2; ++index)
+        {
+          read(controller, 0x18);
+        }
+      }
+      controller.reset();
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, CDVDController{}));
+      REQUIRE_FALSE(controller.completeSubcommand());
+    }
+  }
 }
 
 TEST_CASE("CDVD RCBypass publishes one opaque byte without changing configuration",
@@ -762,6 +885,10 @@ TEST_CASE("CDVD compatibility queries reject staged requests and unsupported nei
       for (const auto opcode :
            {0x14, 0x16, 0x17, 0x18, 0x19, 0x20, 0x21, 0x23, 0x24})
       {
+        if (opcode == 0x17 && count == 1)
+        {
+          continue;
+        }
         REQUIRE(controller.writeByte(BASE + 0x16, opcode) ==
           CDVDAccessStatus::Unsupported);
         REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
@@ -1064,7 +1191,7 @@ TEST_CASE("CDVD version query rejects malformed requests without consuming stagi
   const auto staged = controller;
   for (unsigned opcode = 0; opcode < 256; ++opcode)
   {
-    if (opcode == 3)
+    if (opcode == 3 || opcode == 0x17)
     {
       continue;
     }

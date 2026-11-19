@@ -4177,11 +4177,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Extend paired-VIF ERR semantics through the existing owner, with researched
       masks, strict unsupported-work boundaries, focused/authored restored-trace
       conformance, risk-based review and due validation before user commits.
-- [ ] Verify fresh unchanged-input BIOS progress after the user-owned commit,
+- [x] Verify fresh unchanged-input BIOS progress after the user-owned commit,
       with bounded same-build conformance and attribution of the next origin.
 
 ### Additional CD/DVD Command and Configuration Scope
 
+- [x] Research the originating SCMD `0x17` through local manuals, retained
+      guest arguments/consumer and authorized secondary evidence; identify
+      result shape and any identity/configuration input policy needing approval.
+- [x] Freeze and approve its bounded request, input, result, lifecycle, timing,
+      IRQ, reset and persistence contract through the existing CD/DVD owner.
+- [x] Implement and independently review the approved command with focused
+      red/green and transport/persistence coverage.
+- [x] Add authored cold/restored traced/plain canonical conformance, resolve
+      due validation and final independent review before the user-owned
+      implementation commit.
+- [ ] Verify fresh unchanged-input BIOS progress after user commits with bounded
+      same-build conformance and attribution of the next originating dependency.
 - [ ] Expand command dependencies required by the selected shell profile into
       independent transport and command-family blocks; select parameters,
       results, busy/error behavior, IRQs, cancellation and timing.

@@ -23,7 +23,7 @@ namespace
 
   void stageQueryParameters(NekoSystem &system, unsigned opcode)
   {
-    if (opcode == 3)
+    if (opcode == 3 || opcode == 0x17)
     {
       write(system, 0x17, 0);
     }
@@ -643,7 +643,8 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
   "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
 {
-  for (const auto opcode : {3u, 8u, 0x15u, 0x1au, 0x22u, 0x24u, 0x36u, 0x40u})
+  for (const auto opcode :
+       {3u, 8u, 0x15u, 0x17u, 0x1au, 0x22u, 0x24u, 0x36u, 0x40u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -828,10 +829,10 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
 TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads passive",
   "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
 {
-  for (const std::uint8_t opcode : {0x15, 0x22, 0x24, 0x40})
+  for (const std::uint8_t opcode : {0x15, 0x17, 0x22, 0x24, 0x40})
   {
     CAPTURE(opcode);
-    const unsigned size = opcode == 0x22 ? 10 : 1;
+    const unsigned size = opcode == 0x22 ? 10 : (opcode == 0x17 ? 9 : 1);
     NekoSystem system;
     stageQueryParameters(system, opcode);
     for (unsigned stage = 0; stage < size + 3; ++stage)
@@ -874,8 +875,195 @@ TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads 
       }
       else if (stage < size + 2)
       {
-        REQUIRE(read(system, 0x18) == (opcode == 0x15 ? 5 : 0));
+        const std::array<std::uint8_t, 9> model = {{0, 'S', 'C', 'P', 'H', '-', '7', '0', '0'}};
+        REQUIRE(read(system, 0x18) ==
+          (opcode == 0x15 ? 5 : (opcode == 0x17 ? model[stage - 2] : 0)));
       }
+    }
+  }
+}
+
+TEST_CASE("CDVD model restores each request and result without changing configuration",
+  "[iop][cdvd-integration][cdvd-model][save-state]")
+{
+  const std::array<std::array<std::uint8_t, 9>, 2> replies = {{
+    {{0, 'S', 'C', 'P', 'H', '-', '7', '0', '0'}}, {{0, '1', '2'}}
+  }};
+  for (unsigned session = 0; session < 4; ++session)
+  {
+    NekoSystem seed;
+    auto &sio2 = seed.sio2Controller();
+    REQUIRE(sio2.writeCommandDescriptor(0, 0x001c0740) == SIO2AccessStatus::Accepted);
+    for (const std::uint8_t byte : {0x61, 6, 3, 0, 0, 0, 0})
+    {
+      REQUIRE(sio2.writeTransmitByte(byte) == SIO2AccessStatus::Accepted);
+    }
+    REQUIRE(seed.iopBus().write32(0x1f808268, 0xb1).status == IOPBusStatus::Completed);
+    const auto sioCause = sio2.readInterruptStatus();
+    if (session != 0)
+    {
+      stageQueryParameters(seed, 0x40);
+      write(seed, 0x16, 0x40);
+      seed.clockMasterCycle();
+      REQUIRE(read(seed, 0x18) == 0);
+      for (unsigned block = 0; block < session - 1; ++block)
+      {
+        write(seed, 0x16, 0x41);
+        seed.runMasterCycles(8);
+        for (unsigned index = 0; index < 16; ++index)
+        {
+          read(seed, 0x18);
+        }
+      }
+    }
+    const auto initial = seed.saveState();
+    for (unsigned half = 0; half < 2; ++half)
+    {
+      for (unsigned cut = 0; cut < 6; ++cut)
+      {
+        CAPTURE(session);
+        CAPTURE(half);
+        CAPTURE(cut);
+        NekoSystem original;
+        original.loadState(initial);
+        write(original, 4, 0);
+        write(original, 0x17, static_cast<std::uint8_t>(half * 8));
+        if (cut != 0)
+        {
+          write(original, 0x16, 0x17);
+        }
+        const unsigned consumed = cut < 3 ? 0 : (cut == 3 ? 1 : (cut == 4 ? 8 : 9));
+        if (cut >= 2)
+        {
+          original.runMasterCycles(8);
+          for (unsigned index = 0; index < consumed; ++index)
+          {
+            REQUIRE(read(original, 0x18) == replies[half][index]);
+          }
+        }
+        const auto checkpoint = original.saveState();
+        const SaveStateMutation fields(checkpoint);
+        REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
+        REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") ==
+          (cut == 0 || cut == 5 ? 0 : half + 1));
+        REQUIRE(fields.readByte("system.iop.cdvd.configProfile") == (session != 0));
+        REQUIRE(fields.readByte("system.iop.cdvd.configNextBlock") ==
+          (session == 0 ? 0 : session - 1));
+        NekoSystem restored;
+        restored.loadState(checkpoint);
+        requireSame(original, restored);
+        for (auto *system : {&original, &restored})
+        {
+          if (cut == 0)
+          {
+            write(*system, 0x16, 0x17);
+          }
+          system->runMasterCycles(8);
+          REQUIRE(read(*system, 8) == 1);
+          for (unsigned index = consumed; index < 9; ++index)
+          {
+            REQUIRE(read(*system, 0x18) == replies[half][index]);
+          }
+          REQUIRE(read(*system, 0x17) == 0x40);
+          REQUIRE(system->sio2Controller().readControl() == 0xb1);
+          REQUIRE(system->sio2Controller().readCommandDescriptor(0) == 0x001c0740);
+          REQUIRE(system->sio2Controller().readInterruptStatus() == sioCause);
+          for (unsigned index = 0; index < 3; ++index)
+          {
+            const auto status = system->sio2Controller().readTransferStatus(index);
+            REQUIRE(status.status == SIO2AccessStatus::Accepted);
+            REQUIRE(status.value == (index == 0 ? 0x1d100u : (index == 1 ? 0xfu : 0u)));
+          }
+          write(*system, 0x17, 8);
+        }
+        requireSame(original, restored);
+        restored.loadState(restored.saveState());
+        requireSame(original, restored);
+        restored.reset();
+        restored.runMasterCycles(8);
+        REQUIRE(read(restored, 0x17) == 0x40);
+        const SaveStateMutation reset(restored.saveState());
+        REQUIRE(reset.readByte("system.iop.cdvd.modelProfile") == 1);
+        REQUIRE(reset.readByte("system.iop.cdvd.modelRequest") == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("CDVD model rejects incoherent profile selector and reply states transactionally",
+  "[iop][cdvd-integration][cdvd-model][save-state]")
+{
+  NekoSystem destination;
+  write(destination, 4, 0);
+  const auto before = destination.saveState();
+  for (unsigned stage = 0; stage < 4; ++stage)
+  {
+    NekoSystem source;
+    if (stage != 0)
+    {
+      write(source, 0x17, 8);
+      write(source, 0x16, 0x17);
+    }
+    if (stage >= 2)
+    {
+      source.clockMasterCycle();
+      if (stage == 3)
+      {
+        for (unsigned index = 0; index < 9; ++index)
+        {
+          read(source, 0x18);
+        }
+      }
+    }
+    const auto valid = source.saveState();
+    const auto reject = [&](SaveStateMutation &bad)
+    {
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    };
+    for (const auto value : {0, 2, 255})
+    {
+      SaveStateMutation bad(valid);
+      bad.writeScalar("system.iop.cdvd.modelProfile", value);
+      reject(bad);
+    }
+    for (const auto value : {0, 1, 3, 255})
+    {
+      if (value == 1 && stage == 1)
+      {
+        continue; // Either pending chunk is valid without historical pairing.
+      }
+      if (value == 0 && (stage == 0 || stage == 3))
+      {
+        continue;
+      }
+      SaveStateMutation bad(valid);
+      bad.writeScalar("system.iop.cdvd.modelRequest", value);
+      reject(bad);
+    }
+    if (stage == 1 || stage == 2)
+    {
+      for (const auto field : {"lastSubcommand", "subcommandParameterCount",
+           "configRequest", "configRequestBlock"})
+      {
+        SaveStateMutation bad(valid);
+        bad.writeScalar(std::string("system.iop.cdvd.") + field,
+          std::string(field) == "lastSubcommand" ? 8 : 1);
+        reject(bad);
+      }
+    }
+    if (stage == 2)
+    {
+      for (const unsigned index : {0u, 1u, 8u, 9u, 15u})
+      {
+        SaveStateMutation bad(valid);
+        bad.xorByte("system.iop.cdvd.result", index, 1);
+        reject(bad);
+      }
+      SaveStateMutation bad(valid);
+      bad.writeScalar("system.iop.cdvd.resultCursor", 9);
+      reject(bad);
     }
   }
 }

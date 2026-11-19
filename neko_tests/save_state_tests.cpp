@@ -646,8 +646,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 131 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err]")
+TEST_CASE("Version 132 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -662,17 +662,20 @@ TEST_CASE("Version 131 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 131);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 132);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 130;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 131;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 707 + appendedSpuStateSize);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 709 + appendedSpuStateSize);
+  const SaveStateMutation fields(state);
+  REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
+  REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
   const auto snapshot = inspectSaveState(state);
   const auto *vif0Mask = snapshot.find("system.vif0.errorMask");
   const auto *vif1Mask = snapshot.find("system.vif1.errorMask");
@@ -954,7 +957,7 @@ TEST_CASE("Version 131 save-state layout is byte-stable",
   const auto *configSession = snapshot.find("system.iop.cdvd.configSession");
   REQUIRE(configSession != nullptr);
   previousVersion.erase(previousVersion.begin() + configSession->containerOffset,
-    previousVersion.begin() + configSession->containerOffset + 5);
+    previousVersion.begin() + configSession->containerOffset + 7);
   for (std::size_t index = 0; index < 108; ++index)
   {
     const auto path = index < 88
@@ -993,7 +996,7 @@ TEST_CASE("Version 131 save-state layout is byte-stable",
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
       (offset >= voiceStateOffset + appendedSpuStateSize ? appendedSpuStateSize : 0) -
-      (offset >= configSession->containerOffset + 5 ? 5 : 0) -
+      (offset >= configSession->containerOffset + 7 ? 7 : 0) -
       (offset >= vif0Mask->containerOffset + 3 ? 3 : 0) -
       (offset >= vif1Mask->containerOffset + 3 ? 3 : 0);
   };

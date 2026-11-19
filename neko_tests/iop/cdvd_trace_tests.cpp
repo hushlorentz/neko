@@ -89,7 +89,7 @@ namespace
         }
       }
 
-      std::array<NekoTraceEvent, 2048> events = {};
+      std::array<NekoTraceEvent, 4096> events = {};
       std::size_t count = 0;
       bool overflow = false;
   };
@@ -847,9 +847,13 @@ TEST_CASE("CDVD OpenConfig authored guest stages its exact request and drains on
   }
 }
 
-TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its lifecycle",
-  "[iop][cdvd-trace][cdvd-config-session][cdvd-config-session-conformance][cdvd-rc-bypass][cdvd-rc-bypass-conformance][save-state]")
+TEST_CASE("CDVD diagnostic session guest checks packets bypass and model across its lifecycle",
+  "[iop][cdvd-trace][cdvd-config-session][cdvd-config-session-conformance][cdvd-rc-bypass][cdvd-rc-bypass-conformance][cdvd-model][cdvd-model-conformance][save-state]")
 {
+  const std::array<std::array<std::uint8_t, 16>, 2> modelReplies = {{
+    {{0, 'S', 'C', 'P', 'H', '-', '7', '0', '0'}}, {{0, '1', '2'}}
+  }};
+  const std::array<unsigned, 3> modelHalves = {{1, 0, 0}};
   const std::array<std::array<std::uint8_t, 16>, 3> packets = {{
     {{0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
       0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x58}},
@@ -888,6 +892,7 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
       std::uint8_t block = 0;
       std::uint8_t parameters = 0;
       std::array<std::uint8_t, 3> parameterBytes = {{0, 1, 2}};
+      std::uint8_t modelRequest = 0;
     };
     std::vector<Access> accesses;
     std::vector<Command> commands;
@@ -984,6 +989,43 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
       }
       load(0x90280018, 0x18, 0);
     };
+    const auto readModel = [&](unsigned packet, std::uint8_t profile,
+        std::uint8_t next)
+    {
+      const auto half = modelHalves[packet];
+      const auto offset = static_cast<std::uint8_t>(half * 8);
+      program.push_back(0x34020000 | offset);
+      const auto staged = access(0xa0220017, 0x17, offset,
+        NekoIOPTraceMemory::AccessKind::DataStore);
+      cuts.push_back({staged, profile, next, 0, 0, 0, 0, 1, {{offset, 0, 0}}});
+      const auto cut = [&](std::uint64_t cycle, std::uint8_t phase,
+          std::uint8_t cursor)
+      {
+        Cut state = {cycle, profile, next, phase, cursor};
+        state.modelRequest = phase == 0 ? 0 : static_cast<std::uint8_t>(half + 1);
+        cuts.push_back(state);
+      };
+      const auto accepted = submit(0x17, modelReplies[half]);
+      cut(accepted, 1, 0);
+      cut(accepted + 7, 1, 0);
+      cut(accepted + 8, 2, 0);
+      for (unsigned index = 0; index < 9; ++index)
+      {
+        const auto loaded = load(0x90280018, 0x18, modelReplies[half][index]);
+        if (packet < 2 || index == 0 || index == 8)
+        {
+          cut(loaded, index == 8 ? 0 : 2, index == 8 ? 0 : index + 1);
+        }
+        program.insert(program.end(), {
+          0xa2080100 | (packet * 16 + index),
+          0x390b0000u | modelReplies[half][index], 0x028ba025
+        });
+        load(0x90290017, 0x17, index == 8 ? 0x40 : 0);
+      }
+      load(0x90280018, 0x18, 0);
+      load(0x902c0016, 0x16, 0x17);
+    };
+    readModel(0, 0, 0);
     bypass(0, 0);
     openParameters(0, 0);
     const auto opened = submit(0x40, {});
@@ -993,12 +1035,14 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
     cuts.push_back({drainAck(0), 1, 0, 0});
     bypass(1, 0);
     readPacket(0, 1);
+    readModel(1, 1, 1);
     const auto interleaved = submit(0x15, {{5}});
     cuts.push_back({interleaved, 1, 1, 1});
     cuts.push_back({interleaved + 8, 1, 1, 2});
     drainAck(5);
     bypass(1, 1);
     readPacket(1, 2);
+    readModel(2, 1, 2);
     bypass(1, 2);
     openParameters(1, 2);
     const auto reopened = submit(0x40, {});
@@ -1035,6 +1079,14 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
     REQUIRE(reference.iopCore().generalRegister(12) == 0x24);
     REQUIRE(reference.iopCore().generalRegister(13) == 0);
     REQUIRE(reference.iopInterruptController().status() == 0);
+    for (unsigned packet = 0; packet < modelHalves.size(); ++packet)
+    {
+      for (unsigned index = 0; index < 9; ++index)
+      {
+        REQUIRE(reference.iopBus().read8(0x1100 + packet * 16 + index).value ==
+          modelReplies[modelHalves[packet]][index]);
+      }
+    }
     for (unsigned packet = 0; packet < packets.size(); ++packet)
     {
       REQUIRE(reference.iopBus().read32(0x1040 + packet * 4).value == 0);
@@ -1136,6 +1188,8 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
       REQUIRE(fields.readByte("system.iop.cdvd.configRequestBlock") == cut.block);
       REQUIRE(fields.readByte("system.iop.cdvd.subcommandPhase") == cut.phase);
       REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == cut.cursor);
+      REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
+      REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == cut.modelRequest);
       REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") ==
         cut.parameters);
       for (unsigned index = 0; index < 16; ++index)
@@ -1150,7 +1204,8 @@ TEST_CASE("CDVD diagnostic session guest checks packets and bypass across its li
       }
       const bool bypassResult = cut.phase == 2 &&
         fields.readByte("system.iop.cdvd.lastSubcommand") == 0x24;
-      if (cut.phase == 1 || cut.parameters != 0 || cut.cursor == 15 || bypassResult)
+      if (cut.phase == 1 || cut.parameters != 0 || cut.cursor == 15 || bypassResult ||
+          cut.modelRequest != 0)
       {
         source.reset();
         source.startTrace();

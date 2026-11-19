@@ -37,6 +37,9 @@ void NekoSaveStateCodec::writeCDVDState(
   writer->writeFieldU8("configRequest",
     static_cast<std::uint8_t>(controller.configRequest));
   writer->writeFieldU8("configRequestBlock", controller.configRequestBlock);
+  writer->writeFieldU8("modelProfile", CDVDController::modelProfileId());
+  writer->writeFieldU8("modelRequest",
+    static_cast<std::uint8_t>(controller.modelRequest));
 }
 
 template void NekoSaveStateCodec::writeCDVDState(
@@ -111,6 +114,16 @@ void NekoSaveStateCodec::readCDVD(
     "CD/DVD configuration request is invalid");
   controller->configRequest = static_cast<CDVDController::ConfigRequest>(request);
   controller->configRequestBlock = reader->readFieldU8("configRequestBlock");
+  reader->requireField(
+    reader->readFieldU8("modelProfile") == CDVDController::modelProfileId(),
+    "CD/DVD model profile is incompatible");
+  const auto modelRequest = reader->readFieldU8("modelRequest");
+  reader->requireField(modelRequest <=
+    static_cast<std::uint8_t>(CDVDController::ModelRequest::SecondHalfV1),
+    "CD/DVD model request is invalid");
+  controller->modelRequest = static_cast<CDVDController::ModelRequest>(modelRequest);
+  reader->requireField(controller->isValidModelState(),
+    "CD/DVD model request and transport are inconsistent");
   reader->requireField(controller->isValidConfigState(),
     "CD/DVD configuration session and request are inconsistent");
   if (controller->subcommandPhase == Phase::Result)
