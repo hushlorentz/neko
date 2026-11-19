@@ -4168,7 +4168,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Avoid expensive component hashing when selected trace consumers do not
       need it; preserve existing full-trace/failure-capture contracts or
       explicitly approve/version new profiles, retaining canonical comparisons.
-- [ ] Validate retention, progress and trace-demand behavior with BIOS-free
+- [x] Validate retention, progress and trace-demand behavior with BIOS-free
       regressions and bounded performance comparisons; document maintained
       scout/replay/conformance recipes before the next real-BIOS campaign.
 

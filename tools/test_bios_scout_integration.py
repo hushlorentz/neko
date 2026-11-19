@@ -28,11 +28,15 @@ class ScoutIntegrationTests(unittest.TestCase):
                  "--save-checkpoint", str(checkpoint)], capture_output=True)
             self.assertEqual(prepared.returncode, 0, prepared.stderr)
             profiles = (
-                [], ["--trace-events", "256", "--failure-context"],
+                [], ["--trace-events", "0"], ["--trace-events", "1"],
+                ["--trace-events", "256", "--failure-context"],
                 ["--trace-events", "256", "--failure-context", "--trace-from-cycle", "3"],
+                ["--trace-events", "1", "--trace-from-cycle", "3"],
                 ["--resume-checkpoint", str(checkpoint)],
+                ["--resume-checkpoint", str(checkpoint), "--trace-events", "1"],
                 ["--scout"],
             )
+            canonical_identity = None
             for index, options in enumerate(profiles):
                 with self.subTest(options=options):
                     states = [root / f"{index}-{mode}.state" for mode in ("plain", "progress")]
@@ -49,8 +53,11 @@ class ScoutIntegrationTests(unittest.TestCase):
                     self.assertEqual(plain.returncode, 0, plain.stderr)
                     self.assertEqual(observed.stdout, plain.stdout)
                     self.assertEqual(observed.stderr, plain.stderr)
-                    self.assertEqual(discovery.file_identity(states[0]),
-                                     discovery.file_identity(states[1]))
+                    identity = discovery.file_identity(states[0])
+                    if canonical_identity is None:
+                        canonical_identity = identity
+                    self.assertEqual(identity, canonical_identity)
+                    self.assertEqual(discovery.file_identity(states[1]), canonical_identity)
                     samples = [json.loads(line) for line in progress.read_text().splitlines()]
                     start = 8 if "--resume-checkpoint" in options else 0
                     execution = [sample for sample in samples if sample["phase"] == "execution"]
@@ -142,6 +149,18 @@ class ScoutIntegrationTests(unittest.TestCase):
             self.assertEqual(manifest["pruned_state_bytes"], sum(
                 item["state"]["bytes"] for item in manifest["checkpoint_receipts"]
                 if item.get("pruned")))
+            for receipt in manifest["checkpoint_receipts"]:
+                self.assertFalse(receipt.get("prune_pending", False))
+                self.assertTrue(Path(receipt["path"] + ".json").is_file())
+            for entry in manifest["commands"]:
+                if len(entry["command"]) < 2 or entry["command"][1] != "bios-startup":
+                    continue
+                self.assertIn("--progress-file", entry["command"])
+                sample = discovery.campaign.read_progress(directory, entry["progress_file"])
+                self.assertEqual(sample, entry["progress"])
+                self.assertEqual(sample["phase"], "finished")
+                self.assertEqual(sample["master_cycle"], int(
+                    entry["command"][entry["command"].index("--cycles") + 1]))
             self.assertEqual(discovery.campaign.status(directory)["state"],
                              "execution_finished")
 
@@ -151,18 +170,25 @@ class ScoutIntegrationTests(unittest.TestCase):
             root = Path(temporary)
             bios = root / "authored.bin"
             bios.write_bytes(bytes(4194304))
-            directory = root / "conformance"
-            with patch.object(discovery, "build_neko", return_value=binary), \
-                 redirect_stderr(io.StringIO()):
-                result = discovery.run_batch(
-                    directory, bios, master_cycles=64, checkpoint_at=8)
-            self.assertTrue(result["comparisons_equal"])
-            self.assertEqual(result["bios_exit_codes"],
-                             {"checkpoint": 0, "cold": 0, "resumed": 0, "resumed-plain": 0})
-            manifest = json.loads((directory / "manifest.json").read_text())
-            self.assertTrue(all(state["equal"] for state in manifest["final_states"].values()))
-            self.assertTrue(all(entry["returncode"] == 0 for entry in manifest["commands"]))
-            self.assertEqual(discovery.campaign.status(directory)["state"], "execution_finished")
+            for limit in (1, discovery.TRACE_EVENTS):
+                with self.subTest(trace_limit=limit):
+                    directory = root / f"conformance-{limit}"
+                    with patch.object(discovery, "build_neko", return_value=binary), \
+                         patch.object(discovery, "TRACE_EVENTS", limit), \
+                         redirect_stderr(io.StringIO()):
+                        result = discovery.run_batch(
+                            directory, bios, master_cycles=64, checkpoint_at=8)
+                    self.assertTrue(result["comparisons_equal"])
+                    self.assertEqual(result["bios_exit_codes"],
+                                     {"checkpoint": 0, "cold": 0, "resumed": 0,
+                                      "resumed-plain": 0})
+                    manifest = json.loads((directory / "manifest.json").read_text())
+                    self.assertTrue(all(state["equal"]
+                                        for state in manifest["final_states"].values()))
+                    self.assertTrue(all(entry["returncode"] == 0
+                                        for entry in manifest["commands"]))
+                    self.assertEqual(discovery.campaign.status(directory)["state"],
+                                     "execution_finished")
 
     def test_architectural_rejection_retains_matching_scout_replay_identity(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
@@ -194,6 +220,7 @@ class ScoutIntegrationTests(unittest.TestCase):
             bios.write_bytes(image + bytes(4194304 - len(image)))
             directory = root / "discovery"
             with patch.object(discovery, "build_neko", return_value=binary), \
+                 patch.object(discovery, "TRACE_EVENTS", 1), \
                  redirect_stderr(io.StringIO()):
                 result = discovery.run_scout_batch(
                     directory, bios, master_cycles=100,
@@ -213,6 +240,8 @@ class ScoutIntegrationTests(unittest.TestCase):
                                 for entry in manifest["commands"]))
             self.assertGreater(manifest["progress"]["cycles_per_second"], 0)
             self.assertGreater(manifest["pruned_state_bytes"], 0)
+            self.assertEqual(json.loads((directory / "summary.json").read_text())[
+                "failure_event_source"], "failure_capture")
 
 
 if __name__ == "__main__":

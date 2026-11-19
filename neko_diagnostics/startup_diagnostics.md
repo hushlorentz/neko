@@ -901,7 +901,7 @@ and validated checkpoint matrix for broader cold/restore and trace-mode gates.
 BIOS-free integration against an already-built headless executable:
 
 ```sh
-NEKO_TEST_BINARY="$PWD/out/check/neko" python3 -B -m unittest discover -s tools -p test_bios_scout_integration.py
+NEKO_TEST_BINARY="$PWD/out/check/neko" python3 -B -m unittest discover -s tools -p 'test_bios_scout_integration.py'
 ```
 
 This uses only an ephemeral, independently authored synthetic ROM, never the
@@ -911,6 +911,43 @@ workflows run all Python tests, including these integration cases, against
 their own built executable. CTest schedules the Python suite alongside the
 C++ shards under the same concurrency limit. Plain Python discovery without
 `NEKO_TEST_BINARY` skips the native cases.
+
+### Throughput acceptance and capture selection
+
+The BIOS-free integration suite checks these features together, not just as
+isolated options: recent/pinned scout retention with completed progress
+sidecars, replay failure attribution after prefix saturation, cold/restored
+conformance with both full and one-event prefixes, and byte-identical complete
+canonical endings across plain, full, saturated, deferred, restored and scout
+execution with or without progress.
+
+Choose the maintained capture by its evidence requirement:
+
+| Workflow | Hash demand and bounds |
+| --- | --- |
+| Cold scout (`--mode scout`) | Failure-only observation omits full component hashes. Retain the two recent states plus necessary launch-time pins; inspect pruning receipts. |
+| Automatic scout replay | The helper restores the nearest preceding same-build checkpoint and traces only the trailing window through the originating failure. Its failure recorder still requires full hashes; prefix saturation does not make a long replay cheap. |
+| Cold/restored verification (`--mode conformance --checkpoint-at ...`) | Select a fresh checkpoint before the capability and a justified ending ceiling. Full trace/recorder and complete canonical comparisons remain required; use tightly bounded windows rather than a broad discovery ceiling. |
+| Direct bounded prefix without a recorder | Once truncation is established, unconsumed EE/presentation hashes are skipped. This is not a replacement for the campaign failure recorder or canonical verification. |
+
+Coarse progress reports sampled native wall/process-CPU time and throughput,
+not health or a completion verdict. Retention bounds surviving checkpoint
+storage, not serialization cost or checkpoint conformance. Performance
+comparisons must retain exact commands, input/executable identities, timing
+scope and matching reports/states; a local prefix-only speedup is not an
+end-to-end campaign estimate. Do not remove recorder events, weaken canonical
+comparison or introduce a reduced trace profile to obtain faster measurements.
+
+At block closure, run the complete optimized and AddressSanitizer gates:
+
+```sh
+cmake -P cmake/Check.cmake
+cmake -P cmake/Sanitize.cmake
+```
+
+These are BIOS-free gates. A subsequent real-BIOS campaign still needs a fresh
+batch, unchanged authorized input, explicit finite bounds, owned execution
+through terminal inspection, and the status/finalization procedure above.
 
 ### Validated checkpoint workflow
 
