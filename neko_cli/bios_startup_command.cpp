@@ -4,7 +4,9 @@
 #include "startup_diagnostics.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -19,6 +21,7 @@ namespace
     "Usage: neko bios-startup <file> --cycles <count> "
     "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] "
     "[--resume-checkpoint <file>] [--save-checkpoint <file>] "
+    "[--progress-file <file> [--progress-every <cycles>]] "
     "[--scout | --stop-on-first-failure]";
 
   struct Options
@@ -33,6 +36,9 @@ namespace
     bool stopOnFirstFailure = false;
     std::string resumePath;
     std::string savePath;
+    std::string progressPath;
+    std::uint64_t progressEvery = 1000000;
+    bool progressEverySpecified = false;
   };
 
   std::uint64_t parseUnsignedInteger(
@@ -112,12 +118,24 @@ namespace
       {
         options.savePath = value;
       }
+      else if (name == "--progress-file" && options.progressPath.empty())
+      {
+        options.progressPath = value;
+      }
+      else if (name == "--progress-every" && !options.progressEverySpecified)
+      {
+        options.progressEverySpecified = true;
+        options.progressEvery = parseUnsignedInteger(value,
+          "Progress interval must be a positive unsigned 64-bit decimal integer.");
+      }
       else
       {
         throw std::invalid_argument(USAGE);
       }
     }
-    if ((options.scout && (options.traced || options.failureContext ||
+    if (options.progressEvery == 0 ||
+        (options.progressEverySpecified && options.progressPath.empty()) ||
+        (options.scout && (options.traced || options.failureContext ||
           options.traceStartSpecified || options.stopOnFirstFailure)) ||
         (options.stopOnFirstFailure && !options.traced) ||
         (!options.traced && (options.failureContext || options.traceStartSpecified)) ||
@@ -126,6 +144,126 @@ namespace
       throw std::invalid_argument(USAGE);
     }
     return options;
+  }
+
+  class ProgressReport
+  {
+    public:
+      ProgressReport(const Options &options, std::uint64_t start) :
+        file(nullptr, &std::fclose), startCycle(start), ceiling(options.ceiling)
+      {
+        if (options.progressPath.empty())
+        {
+          return;
+        }
+        file.reset(std::fopen(options.progressPath.c_str(), "wbx"));
+        if (!file)
+        {
+          throw std::runtime_error("Cannot create progress file: " + options.progressPath);
+        }
+        wallStart = std::chrono::steady_clock::now();
+        cpuStart = cpuClock();
+        publish("execution", start);
+      }
+
+      bool enabled() const { return file != nullptr; }
+
+      void publish(const char *phase, std::uint64_t cycle)
+      {
+        if (!file)
+        {
+          return;
+        }
+        const double wall = std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - wallStart).count();
+        const auto cpuNow = cpuClock();
+        if (cpuNow < cpuStart)
+        {
+          throw std::runtime_error("Progress CPU clock wrapped.");
+        }
+        const double cpu = static_cast<double>(cpuNow - cpuStart) / CLOCKS_PER_SEC;
+        const double timestamp = std::chrono::duration<double>(
+          std::chrono::system_clock::now().time_since_epoch()).count();
+        std::ostringstream row;
+        row.imbue(std::locale::classic());
+        row << std::setprecision(17) <<
+          "{\"format\":\"neko-bios-progress-v1\",\"phase\":\"" << phase <<
+          "\",\"master_cycle\":" << cycle <<
+          ",\"start_master_cycle\":" << startCycle <<
+          ",\"cycle_ceiling\":" << ceiling <<
+          ",\"elapsed_wall_seconds\":" << wall <<
+          ",\"elapsed_cpu_seconds\":" << cpu <<
+          ",\"cycles_per_second\":" << (wall > 0 ? (cycle - startCycle) / wall : 0) <<
+          ",\"sampled_at_unix_seconds\":" << timestamp << "}\n";
+        const auto bytes = row.str();
+        if (std::fwrite(bytes.data(), 1, bytes.size(), file.get()) != bytes.size() ||
+            std::fflush(file.get()) != 0)
+        {
+          throw std::runtime_error("Cannot write progress file.");
+        }
+      }
+
+      void close()
+      {
+        if (file && std::fclose(file.release()) != 0)
+        {
+          throw std::runtime_error("Cannot close progress file.");
+        }
+      }
+
+    private:
+      static std::clock_t cpuClock()
+      {
+        const auto value = std::clock();
+        if (value == static_cast<std::clock_t>(-1))
+        {
+          throw std::runtime_error("Progress process CPU clock is unavailable.");
+        }
+        return value;
+      }
+
+      std::unique_ptr<std::FILE, decltype(&std::fclose)> file;
+      std::chrono::steady_clock::time_point wallStart;
+      std::clock_t cpuStart = 0;
+      std::uint64_t startCycle;
+      std::uint64_t ceiling;
+  };
+
+  void addExecutionCounts(
+    DualCPUExecutionResult &run, const DualCPUExecutionResult &before)
+  {
+    run.masterCycles += before.masterCycles;
+    run.ee.masterCycles += before.ee.masterCycles;
+    run.ee.eeCycles += before.ee.eeCycles;
+    run.ee.instructions += before.ee.instructions;
+    run.iop.iopCycles += before.iop.iopCycles;
+    run.iop.instructions += before.iop.instructions;
+  }
+
+  StartupRunEvidence runWithProgress(
+    NekoSystem &system, std::uint64_t cycles,
+    const Options &options, ProgressReport &progress)
+  {
+    if (!progress.enabled())
+    {
+      return runDualCPUWithStartupEvidence(system, cycles);
+    }
+    DualCPUExecutionResult accumulated{};
+    StartupRunEvidence evidence;
+    do
+    {
+      evidence = runDualCPUWithStartupEvidence(
+        system, std::min(options.progressEvery, cycles - accumulated.masterCycles));
+      if (evidence.outcome == StartupRunOutcome::RuntimeError)
+      {
+        return evidence;
+      }
+      addExecutionCounts(evidence.completed.execution, accumulated);
+      accumulated = evidence.completed.execution;
+      progress.publish("execution", system.masterClockScheduler().currentCycle());
+    }
+    while (accumulated.cycleLimitReached && accumulated.masterCycles < cycles);
+    return evidence;
   }
 
   void saveCheckpointFile(
@@ -150,7 +288,7 @@ namespace
 
   StartupRunEvidence runWithTrace(
     NekoSystem &system, const Options &options,
-    const std::shared_ptr<StartupFailureCapture> &capture)
+    const std::shared_ptr<StartupFailureCapture> &capture, ProgressReport &progress)
   {
     const auto start = system.masterClockScheduler().currentCycle();
     const auto traceStart = std::max(start, options.traceStart);
@@ -159,7 +297,7 @@ namespace
     if (options.scout)
     {
       system.startFailureProbe();
-      return runDualCPUWithStartupEvidence(system, options.ceiling - start);
+      return runWithProgress(system, options.ceiling - start, options, progress);
     }
     if (!options.traced || traceStart == start)
     {
@@ -167,27 +305,20 @@ namespace
       {
         system.startTrace(options.traceLimit, capture, stopPolicy);
       }
-      return runDualCPUWithStartupEvidence(system, options.ceiling - start);
+      return runWithProgress(system, options.ceiling - start, options, progress);
     }
-    auto prefix = runDualCPUWithStartupEvidence(system, traceStart - start);
+    auto prefix = runWithProgress(system, traceStart - start, options, progress);
     system.startTrace(options.traceLimit, capture, stopPolicy);
     if (prefix.outcome == StartupRunOutcome::RuntimeError ||
         !prefix.completed.execution.cycleLimitReached)
     {
       return prefix;
     }
-    auto suffix = runDualCPUWithStartupEvidence(
-      system, options.ceiling - traceStart);
+    auto suffix = runWithProgress(
+      system, options.ceiling - traceStart, options, progress);
     if (suffix.outcome == StartupRunOutcome::Completed)
     {
-      auto &run = suffix.completed.execution;
-      const auto &before = prefix.completed.execution;
-      run.masterCycles += before.masterCycles;
-      run.ee.masterCycles += before.ee.masterCycles;
-      run.ee.eeCycles += before.ee.eeCycles;
-      run.ee.instructions += before.ee.instructions;
-      run.iop.iopCycles += before.iop.iopCycles;
-      run.iop.instructions += before.iop.instructions;
+      addExecutionCounts(suffix.completed.execution, prefix.completed.execution);
     }
     return suffix;
   }
@@ -249,13 +380,16 @@ int neko_cli::runBIOSStartupCommand(
     }
     const auto capture = options.failureContext ?
       std::make_shared<StartupFailureCapture>() : nullptr;
-    const auto evidence = runWithTrace(system, options, capture);
+    ProgressReport progress(options, start);
+    const auto evidence = runWithTrace(system, options, capture, progress);
     const auto *runtimeError = evidence.outcome == StartupRunOutcome::RuntimeError ?
       &evidence.error : nullptr;
     if (runtimeError != nullptr)
     {
       error << runtimeError->message << '\n';
     }
+    progress.publish(runtimeError != nullptr ? "runtime_error" : "report",
+      system.masterClockScheduler().currentCycle());
 
     std::ostringstream record;
     record.imbue(std::locale::classic());
@@ -307,12 +441,16 @@ int neko_cli::runBIOSStartupCommand(
     }
     if (runtimeError != nullptr)
     {
+      progress.close();
       return 2;
     }
     if (!options.savePath.empty())
     {
+      progress.publish("checkpoint", system.masterClockScheduler().currentCycle());
       saveCheckpoint(options.savePath, system.saveState());
     }
+    progress.publish("finished", system.masterClockScheduler().currentCycle());
+    progress.close();
     return evidence.completed.execution.cycleLimitReached ? 0 : 1;
   }
   catch (const std::exception &exception)

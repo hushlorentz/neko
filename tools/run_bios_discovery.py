@@ -30,12 +30,16 @@ RUN_NAMES = ("traced1", "traced2", "plain1", "plain2")
 @contextmanager
 def running_capture(directory, manifest, name, command, *, extension="stdout",
                     accepted=(0,), compressed=False):
+    command = list(command)
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
     entry = dict(name=name, command=command, returncode=None,
                  accepted_exit_codes=list(accepted),
                  stdout=output.name, stderr=errors.name,
                  started_at=datetime.now(timezone.utc).isoformat())
+    if len(command) > 1 and command[1] == "bios-startup":
+        entry["progress_file"] = f"{name}.progress.jsonl"
+        command += ["--progress-file", str(directory / entry["progress_file"])]
     started = time.monotonic()
     print(f"[{name}] started", file=sys.stderr, flush=True)
     manifest["commands"].append(entry)
@@ -65,6 +69,11 @@ def running_capture(directory, manifest, name, command, *, extension="stdout",
     if status not in accepted:
         raise ValueError(
             f"{name} exited {status}; see {output} and {errors}")
+    if "progress_file" in entry:
+        entry["progress"] = campaign.read_progress(directory, entry["progress_file"])
+        if entry["progress"] is None or entry["progress"]["phase"] != "finished":
+            raise ValueError(f"{name} did not publish finished progress")
+        write_json(directory / "manifest.json", manifest)
 
 
 def capture(directory, manifest, name, command, *, extension="stdout",

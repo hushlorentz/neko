@@ -4162,7 +4162,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Bound live scout checkpoint retention to recent usable and explicitly
       pinned investigation states, preserving identity receipts and safe
       interruption, mismatch and cleanup behavior.
-- [ ] Add coarse diagnostic cycle/ceiling, stage, elapsed wall/CPU time and
+- [x] Add coarse diagnostic cycle/ceiling, stage, elapsed wall/CPU time and
       throughput reporting through maintained campaign status, without changing
       guest timing, canonical state or trace payloads.
 - [ ] Avoid expensive component hashing when selected trace consumers do not

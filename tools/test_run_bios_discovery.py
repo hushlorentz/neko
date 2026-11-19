@@ -386,6 +386,16 @@ class DiscoveryTests(unittest.TestCase):
                    "".join(json.dumps(row) + "\n" for row in rows))
             kwargs["stdout"].write(raw.encode("utf-8"))
             kwargs["stderr"].write(f"authored stderr {index}\n".encode("utf-8"))
+            if "--progress-file" in command:
+                progress = Path(command[command.index("--progress-file") + 1])
+                sample = dict(
+                    format="neko-bios-progress-v1", phase="finished",
+                    master_cycle=rows[1]["snapshot"]["master_cycle"],
+                    start_master_cycle=rows[0].get("start_master_cycle", 0),
+                    cycle_ceiling=budget, elapsed_wall_seconds=2.0,
+                    elapsed_cpu_seconds=1.5, cycles_per_second=4.0,
+                    sampled_at_unix_seconds=1000.0)
+                progress.write_text(json.dumps(sample) + "\n")
             return subprocess.CompletedProcess(command, self.run_statuses[index])
         return REAL_RUN(command, **kwargs)
 
@@ -522,6 +532,26 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(all(entry["returncode"] is not None
                             for entry in self.read("manifest.json")["commands"]))
 
+    def test_running_status_exposes_independent_stage_samples_and_final_progress_is_protected(self):
+        execute = self.execute
+
+        def while_checkpoint_runs(command, **kwargs):
+            if "--trace-from-cycle" in command:
+                report = discovery.campaign.status(self.output)
+                checkpoint, cold = report["stage_progress"]
+                self.assertEqual(checkpoint["sample"]["cycle_ceiling"], 40)
+                self.assertEqual(checkpoint["sample"]["master_cycle"], 40)
+                self.assertGreaterEqual(checkpoint["sample_age_seconds"], 0)
+                self.assertGreaterEqual(cold["elapsed_wall_seconds"], 0)
+                self.assertIsNone(cold["sample"])
+            return execute(command, **kwargs)
+
+        with patch.object(self, "execute", side_effect=while_checkpoint_runs):
+            self.create_checkpoint()
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "execution_finished")
+        (self.output / "cold.progress.jsonl").write_text("{}\n")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
     def test_cold_error_reaps_checkpoint_before_releasing_campaign_ownership(self):
         execute = self.execute
 
@@ -612,10 +642,13 @@ class DiscoveryTests(unittest.TestCase):
         runs = [command for command in self.calls if command[0] == str(self.binary)]
         base = [str(self.binary), "bios-startup", str(self.bios),
                 "--cycles", "1000000"]
-        self.assertEqual(runs, [
+        expected = [
             base + ["--trace-events", "3000000"],
             base + ["--trace-events", "3000000"], base, base,
-        ])
+        ]
+        self.assertEqual(runs, [
+            command + ["--progress-file", str(self.output / f"{name}.progress.jsonl")]
+            for name, command in zip(discovery.RUN_NAMES, expected)])
         self.assertEqual(self.calls[0], [
             "cmake", "--build", str(self.root / "out" / "check"),
             "--target", "neko", "--config", "Debug", "-j", "4",
@@ -657,7 +690,9 @@ class DiscoveryTests(unittest.TestCase):
         base = [str(self.binary), "bios-startup", str(self.bios),
                 "--cycles", "10000000"]
         traced = base + ["--trace-events", "3000000", "--failure-context"]
-        self.assertEqual(runs, [traced, traced, base, base])
+        self.assertEqual(runs, [
+            command + ["--progress-file", str(self.output / f"{name}.progress.jsonl")]
+            for name, command in zip(discovery.RUN_NAMES, (traced, traced, base, base))])
         self.assertEqual(self.read("manifest.json")["max_master_cycles"], 10000000)
         self.assertEqual(self.read("summary.json")["input"]["max_master_cycles"],
                          10000000)
@@ -689,8 +724,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_opt_in_capture_keeps_untraced_runs_plain_and_selects_failure_context(self):
         self.invoke(failure_context=True)
         runs = [command for command in self.calls if command[0] == str(self.binary)]
-        self.assertEqual([command[-1] for command in runs[:2]],
-                         ["--failure-context", "--failure-context"])
+        self.assertTrue(all("--failure-context" in command for command in runs[:2]))
         for command in runs[2:]:
             self.assertNotIn("--failure-context", command)
             self.assertNotIn("--trace-events", command)
@@ -939,6 +973,31 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class CampaignOwnershipTests(unittest.TestCase):
+    def test_progress_tail_is_bounded_and_ignores_only_an_unfinished_record(self):
+        sample = dict(format="neko-bios-progress-v1", phase="execution",
+                      master_cycle=16, start_master_cycle=8, cycle_ceiling=100,
+                      elapsed_wall_seconds=2.0, elapsed_cpu_seconds=1.5,
+                      cycles_per_second=4.0, sampled_at_unix_seconds=1000.0)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / "cold.progress.jsonl"
+            row = json.dumps(sample) + "\n"
+            path.write_text(row * 1000 + '{"format":')
+            self.assertEqual(discovery.campaign.read_progress(directory, path.name), sample)
+            path.write_text(row + '{"format":"broken"}\n')
+            with self.assertRaisesRegex(ValueError, "progress"):
+                discovery.campaign.read_progress(directory, path.name)
+            for field, value in (("master_cycle", 101), ("elapsed_wall_seconds", float("nan")),
+                                 ("elapsed_cpu_seconds", -1), ("master_cycle", True),
+                                 ("cycles_per_second", 10 ** 1000)):
+                with self.subTest(field=field, value=value):
+                    path.write_text(json.dumps(dict(sample, **{field: value})) + "\n")
+                    with self.assertRaisesRegex(ValueError, "progress"):
+                        discovery.campaign.read_progress(directory, path.name)
+            with self.assertRaisesRegex(ValueError, "artifact"):
+                discovery.campaign.read_progress(directory, "../outside.progress.jsonl")
+            self.assertIsNone(discovery.campaign.read_progress(directory, "not-published.jsonl"))
+
     def test_live_ownership_and_abrupt_death_are_not_inferred_from_a_pid(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

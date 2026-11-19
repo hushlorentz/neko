@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
+import time
 
 if os.name == "nt":
     import msvcrt
@@ -102,14 +104,70 @@ class Owner:
             self.stream.close()
 
 
-def artifact(directory, name):
+def artifact_path(directory, name):
     if (type(name) is not str or Path(name).name != name or
             (directory / name).resolve().parent != directory.resolve()):
         raise ValueError(f"Invalid campaign artifact name: {name!r}")
-    path = directory / name
+    return directory / name
+
+
+def artifact(directory, name):
+    path = artifact_path(directory, name)
     if not path.is_file():
         raise ValueError(f"Missing campaign artifact: {name}")
     return path
+
+
+def read_progress(directory, name):
+    path = artifact_path(directory, name)
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 65536))
+            rows = stream.read(65536).split(b"\n")
+    except FileNotFoundError:
+        return None
+    if len(rows) < 2:
+        return None
+    try:
+        sample = json.loads(rows[-2])
+    except (ValueError, UnicodeError) as error:
+        raise ValueError(f"Invalid progress record: {name}") from error
+    if (type(sample) is not dict or sample.get("format") != "neko-bios-progress-v1" or
+            sample.get("phase") not in ("execution", "report", "checkpoint",
+                                        "finished", "runtime_error")):
+        raise ValueError(f"Invalid progress record: {name}")
+    cycles = [sample.get(field) for field in
+              ("start_master_cycle", "master_cycle", "cycle_ceiling")]
+    if (any(type(value) is not int or not 0 <= value < 1 << 64 for value in cycles) or
+            not cycles[0] <= cycles[1] <= cycles[2]):
+        raise ValueError(f"Invalid progress cycle bounds: {name}")
+    for field in ("elapsed_wall_seconds", "elapsed_cpu_seconds",
+                  "cycles_per_second", "sampled_at_unix_seconds"):
+        value = sample.get(field)
+        try:
+            valid = type(value) in (int, float) and math.isfinite(value) and value >= 0
+        except OverflowError:
+            valid = False
+        if not valid:
+            raise ValueError(f"Invalid progress {field}: {name}")
+    return sample
+
+
+def stage_progress(directory, entry):
+    elapsed = None
+    if "started_at" in entry:
+        if type(entry["started_at"]) is not str:
+            raise ValueError("Invalid stage start timestamp")
+        started = datetime.fromisoformat(entry["started_at"])
+        if started.tzinfo is None:
+            raise ValueError("Stage timestamp must include a timezone")
+        elapsed = max(0, (datetime.now(timezone.utc) - started).total_seconds())
+    sample = read_progress(directory, entry["progress_file"]) if "progress_file" in entry else None
+    age = max(0, time.time() - sample["sampled_at_unix_seconds"]) if sample else None
+    return dict(name=entry.get("name"), elapsed_wall_seconds=elapsed,
+                sample=sample, sample_age_seconds=age)
 
 
 def completed_evidence(directory, execution):
@@ -150,6 +208,13 @@ def completed_evidence(directory, execution):
             if path.suffix == ".json":
                 read_json(path)
                 evidence[path.name] = file_identity(path)
+        if "progress_file" in entry:
+            progress = artifact(directory, entry["progress_file"])
+            sample = read_progress(directory, progress.name)
+            if (sample is None or sample.get("phase") != "finished" or
+                    sample != entry.get("progress")):
+                raise ValueError(f"Command progress changed: {name}")
+            evidence[progress.name] = file_identity(progress)
     if scout:
         required = {"scout-summary"}
         if not any(name.startswith("scout-") and name != "scout-summary" for name in names):
@@ -279,6 +344,7 @@ def status(directory):
                             active_stage=active.get("name"),
                             stage_exit=active.get("returncode"),
                             stage_started_at=active.get("started_at"),
+                            stage_progress=[stage_progress(directory, entry) for entry in pending],
                             progress=manifest.get("progress"))
             execution = read_json(directory / "execution.json")
             if execution.get("format") != EXECUTION_FORMAT:

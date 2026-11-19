@@ -740,6 +740,44 @@ means failed/interrupted/unknown. Read the JSON, not just the code.
 its timestamp/exit describe the latest pending command, or the latest completed
 command when none is pending. A completed cold pass does not hide a still-owned
 checkpoint capture.
+
+New native captures also retain `<stage>.progress.jsonl`. While running,
+`stage_progress` contains one entry per pending stage: parent-observed
+`elapsed_wall_seconds`, the latest native `sample`, and its host-clock
+`sample_age_seconds`. Samples report absolute `master_cycle`, the invocation's
+`start_master_cycle` and `cycle_ceiling`, native elapsed wall/process-CPU seconds,
+and cumulative `cycles_per_second`. Native timing starts after ROM loading and
+checkpoint restoration; parent stage wall time includes that preparation and
+any delay before reaping the child. CPU time is for that native process only,
+not the driver, other stages, or the complete campaign.
+
+Native phases are `execution`, `report`, `checkpoint`, `finished` and
+`runtime_error`. A finished sample is not an observed process exit or verified
+campaign. Each overlapping cold/checkpoint stage has its own sample and ceiling;
+the existing top-level scout `progress` remains a completed-segment summary.
+A null sample means the stage has not published one or is not a native capture.
+Old manifests need no synthetic progress records.
+
+Progress is sampled at coarse execution-slice boundaries (default one million
+master cycles), plus phase transitions, without per-cycle clock polling.
+Inspect sample age before treating the reported cycle as current: slow traced
+slices, report export, checkpoint I/O or a stalled process can leave an old
+sample. Status reads at most the last 64 KiB of each active sidecar, accepts
+the last complete line while a new line is being written, and reports malformed
+complete records as errors. Final progress and sidecar identities are retained
+in command/inspection evidence; they do not replace any execution comparison.
+
+For direct diagnostics, progress is opt-in and its destination must not exist:
+
+```sh
+./out/check/neko bios-startup path/to/bios.bin --cycles 10000000 --progress-file progress.jsonl --progress-every 1000000
+```
+
+`--progress-every` requires `--progress-file` and a positive unsigned 64-bit
+cycle interval. The file's records use `neko-bios-progress-v1`; telemetry is
+separate from stdout JSONL and stderr. Enabling it does not change run/trace
+payloads, guest timing, canonical state, failure-stop policy or cycle ceilings.
+
 Required compact JSON must parse, recorded output sizes must agree, required comparisons
 must agree and retained canonical/checkpoint bytes are hashed,
 so status inspection can read tens of MiB. It does not reread large JSONL

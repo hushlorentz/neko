@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -15,6 +16,113 @@ import run_bios_discovery as discovery
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    def test_native_progress_is_observational_across_trace_and_resume_boundaries(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes(bytes(4194304))
+            checkpoint = root / "prefix.state"
+            prepared = subprocess.run(
+                [str(binary), "bios-startup", str(bios), "--cycles", "8",
+                 "--save-checkpoint", str(checkpoint)], capture_output=True)
+            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            profiles = (
+                [], ["--trace-events", "256", "--failure-context"],
+                ["--trace-events", "256", "--failure-context", "--trace-from-cycle", "3"],
+                ["--resume-checkpoint", str(checkpoint)],
+                ["--scout"],
+            )
+            for index, options in enumerate(profiles):
+                with self.subTest(options=options):
+                    states = [root / f"{index}-{mode}.state" for mode in ("plain", "progress")]
+                    command = [str(binary), "bios-startup", str(bios), "--cycles", "24"]
+                    plain = subprocess.run(
+                        command + options + ["--save-checkpoint", str(states[0])],
+                        capture_output=True)
+                    progress = root / f"{index}.progress.jsonl"
+                    observed = subprocess.run(
+                        command + options + ["--save-checkpoint", str(states[1]),
+                        "--progress-file", str(progress), "--progress-every", "8"],
+                        capture_output=True)
+                    self.assertEqual(observed.returncode, plain.returncode, observed.stderr)
+                    self.assertEqual(plain.returncode, 0, plain.stderr)
+                    self.assertEqual(observed.stdout, plain.stdout)
+                    self.assertEqual(observed.stderr, plain.stderr)
+                    self.assertEqual(discovery.file_identity(states[0]),
+                                     discovery.file_identity(states[1]))
+                    samples = [json.loads(line) for line in progress.read_text().splitlines()]
+                    start = 8 if "--resume-checkpoint" in options else 0
+                    execution = [sample for sample in samples if sample["phase"] == "execution"]
+                    expected = ([0, 3, 11, 19, 24] if "--trace-from-cycle" in options else
+                                list(range(start, 25, 8)))
+                    self.assertEqual([sample["master_cycle"] for sample in execution],
+                                     expected)
+                    self.assertEqual(samples[-1]["phase"], "finished")
+                    for sample in samples:
+                        self.assertEqual(sample["format"], "neko-bios-progress-v1")
+                        self.assertEqual(sample["start_master_cycle"], start)
+                        self.assertEqual(sample["cycle_ceiling"], 24)
+                        self.assertGreaterEqual(sample["elapsed_wall_seconds"], 0)
+                        self.assertGreaterEqual(sample["elapsed_cpu_seconds"], 0)
+                        self.assertGreaterEqual(sample["cycles_per_second"], 0)
+                    self.assertEqual(sorted(sample["elapsed_wall_seconds"] for sample in samples),
+                                     [sample["elapsed_wall_seconds"] for sample in samples])
+
+    def test_native_progress_retains_early_failure_and_refuses_existing_destination(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes((0x4c000000).to_bytes(4, "little") + bytes(4194300))
+            command = [str(binary), "bios-startup", str(bios), "--cycles", "100", "--scout"]
+            plain = subprocess.run(command, capture_output=True)
+            progress = root / "progress.jsonl"
+            observed = subprocess.run(
+                command + ["--progress-file", str(progress), "--progress-every", "8"],
+                capture_output=True)
+            self.assertEqual(observed.returncode, 1, observed.stderr)
+            self.assertEqual(observed.stdout, plain.stdout)
+            samples = [json.loads(line) for line in progress.read_text().splitlines()]
+            self.assertEqual(samples[-1]["phase"], "finished")
+            self.assertGreater(samples[-1]["master_cycle"], 0)
+            self.assertLess(samples[-1]["master_cycle"], 8)
+            before = progress.read_bytes()
+            rejected = subprocess.run(
+                command + ["--progress-file", str(progress)], capture_output=True)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn(b"Cannot create progress", rejected.stderr)
+            self.assertEqual(progress.read_bytes(), before)
+
+    def test_native_progress_zero_and_partial_budgets_and_option_validation(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes(bytes(4194304))
+            for ceiling in (0, 10):
+                with self.subTest(ceiling=ceiling):
+                    progress = root / f"{ceiling}.jsonl"
+                    result = subprocess.run(
+                        [str(binary), "bios-startup", str(bios), "--cycles", str(ceiling),
+                         "--progress-file", str(progress), "--progress-every", "8"],
+                        capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    samples = [json.loads(line) for line in progress.read_text().splitlines()]
+                    self.assertEqual(samples[-1]["phase"], "finished")
+                    self.assertEqual(samples[-1]["master_cycle"], ceiling)
+            for interval in ("0", "-1", "18446744073709551616"):
+                result = subprocess.run(
+                    [str(binary), "bios-startup", str(bios), "--cycles", "10",
+                     "--progress-file", str(root / "invalid.jsonl"),
+                     "--progress-every", interval], capture_output=True)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse((root / "invalid.jsonl").exists())
+            result = subprocess.run(
+                [str(binary), "bios-startup", str(bios), "--cycles", "10",
+                 "--progress-every", "8"], capture_output=True)
+            self.assertEqual(result.returncode, 2)
+
     def test_native_scout_ceiling_retains_recent_and_pinned_checkpoints(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:
