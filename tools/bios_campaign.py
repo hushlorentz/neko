@@ -253,13 +253,18 @@ def completed_evidence(directory, execution):
         if comparison.get("equal") is not True or comparison.get("first_difference") is not None:
             raise ValueError(f"Comparison did not agree: {name}")
     states = manifest.get("final_states", {})
-    if (scout and not ceiling) or "checkpoint_at" in manifest:
-        expected = {"scout", "replay", "plain"} if scout else {"cold", "resumed", "resumed-plain"}
+    if not ceiling:
+        if scout:
+            expected, baseline_name = {"scout", "replay", "plain"}, "scout"
+        elif "checkpoint_at" in manifest:
+            expected, baseline_name = {"cold", "resumed", "resumed-plain"}, "cold"
+        else:
+            expected, baseline_name = {"traced1", "traced2", "plain1", "plain2"}, "traced1"
         if type(states) is not dict or set(states) != expected:
             raise ValueError("Missing canonical comparisons")
         if any(type(state) is not dict for state in states.values()):
             raise ValueError("Invalid canonical comparison receipt")
-        baseline = states["scout" if scout else "cold"]
+        baseline = states[baseline_name]
         identity = {key: baseline.get(key) for key in ("bytes", "sha256")}
         retained = 0
         for state in states.values():

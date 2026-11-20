@@ -340,6 +340,7 @@ class DiscoveryTests(unittest.TestCase):
         self.build_status = 0
         self.failure = True
         self.change_plain = False
+        self.change_canonical = False
         self.malformed = False
         self.cpu = "iop"
         self.run_error = None
@@ -381,7 +382,10 @@ class DiscoveryTests(unittest.TestCase):
                 rows[0].update(start="checkpoint", start_master_cycle=cycle)
             if "--save-checkpoint" in command:
                 path = Path(command[command.index("--save-checkpoint") + 1])
-                path.write_text(json.dumps(rows[1]["snapshot"], sort_keys=True))
+                state = dict(rows[1]["snapshot"])
+                if self.change_canonical and index == 3:
+                    state["authored_hidden_state"] = 1
+                path.write_text(json.dumps(state, sort_keys=True))
             raw = ("not json\n" if self.malformed else
                    "".join(json.dumps(row) + "\n" for row in rows))
             kwargs["stdout"].write(raw.encode("utf-8"))
@@ -604,6 +608,36 @@ class DiscoveryTests(unittest.TestCase):
             if run[0] == str(self.binary):
                 self.assertIn("--resume-checkpoint", run)
         self.assertTrue(self.read("compare-traces.json")["equal"])
+        manifest = self.read("manifest.json")
+        self.assertEqual(set(manifest["final_states"]), set(discovery.RUN_NAMES))
+        baseline = self.output / "traced1-final.state"
+        self.assertTrue(baseline.is_file())
+        for name, state in manifest["final_states"].items():
+            self.assertTrue(state["equal"])
+            self.assertEqual(state["sha256"], discovery.file_identity(baseline)["sha256"])
+            self.assertEqual(state.get("pruned_duplicate", False), name != "traced1")
+            self.assertEqual((self.output / state["file"]).exists(), name == "traced1")
+        self.assertEqual(discovery.campaign.status(self.output)["state"],
+                         "execution_finished")
+        baseline.write_bytes(b"changed canonical ending")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_reuse_canonical_mismatch_fails_even_when_reports_agree(self):
+        checkpoint = self.create_checkpoint()
+        self.output = self.root / "reuse-mismatch"
+        self.run_count = 0
+        self.run_statuses = [1] * 4
+        self.change_canonical = True
+        self.invoke(status=1, checkpoint=checkpoint)
+        self.assertTrue(self.read("compare-traces.json")["equal"])
+        self.assertTrue(self.read("compare-traced-plain.json")["equal"])
+        self.assertTrue(self.read("compare-plain.json")["equal"])
+        manifest = self.read("manifest.json")
+        self.assertFalse(manifest["final_states"]["plain2"]["equal"])
+        for state in manifest["final_states"].values():
+            self.assertFalse(state.get("pruned_duplicate", False))
+            self.assertTrue((self.output / state["file"]).is_file())
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
 
     def test_checkpoint_identity_changes_are_rejected_before_bios_reuse(self):
         for changed in ("state", "bios", "binary"):
@@ -647,7 +681,8 @@ class DiscoveryTests(unittest.TestCase):
             base + ["--trace-events", "3000000"], base, base,
         ]
         self.assertEqual(runs, [
-            command + ["--progress-file", str(self.output / f"{name}.progress.jsonl")]
+            command + ["--save-checkpoint", str(self.output / f"{name}-final.state"),
+                       "--progress-file", str(self.output / f"{name}.progress.jsonl")]
             for name, command in zip(discovery.RUN_NAMES, expected)])
         self.assertEqual(self.calls[0], [
             "cmake", "--build", str(self.root / "out" / "check"),
@@ -691,7 +726,8 @@ class DiscoveryTests(unittest.TestCase):
                 "--cycles", "10000000"]
         traced = base + ["--trace-events", "3000000", "--failure-context"]
         self.assertEqual(runs, [
-            command + ["--progress-file", str(self.output / f"{name}.progress.jsonl")]
+            command + ["--save-checkpoint", str(self.output / f"{name}-final.state"),
+                       "--progress-file", str(self.output / f"{name}.progress.jsonl")]
             for name, command in zip(discovery.RUN_NAMES, (traced, traced, base, base))])
         self.assertEqual(self.read("manifest.json")["max_master_cycles"], 10000000)
         self.assertEqual(self.read("summary.json")["input"]["max_master_cycles"],

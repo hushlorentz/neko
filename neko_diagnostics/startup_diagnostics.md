@@ -1009,6 +1009,17 @@ it affects only later execution: regenerate and revalidate with
 old state reflects current early-startup behavior. Low-level CLI restore does
 not enforce this helper provenance policy.
 
+The ordinary matrix, with or without checkpoint reuse, saves all four complete
+canonical ending states and compares them byte-for-byte in addition to its
+trace and snapshot comparisons. Agreement retains `traced1-final.state` for
+offline hardware inspection or `save-state frame` export; only the three
+newly generated duplicate endings are pruned. The manifest records each ending
+identity, comparison result, duplicate removal and total pruned bytes.
+Any disagreement retains all endings and fails the campaign. Runtime/I/O
+errors preserve partial evidence. Status/finalization verifies the retained
+canonical bytes; older ordinary matrices without canonical receipts cannot
+satisfy this gate and are not retroactively certified.
+
 Cold starts remain the authoritative regression baseline; restored runs are
 an iteration accelerator, not proof that reset/early startup still works.
 Each invocation still needs its own approved input/budget. Compression is not

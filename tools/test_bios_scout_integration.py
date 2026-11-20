@@ -190,6 +190,35 @@ class ScoutIntegrationTests(unittest.TestCase):
                     self.assertEqual(discovery.campaign.status(directory)["state"],
                                      "execution_finished")
 
+    def test_native_checkpoint_reuse_retains_and_protects_canonical_ending(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            bios.write_bytes(bytes(4194304))
+            created = root / "created"
+            reused = root / "reused"
+            with patch.object(discovery, "build_neko", return_value=binary), \
+                 redirect_stderr(io.StringIO()):
+                discovery.run_batch(created, bios, master_cycles=16, checkpoint_at=8)
+                result = discovery.run_batch(
+                    reused, bios, master_cycles=24, checkpoint=created / "checkpoint.state",
+                    failure_context=True)
+            self.assertTrue(result["comparisons_equal"])
+            manifest = json.loads((reused / "manifest.json").read_text())
+            self.assertEqual(set(manifest["final_states"]), set(discovery.RUN_NAMES))
+            baseline = reused / "traced1-final.state"
+            identity = discovery.file_identity(baseline)
+            for name, state in manifest["final_states"].items():
+                self.assertTrue(state["equal"])
+                self.assertEqual({key: state[key] for key in ("bytes", "sha256")}, identity)
+                self.assertEqual(state.get("pruned_duplicate", False), name != "traced1")
+            self.assertEqual(discovery.campaign.status(reused)["state"],
+                             "execution_finished")
+            with baseline.open("r+b") as stream:
+                stream.write(b"changed")
+            self.assertEqual(discovery.campaign.status(reused)["state"], "failed")
+
     def test_architectural_rejection_retains_matching_scout_replay_identity(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:
