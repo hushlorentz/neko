@@ -9,13 +9,15 @@
 
 class EEBus;
 class DMACController;
+class EEMemorySystem;
 
 class VIF1DMACChannel : public ClockedComponent
 {
   public:
     VIF1DMACChannel(
       EEBus *bus,
-      DMACController *controller);
+      DMACController *controller,
+      EEMemorySystem *memorySystem);
 
     bool clockActive() const override;
     void clock() override;
@@ -40,14 +42,14 @@ class VIF1DMACChannel : public ClockedComponent
     friend class NekoSaveStateCodec;
 
     bool submitValue(const GIFQuadword &quadword);
-    bool submitQuadword(std::uint32_t address);
-    bool submitTag(std::uint32_t address);
+    bool readSourceQuadword(std::uint32_t address, GIFQuadword *value) const;
     void transferQuadword();
     void readSourceChainTag();
     void completeTransfer();
 
     EEBus *eeBus;
     DMACController *dmacController;
+    EEMemorySystem *eeMemorySystem;
     DMACChannelState channelState;
     bool vif1Stalled = false;
     std::uint64_t transferredQuadwords = 0;

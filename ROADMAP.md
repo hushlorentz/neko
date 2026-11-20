@@ -4226,8 +4226,23 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored staged/active cold/restored traced/plain full canonical
       conformance; resolve architectural review and due validation before
       the user-owned implementation commit.
-- [ ] Verify fresh unchanged-input BIOS progress after the user commits,
-      with bounded same-build full conformance and next-origin attribution.
+- [x] Verify fresh unchanged-input BIOS progress after the user commits,
+      with bounded same-build full conformance and next-origin attribution
+      or an explicit bounded observation limit.
+
+### VIF1 Scratchpad Source-Chain Dependency
+
+- [x] Attribute the originating SPR-selected TADR write through retained
+      same-build discovery and local manuals; identify shared address-state
+      and transport boundaries without treating it as missing MMIO.
+- [x] Select a bounded scratchpad source-chain contract and architecture,
+      including tag/payload addressing, continuation, TTE/backpressure,
+      rejection and persistence, before implementing active DMA behavior.
+- [x] Implement and independently review the selected contract with focused
+      red/green and authored restored/trace conformance; run due validation
+      before the implementation commit.
+- [ ] Verify fresh unchanged-input BIOS progress with the required same-build
+      comparison scope and next-origin attribution.
 
 ### Additional CD/DVD Command and Configuration Scope
 

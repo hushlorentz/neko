@@ -2,19 +2,23 @@
 
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
+#include "ee_memory_system.hpp"
 #include "gif_dmac_channel.hpp"
 #include "vif1_dmac_channel.hpp"
 
 VIF1DMACChannel::VIF1DMACChannel(
   EEBus *bus,
-  DMACController *controller) :
+  DMACController *controller,
+  EEMemorySystem *memorySystem) :
   eeBus(bus),
   dmacController(controller),
+  eeMemorySystem(memorySystem),
   channelState(
     "VIF1",
-    DMACChannelDirectionPolicy::FromMemory)
+    DMACChannelDirectionPolicy::FromMemory,
+    DMACChannelProfile::VIF1)
 {
-  if (eeBus == nullptr || dmacController == nullptr)
+  if (eeBus == nullptr || dmacController == nullptr || eeMemorySystem == nullptr)
   {
     throw std::invalid_argument(
       "VIF1 DMAC channel requires non-null DMAC components.");
@@ -130,15 +134,32 @@ bool VIF1DMACChannel::submitValue(
       }) == EEDataWriteResult::Completed;
 }
 
-bool VIF1DMACChannel::submitQuadword(std::uint32_t address)
+bool VIF1DMACChannel::readSourceQuadword(
+  std::uint32_t address, GIFQuadword *value) const
 {
-  return submitValue(eeBus->readQuadword(address));
-}
-
-bool VIF1DMACChannel::submitTag(std::uint32_t address)
-{
-  const GIFQuadword tag = eeBus->readQuadword(address);
-  return eeBus->submitVIF1DMATag(tag);
+  if ((address & UINT32_C(0x80000000)) == 0)
+  {
+    *value = eeBus->readQuadword(address);
+    return true;
+  }
+  EEQuadword data = {};
+  const auto result = eeMemorySystem->readScratchpadDMA128(
+    address & (EEMemorySystem::SCRATCHPAD_SIZE - 1), &data);
+  if (result == EEScratchpadAccessResult::Wait)
+  {
+    return false;
+  }
+  if (result != EEScratchpadAccessResult::Completed)
+  {
+    throw std::out_of_range("VIF1 DMAC scratchpad address is invalid.");
+  }
+  *value = {
+    static_cast<std::uint32_t>(data.low),
+    static_cast<std::uint32_t>(data.low >> 32),
+    static_cast<std::uint32_t>(data.high),
+    static_cast<std::uint32_t>(data.high >> 32)
+  };
+  return true;
 }
 
 void VIF1DMACChannel::transferQuadword()
@@ -147,7 +168,12 @@ void VIF1DMACChannel::transferQuadword()
   {
     return;
   }
-  if (!submitQuadword(channelState.memoryAddress()))
+  GIFQuadword value = {};
+  if (!readSourceQuadword(channelState.memoryAddress(), &value))
+  {
+    return;
+  }
+  if (!submitValue(value))
   {
     vif1Stalled = true;
     return;
@@ -165,10 +191,14 @@ void VIF1DMACChannel::readSourceChainTag()
 {
   const std::uint32_t currentTagAddress =
     channelState.tagAddress();
-  const GIFQuadword tag = eeBus->readQuadword(currentTagAddress);
+  GIFQuadword tag = {};
+  if (!readSourceQuadword(currentTagAddress, &tag))
+  {
+    return;
+  }
   const auto priority = DMACController::decodeTagPriority(tag[0]);
   if (channelState.tagTransferEnabled() &&
-      !submitTag(currentTagAddress))
+      !eeBus->submitVIF1DMATag(tag))
   {
     vif1Stalled = true;
     return;

@@ -1571,7 +1571,7 @@ void NekoSaveStateCodec::readVIF1DMAC(
   for (std::uint32_t address : addresses)
   {
     require(
-      (address & ~UINT32_C(0x7ffffff0)) == 0,
+      (address & 0xf) == 0,
       "VIF1 DMAC address is invalid");
   }
   require(

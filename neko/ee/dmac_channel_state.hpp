@@ -63,7 +63,8 @@ enum class DMACChannelProfile : std::uint8_t
   VIFGIF,
   IPU,
   SIF1,
-  SIF0
+  SIF0,
+  VIF1
 };
 
 enum class DMACChannelDirectionPolicy : std::uint8_t
@@ -137,6 +138,7 @@ class DMACChannelState
     friend class NekoSaveStateCodec;
 
     void requireStopped() const;
+    bool hasAddressStack() const;
     std::uint32_t decodeAddress(
       std::uint32_t value,
       const char *registerName) const;

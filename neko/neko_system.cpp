@@ -206,7 +206,8 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent),
   vif1DMACComponent(
     &eeBusComponent,
-    &dmacControllerComponent),
+    &dmacControllerComponent,
+    &eeCoreComponent.memorySystem),
   fromIPUDMACComponent(IPUDMACChannelKind::FromIPU),
   toIPUDMACComponent(IPUDMACChannelKind::ToIPU),
   fromScratchpadDMACComponent(

@@ -153,7 +153,8 @@ TEST_CASE("DMAC active stops retain programming and discard continuation",
   "[ee][dma][active-stop]")
 {
   for (const auto profile : {DMACChannelProfile::VIFGIF,
-    DMACChannelProfile::IPU, DMACChannelProfile::SIF0, DMACChannelProfile::SIF1})
+    DMACChannelProfile::IPU, DMACChannelProfile::SIF0, DMACChannelProfile::SIF1,
+    DMACChannelProfile::VIF1})
     for (const auto stop : {0u, 0x123400e4u})
     {
       CAPTURE(profile);
@@ -164,7 +165,7 @@ TEST_CASE("DMAC active stops retain programming and discard continuation",
       state.writeQuadwordCount(profile == DMACChannelProfile::SIF0 ? 0 : 3);
       if (profile != DMACChannelProfile::SIF0)
         state.writeTagAddress(0x1000);
-      if (profile == DMACChannelProfile::VIFGIF)
+      if (profile == DMACChannelProfile::VIFGIF || profile == DMACChannelProfile::VIF1)
         state.writeAddressStack(1, 0x6000);
       state.writeChannelControl(profile == DMACChannelProfile::IPU ?
         0x181 : 0x185);
@@ -173,7 +174,8 @@ TEST_CASE("DMAC active stops retain programming and discard continuation",
           DMACChannelTransition::Continue);
       else if (profile != DMACChannelProfile::IPU)
         REQUIRE(state.acceptSourceChainTag(
-          profile == DMACChannelProfile::VIFGIF ? 0xd0000003 : 0xf0000003,
+          profile == DMACChannelProfile::VIFGIF || profile == DMACChannelProfile::VIF1
+            ? 0xd0000003 : 0xf0000003,
           0x2000) == DMACChannelTransition::Continue);
       REQUIRE(state.acceptQuadword() == DMACChannelTransition::Continue);
       const auto retained = state.channelControl() & ~DMACChannelControl::START;
@@ -188,7 +190,7 @@ TEST_CASE("DMAC active stops retain programming and discard continuation",
       REQUIRE_FALSE(state.continuation().terminateAfterPacket);
       REQUIRE_FALSE(state.continuation().destinationPacketAccepted);
       REQUIRE(state.continuation().sliceQuadwordsRemaining == 0);
-      if (profile == DMACChannelProfile::VIFGIF)
+      if (profile == DMACChannelProfile::VIFGIF || profile == DMACChannelProfile::VIF1)
       {
         REQUIRE(state.addressStack(0) == 0x1040);
         REQUIRE(state.addressStack(1) == 0x6000);

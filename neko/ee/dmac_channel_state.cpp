@@ -48,7 +48,8 @@ DMACChannelState::DMACChannelState(
   if (profile != DMACChannelProfile::VIFGIF &&
       profile != DMACChannelProfile::IPU &&
       profile != DMACChannelProfile::SIF1 &&
-      profile != DMACChannelProfile::SIF0)
+      profile != DMACChannelProfile::SIF0 &&
+      profile != DMACChannelProfile::VIF1)
   {
     throw std::invalid_argument("Unsupported DMAC channel profile.");
   }
@@ -128,7 +129,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   }
 
   const std::uint8_t requestedStackDepth =
-    profile != DMACChannelProfile::VIFGIF ? 0 : static_cast<std::uint8_t>(
+    !hasAddressStack() ? 0 : static_cast<std::uint8_t>(
       (value &
        DMACChannelControl::ADDRESS_STACK_MASK) >> 4);
   if (requestedStackDepth > addressStackRegisters.size())
@@ -205,7 +206,7 @@ void DMACChannelState::writeTagAddress(std::uint32_t value)
 std::uint32_t DMACChannelState::addressStack(
   std::size_t index) const
 {
-  if (profile != DMACChannelProfile::VIFGIF ||
+  if (!hasAddressStack() ||
       index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
@@ -220,7 +221,7 @@ void DMACChannelState::writeAddressStack(
   std::uint32_t value)
 {
   requireStopped();
-  if (profile != DMACChannelProfile::VIFGIF ||
+  if (!hasAddressStack() ||
       index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
@@ -334,7 +335,8 @@ DMACChannelState::acceptSourceChainTag(
   const std::uint32_t afterInlineData =
     advanceAddress(inlineDataAddress, count * 16);
   const std::uint32_t tagAddress = high &
-    (profile == DMACChannelProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
+    (profile == DMACChannelProfile::SIF1 || profile == DMACChannelProfile::VIF1
+      ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 
   channelControlRegister =
     (channelControlRegister &
@@ -454,6 +456,12 @@ void DMACChannelState::requireStopped() const
       std::string(name) +
       " DMAC channel registers cannot change while active.");
   }
+}
+
+bool DMACChannelState::hasAddressStack() const
+{
+  return profile == DMACChannelProfile::VIFGIF ||
+    profile == DMACChannelProfile::VIF1;
 }
 
 std::uint32_t DMACChannelState::decodeAddress(
