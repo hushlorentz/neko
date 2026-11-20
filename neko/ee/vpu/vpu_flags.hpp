@@ -28,6 +28,8 @@
 #define VPU_FLAG_IS 0x400
 #define VPU_FLAG_DS 0x800
 
+#define VPU_STATUS_FLAG_MASK 0xfff
+
 #define VPU_Z_BITS_MASK 0xf
 #define VPU_S_BITS_MASK 0xf0
 #define VPU_U_BITS_MASK 0xf00

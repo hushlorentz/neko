@@ -581,6 +581,49 @@ TEST_CASE("Neko save states are canonical and deterministic")
   REQUIRE(traceCount == 1);
 }
 
+TEST_CASE("VU save states preserve combined status flags", "[vu-status-state]")
+{
+  NekoSystem original;
+  original.vu0().setStatusFlagsValue(UINT32_C(0x0fc0));
+  original.vu1().setStatusFlagsValue(UINT32_C(0x0840));
+  const auto state = original.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.vu0().statusFlagsValue() == UINT16_C(0x0fc0));
+  REQUIRE(restored.vu1().statusFlagsValue() == UINT16_C(0x0840));
+  requireStateBytesEqual(restored.saveState(), state);
+
+  SaveStateMutation allFlags(state);
+  allFlags.writeScalar("system.vu0.statusFlags", UINT16_C(0x0fff));
+  allFlags.writeScalar("system.vu1.statusFlags", UINT16_C(0x0fff));
+  allFlags.refreshChecksum();
+  REQUIRE_NOTHROW(restored.loadState(allFlags));
+  REQUIRE(restored.vu0().statusFlagsValue() == UINT16_C(0x0fff));
+  REQUIRE(restored.vu1().statusFlagsValue() == UINT16_C(0x0fff));
+  requireStateBytesEqual(restored.saveState(), allFlags);
+}
+
+TEST_CASE("VU save states reject reserved status bits transactionally",
+          "[vu-status-state]")
+{
+  NekoSystem source;
+  const auto state = source.saveState();
+  NekoSystem destination;
+  destination.vu0().loadIntRegister(1, 0x1234);
+  const auto before = destination.saveState();
+  for (const auto *path : {"system.vu0.statusFlags", "system.vu1.statusFlags"})
+  {
+    for (const auto reservedBit : {UINT16_C(0x1000), UINT16_C(0x8000)})
+    {
+      SaveStateMutation invalid(state);
+      invalid.writeScalar(path, reservedBit);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS(destination.loadState(invalid));
+      requireStateBytesEqual(destination.saveState(), before);
+    }
+  }
+}
+
 TEST_CASE("GS completed transfers survive smaller pending register restore", "[gs16]")
 {
   NekoSystem original;

@@ -4267,7 +4267,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Attribute the real BIOS encoding and select a bounded macro-only unused
       `fsf` policy with manual-first evidence and shared decoding ownership.
 - [x] Implement focused red/green and authored restored/trace conformance,
-      preserving micro decoding, operand guards and existing FDIV timing.
+      preserving micro guards, FDIV timing and valid 12-bit status restoration.
 - [ ] Independently review and verify fresh unchanged-input BIOS retirement
       with required same-build comparisons and next-origin attribution.
 

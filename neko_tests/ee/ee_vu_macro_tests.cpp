@@ -807,6 +807,8 @@ TEST_CASE("BIOS VSQRT unused fsf agrees cold restored and traced",
   const auto prepare = [](NekoSystem &system)
   {
     system.vu0().loadFPRegister(5, 16, 25, 36, 49);
+    system.vu0().setQRegisterBits(UINT32_C(0xbf800000));
+    system.vu0().setStatusFlagsValue(UINT32_C(0x0fc0));
     system.eeBus().write32(0, UINT32_C(0x4a2503bd));
     system.eeBus().write32(4, macroLowerInstruction(VPU_WAITQ_ENCODING));
     system.eeCore().startExecution(0);

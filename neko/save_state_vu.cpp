@@ -483,7 +483,7 @@ void NekoSaveStateCodec::readVPU(
     vpu->pendingBranchLinkRegister <= VPU_REGISTER_VI15,
     "VU branch-link register is invalid");
   require(
-    vpu->statusFlags <= VPU_FLAG_DS,
+    vpu->statusFlags <= VPU_STATUS_FLAG_MASK,
     "VU status flags are invalid");
   require(
     !vpu->forceBreakStop ||
