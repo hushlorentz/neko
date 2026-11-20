@@ -81,7 +81,7 @@ namespace
       vertexValue(x, y, z));
   }
 
-  void prepareDepthSprite(NekoSystem &system)
+  void prepareDepthSprite(NekoSystem &system, std::uint8_t textureFormat)
   {
     auto &gs = system.gs();
     configure(&gs);
@@ -89,7 +89,9 @@ namespace
     gs.writeRegister(
       GSRegisterAddress::TEX0_1,
       UINT64_C(128) | (UINT64_C(1) << 14) |
+      (static_cast<std::uint64_t>(textureFormat) << 20) |
       (UINT64_C(3) << 26) | (UINT64_C(3) << 30) | (UINT64_C(1) << 34));
+    gs.writeRegister(GSRegisterAddress::TEXA, UINT64_C(0x000000810000807f));
     gs.writeRegister(
       GSRegisterAddress::TEX1_1,
       (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
@@ -335,67 +337,74 @@ TEST_CASE("GS PSMZ24 interpolated depth saturates after rasterization",
 }
 
 TEST_CASE("GS PSMZ24 scratchpad DIRECT sprites agree cold restored and traced",
-          "[gs][psmz24][conformance]")
+          "[gs][psmz24][psmct24][conformance]")
 {
-  NekoSystem origin;
-  prepareDepthSprite(origin);
-  const auto staged = origin.saveState();
-  std::uint64_t checkpointCycle = 0;
-  while (checkpointCycle < 32 && origin.gs().queuedVertexCount() != 1)
+  for (const auto textureFormat : {
+         GSPixelStorageMode::PSMCT32, GSPixelStorageMode::PSMCT24})
   {
-    origin.clockMasterCycle();
-    ++checkpointCycle;
-  }
-  REQUIRE(checkpointCycle < 32);
-  REQUIRE(origin.gs().context(0).depthBuffer.pixelStorageMode ==
-    GSPixelStorageMode::PSMZ24);
-  const auto active = origin.saveState();
-  origin.runMasterCycles(64 - checkpointCycle);
-  REQUIRE(origin.gs().spriteCount() == 1);
-  REQUIRE(origin.gs().pixelWriteCount() == 4);
-  REQUIRE(origin.gs().queuedVertexCount() == 0);
-  REQUIRE(origin.vif1DMAC().quadwordCount() == 0);
-  for (std::uint16_t y = 1; y < 3; ++y)
-  {
-    for (std::uint16_t x = 1; x < 3; ++x)
+    INFO("texture format " << static_cast<unsigned>(textureFormat));
+    const auto expectedPixel = textureFormat == GSPixelStorageMode::PSMCT24
+      ? UINT32_C(0xfd00000a) : UINT32_C(0xff00000a);
+    NekoSystem origin;
+    prepareDepthSprite(origin, textureFormat);
+    const auto staged = origin.saveState();
+    std::uint64_t checkpointCycle = 0;
+    while (checkpointCycle < 32 && origin.gs().queuedVertexCount() != 1)
     {
-      REQUIRE(origin.gs().readPSMCT32(0, x, y) == UINT32_C(0xff00000a));
-      REQUIRE(origin.gs().localMemoryWord(
-        origin.gs().psmz24WordAddress(0, x, y)) == UINT32_C(0xb0000020));
+      origin.clockMasterCycle();
+      ++checkpointCycle;
     }
-  }
-  const auto expected = origin.saveState();
-  for (const auto restoredAt : {UINT64_C(0), checkpointCycle})
-  {
-    NekoSystem coldTraced;
-    NekoSystem coldPlain;
-    NekoSystem restoredTraced;
-    NekoSystem restoredPlain;
-    prepareDepthSprite(coldTraced);
-    prepareDepthSprite(coldPlain);
-    const auto &checkpoint = restoredAt == 0 ? staged : active;
-    restoredTraced.loadState(checkpoint);
-    restoredPlain.loadState(checkpoint);
-    REQUIRE(restoredTraced.saveState() == checkpoint);
-    coldTraced.startTrace();
-    restoredTraced.startTrace();
-    coldTraced.runMasterCycles(64);
-    coldPlain.runMasterCycles(64);
-    restoredTraced.runMasterCycles(64 - restoredAt);
-    restoredPlain.runMasterCycles(64 - restoredAt);
-    REQUIRE(coldTraced.saveState() == expected);
-    REQUIRE(coldPlain.saveState() == expected);
-    REQUIRE(restoredTraced.saveState() == expected);
-    REQUIRE(restoredPlain.saveState() == expected);
-    IOPTraceTest::Events suffix;
-    for (const auto &event : coldTraced.trace())
+    REQUIRE(checkpointCycle < 32);
+    REQUIRE(origin.gs().context(0).depthBuffer.pixelStorageMode ==
+      GSPixelStorageMode::PSMZ24);
+    const auto active = origin.saveState();
+    origin.runMasterCycles(64 - checkpointCycle);
+    REQUIRE(origin.gs().spriteCount() == 1);
+    REQUIRE(origin.gs().pixelWriteCount() == 4);
+    REQUIRE(origin.gs().queuedVertexCount() == 0);
+    REQUIRE(origin.vif1DMAC().quadwordCount() == 0);
+    for (std::uint16_t y = 1; y < 3; ++y)
     {
-      if (event.masterCycle > restoredAt)
+      for (std::uint16_t x = 1; x < 3; ++x)
       {
-        suffix.push_back(event);
+        REQUIRE(origin.gs().readPSMCT32(0, x, y) == expectedPixel);
+        REQUIRE(origin.gs().localMemoryWord(
+          origin.gs().psmz24WordAddress(0, x, y)) == UINT32_C(0xb0000020));
       }
     }
-    IOPTraceTest::requireEvents(restoredTraced.trace(), suffix);
+    const auto expected = origin.saveState();
+    for (const auto restoredAt : {UINT64_C(0), checkpointCycle})
+    {
+      NekoSystem coldTraced;
+      NekoSystem coldPlain;
+      NekoSystem restoredTraced;
+      NekoSystem restoredPlain;
+      prepareDepthSprite(coldTraced, textureFormat);
+      prepareDepthSprite(coldPlain, textureFormat);
+      const auto &checkpoint = restoredAt == 0 ? staged : active;
+      restoredTraced.loadState(checkpoint);
+      restoredPlain.loadState(checkpoint);
+      REQUIRE(restoredTraced.saveState() == checkpoint);
+      coldTraced.startTrace();
+      restoredTraced.startTrace();
+      coldTraced.runMasterCycles(64);
+      coldPlain.runMasterCycles(64);
+      restoredTraced.runMasterCycles(64 - restoredAt);
+      restoredPlain.runMasterCycles(64 - restoredAt);
+      REQUIRE(coldTraced.saveState() == expected);
+      REQUIRE(coldPlain.saveState() == expected);
+      REQUIRE(restoredTraced.saveState() == expected);
+      REQUIRE(restoredPlain.saveState() == expected);
+      IOPTraceTest::Events suffix;
+      for (const auto &event : coldTraced.trace())
+      {
+        if (event.masterCycle > restoredAt)
+        {
+          suffix.push_back(event);
+        }
+      }
+      IOPTraceTest::requireEvents(restoredTraced.trace(), suffix);
+    }
   }
 }
 

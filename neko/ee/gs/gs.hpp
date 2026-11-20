@@ -24,6 +24,7 @@ namespace GSRegisterAddress
   constexpr std::uint8_t TEX1_2 = 0x15;
   constexpr std::uint8_t XYOFFSET_1 = 0x18;
   constexpr std::uint8_t XYOFFSET_2 = 0x19;
+  constexpr std::uint8_t TEXA = 0x3b;
   constexpr std::uint8_t SCISSOR_1 = 0x40;
   constexpr std::uint8_t SCISSOR_2 = 0x41;
   constexpr std::uint8_t ALPHA_1 = 0x42;
@@ -47,6 +48,7 @@ namespace GSRegisterAddress
 namespace GSPixelStorageMode
 {
   constexpr std::uint8_t PSMCT32 = 0x00;
+  constexpr std::uint8_t PSMCT24 = 0x01;
   constexpr std::uint8_t PSMCT16 = 0x02;
   constexpr std::uint8_t PSMZ32 = 0x00;
   constexpr std::uint8_t PSMZ24 = 0x01;

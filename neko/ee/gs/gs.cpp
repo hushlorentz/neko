@@ -28,6 +28,7 @@ namespace
   constexpr std::uint16_t GS_PSMCT16_HALF_COLUMN_WIDTH = 8;
   constexpr std::uint32_t GS_HALFWORD_MASK = 0xffff;
   constexpr std::uint32_t GS_PSMZ24_MASK = 0x00ffffff;
+  constexpr std::uint32_t GS_RGB24_MASK = 0x00ffffff;
   constexpr std::uint8_t GS_HALFWORD_BITS = 16;
   constexpr std::size_t GS_BLOCK_WORDS = 64;
   constexpr std::size_t GS_COLUMN_WORDS = 16;
@@ -64,6 +65,7 @@ namespace
   constexpr std::uint8_t GS_TEXTURE_WIDTH_EXPONENT_SHIFT = 26;
   constexpr std::uint8_t GS_TEXTURE_HEIGHT_EXPONENT_SHIFT = 30;
   constexpr std::uint8_t GS_TEXTURE_RGBA_BIT = 34;
+  constexpr std::uint8_t GS_TEXTURE_ALPHA_EXPANSION_BIT = 15;
   constexpr std::uint64_t GS_TEXTURE_FUNCTION_MASK = 0x03;
   constexpr std::uint8_t GS_TEXTURE_FUNCTION_SHIFT = 35;
   constexpr std::uint64_t GS_TEXTURE_MIP_LEVEL_MASK = 0x07;
@@ -1861,10 +1863,11 @@ const GSContext &GS::checkedTextureContext(
     throw std::runtime_error(
       "GS texture sampling requires a valid buffer width.");
   }
-  if (texture.pixelStorageMode != GSPixelStorageMode::PSMCT32)
+  if (texture.pixelStorageMode != GSPixelStorageMode::PSMCT32 &&
+      texture.pixelStorageMode != GSPixelStorageMode::PSMCT24)
   {
     throw std::runtime_error(
-      "GS texture sampling requires PSMCT32.");
+      "GS texture sampling requires PSMCT32 or PSMCT24.");
   }
   if (texture.widthExponent > GS_TEXTURE_MAXIMUM_EXPONENT ||
       texture.heightExponent > GS_TEXTURE_MAXIMUM_EXPONENT)
@@ -1954,11 +1957,23 @@ std::uint32_t GS::readTextureTexel(
     samplingContext.textureClamp.vertical,
     samplingContext.textureClamp.minimumV,
     samplingContext.textureClamp.maximumV);
-  return localMemory[psmct32WordAddress(
+  const std::uint32_t texel = localMemory[psmct32WordAddress(
     texture.basePointer,
     texture.bufferWidth,
     static_cast<std::uint16_t>(u),
     static_cast<std::uint16_t>(v))];
+  if (texture.pixelStorageMode == GSPixelStorageMode::PSMCT24)
+  {
+    const std::uint32_t rgb = texel & GS_RGB24_MASK;
+    const std::uint64_t texa = registers[GSRegisterAddress::TEXA];
+    if (rgb == 0 && bit(texa, GS_TEXTURE_ALPHA_EXPANSION_BIT))
+    {
+      return 0;
+    }
+    return rgb |
+      (static_cast<std::uint32_t>(texa & GS_BYTE_MASK) << GS_ALPHA_SHIFT);
+  }
+  return texel;
 }
 
 GSContext &GS::mutableContext(std::size_t index)

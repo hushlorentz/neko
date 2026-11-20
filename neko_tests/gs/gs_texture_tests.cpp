@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "catch.hpp"
@@ -222,10 +223,10 @@ TEST_CASE("GS PSMCT32 Nearest Texture Sampling Tests")
 
     gs.writeRegister(
       GSRegisterAddress::TEX0_1,
-      textureValue(0, 1, 1, 1, 1));
+      textureValue(0, 1, GSPixelStorageMode::PSMCT16, 1, 1));
     REQUIRE_THROWS_WITH(
       gs.sampleTextureNearest(0, 0, 0),
-      "GS texture sampling requires PSMCT32.");
+      "GS texture sampling requires PSMCT32 or PSMCT24.");
 
     gs.writeRegister(
       GSRegisterAddress::TEX0_1,
@@ -330,7 +331,7 @@ TEST_CASE("GS bilinear sampling retains configuration guards",
   gs.writeRegister(GSRegisterAddress::TEX0_1,
     textureValue(32, 1, 2, 3, 3));
   REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
-    "GS texture sampling requires PSMCT32.");
+    "GS texture sampling requires PSMCT32 or PSMCT24.");
   gs.writeRegister(GSRegisterAddress::TEX0_1,
     textureValue(32, 1, 0, 11, 3));
   REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
@@ -352,6 +353,105 @@ TEST_CASE("GS bilinear sampling retains configuration guards",
     REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
       "GS texture sampling requires matching base-level linear filters.");
   }
+}
+
+TEST_CASE("GS PSMCT24 uses shared TEXA alpha without changing stored words",
+          "[gs][psmct24]")
+{
+  GS gs;
+  for (const auto address : {GSRegisterAddress::TEX0_1, GSRegisterAddress::TEX0_2})
+  {
+    gs.writeRegister(address, textureValue(32, 1, 1, 3, 3));
+  }
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, UINT32_C(0xcc000000));
+  gs.writeDisplayPSMCT32(32, 1, 1, 0, UINT32_C(0xdd112233));
+  gs.writeDisplayPSMCT32(32, 1, 2, 0, UINT32_C(0xee000001));
+  for (const std::uint8_t alpha : {0, 1, 0x7f, 0x80, 0xff})
+  {
+    const auto expanded = static_cast<std::uint32_t>(alpha) << 24;
+    gs.writeRegister(0x3b, (UINT64_C(0xa5) << 32) | alpha);
+    for (const auto context : {0, 1})
+    {
+      REQUIRE(gs.sampleTextureNearest(context, 0, 0) == expanded);
+      REQUIRE(gs.sampleTextureNearest(context, 16, 0) == (expanded | 0x112233));
+      gs.writeRegister(0x3b, (UINT64_C(0x5a) << 32) | (UINT64_C(1) << 15) | alpha);
+      REQUIRE(gs.sampleTextureNearest(context, 0, 0) == 0);
+      REQUIRE(gs.sampleTextureNearest(context, 32, 0) == (expanded | 1));
+      gs.writeRegister(0x3b, (UINT64_C(0xa5) << 32) | alpha);
+    }
+  }
+  REQUIRE(gs.readDisplayPSMCT32(32, 1, 0, 0) == UINT32_C(0xcc000000));
+  REQUIRE(gs.readDisplayPSMCT32(32, 1, 1, 0) == UINT32_C(0xdd112233));
+  gs.writeRegister(GSRegisterAddress::TEX0_2, textureValue(32, 1, 0, 3, 3));
+  REQUIRE(gs.sampleTextureNearest(1, 0, 0) == UINT32_C(0xcc000000));
+  REQUIRE(gs.sampleTextureNearest(1, 16, 0) == UINT32_C(0xdd112233));
+}
+
+TEST_CASE("GS PSMCT24 shares word layout across pages and local memory wrap",
+          "[gs][psmct24]")
+{
+  GS gs;
+  for (const std::uint16_t base : {32, 0x3fff})
+  {
+    gs.writeRegister(GSRegisterAddress::TEX0_1, textureValue(base, 2, 1, 7, 6));
+    gs.writeRegister(0x3b, 0x7f);
+    for (const auto coordinate : {
+           std::pair<std::uint16_t, std::uint16_t>{7, 1}, {63, 31}, {64, 32}})
+    {
+      const auto x = coordinate.first;
+      const auto y = coordinate.second;
+      gs.writeDisplayPSMCT32(base, 2, x, y, UINT32_C(0xee123456));
+      REQUIRE(gs.sampleTextureNearest(0, x * 16, y * 16) == UINT32_C(0x7f123456));
+      REQUIRE(gs.readDisplayPSMCT32(base, 2, x, y) == UINT32_C(0xee123456));
+    }
+  }
+}
+
+TEST_CASE("GS PSMCT24 expands each alpha before bilinear filtering",
+          "[gs][psmct24][bilinear]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::TEX0_1, textureValue(32, 1, 1, 3, 3));
+  gs.writeRegister(GSRegisterAddress::TEX1_1,
+    (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, UINT32_C(0xaa000000));
+  gs.writeDisplayPSMCT32(32, 1, 1, 0, UINT32_C(0xbb203040));
+  gs.writeDisplayPSMCT32(32, 1, 0, 1, UINT32_C(0xcc405060));
+  gs.writeDisplayPSMCT32(32, 1, 1, 1, UINT32_C(0xdd607080));
+  gs.writeRegister(0x3b, UINT64_C(0x80) | (UINT64_C(1) << 15));
+  REQUIRE(gs.sampleTextureBilinear(0, 8, 8) == 0);
+  REQUIRE(gs.sampleTextureBilinear(0, 16, 16) == UINT32_C(0x60303c48));
+  REQUIRE(gs.sampleTextureBilinear(0, 12, 12) == UINT32_C(0x38181f26));
+  gs.writeRegister(0x3b, 0x80);
+  REQUIRE(gs.sampleTextureBilinear(0, 8, 8) == UINT32_C(0x80000000));
+  REQUIRE(gs.sampleTextureBilinear(0, 16, 16) == UINT32_C(0x80303c48));
+}
+
+TEST_CASE("PATH3 PSMCT32 uploads can be sampled as PSMCT24",
+          "[gs][psmct24]")
+{
+  GS gs;
+  GIFDecoder decoder;
+  decoder.attachRegisterWriteHandler(&gs);
+  GIFPath3Transfer path3(&decoder);
+  const std::vector<GIFQuadword> packet = {
+    gifTag(6, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+    adWrite(GSRegisterAddress::BITBLTBUF, transferBuffer(16, 1)),
+    adWrite(GSRegisterAddress::TRXPOS, 0),
+    adWrite(GSRegisterAddress::TRXREG, transferRegion(2, 2)),
+    adWrite(GSRegisterAddress::TRXDIR, 0),
+    adWrite(GSRegisterAddress::TEXA, UINT64_C(0x000000810000807f)),
+    adWrite(GSRegisterAddress::TEX0_1, textureValue(16, 1, 1, 1, 1)),
+    gifTag(1, GIFDataFormat::Image),
+    GIFQuadword{{0xaa000000, 0xbb112233, 0xcc000001, 0xddccbbaa}}
+  };
+  const auto result = path3.submitQuadwords(packet.data(), packet.size());
+  REQUIRE(result.transferredQuadwords == packet.size());
+  REQUIRE(result.packetComplete);
+  REQUIRE(gs.sampleTextureNearest(0, 0, 0) == 0);
+  REQUIRE(gs.sampleTextureNearest(0, 16, 0) == UINT32_C(0x7f112233));
+  REQUIRE(gs.sampleTextureNearest(0, 0, 16) == UINT32_C(0x7f000001));
+  REQUIRE(gs.sampleTextureNearest(0, 16, 16) == UINT32_C(0x7fccbbaa));
 }
 
 TEST_CASE("PATH3 PSMCT32 Texture Upload and Sampling Tests")

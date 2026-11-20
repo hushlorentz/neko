@@ -4268,7 +4268,16 @@ not requirements for exhaustive subsystem coverage.
       `fsf` policy with manual-first evidence and shared decoding ownership.
 - [x] Implement focused red/green and authored restored/trace conformance,
       preserving micro guards, FDIV timing and valid 12-bit status restoration.
-- [ ] Independently review and verify fresh unchanged-input BIOS retirement
+- [x] Independently review and verify fresh unchanged-input BIOS retirement
+      with required same-build comparisons and next-origin attribution.
+
+### GS 24-Bit Texture Sampling Dependency
+
+- [x] Establish the evidenced direct-color texture layout and alpha-expansion
+      contract, using the existing GS raw-register and local-memory owners.
+- [x] Support nearest/linear sampling with focused red/green and authored
+      primitive/transport/restored conformance; preserve other format guards.
+- [ ] Verify fresh unchanged-input BIOS retirement and bounded presentation
       with required same-build comparisons and next-origin attribution.
 
 ### Additional CD/DVD Command and Configuration Scope
