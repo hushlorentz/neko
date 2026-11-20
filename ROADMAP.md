@@ -4241,8 +4241,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement and independently review the selected contract with focused
       red/green and authored restored/trace conformance; run due validation
       before the implementation commit.
-- [ ] Verify fresh unchanged-input BIOS progress with the required same-build
+- [x] Verify fresh unchanged-input BIOS progress with the required same-build
       comparison scope and next-origin attribution.
+
+### GS PSMZ24 Sprite Drawing Dependency
+
+- [x] Freeze PSMZ24 depth and base-level bilinear PSMCT32 sampling contracts
+      for the evidenced sprite; retain format, mipmap and transfer guards.
+- [x] Implement focused red/green and authored primitive/transport/restored
+      conformance, preserving masks and PSMZ32 behavior; review before commit.
+- [ ] Verify fresh unchanged-input BIOS retirement with the selected same-build
+      comparisons and next origin or explicit bounded observation limit.
 
 ### Additional CD/DVD Command and Configuration Scope
 

@@ -27,6 +27,7 @@ namespace
   constexpr std::uint16_t GS_PSMCT16_BLOCK_HEIGHT = 8;
   constexpr std::uint16_t GS_PSMCT16_HALF_COLUMN_WIDTH = 8;
   constexpr std::uint32_t GS_HALFWORD_MASK = 0xffff;
+  constexpr std::uint32_t GS_PSMZ24_MASK = 0x00ffffff;
   constexpr std::uint8_t GS_HALFWORD_BITS = 16;
   constexpr std::size_t GS_BLOCK_WORDS = 64;
   constexpr std::size_t GS_COLUMN_WORDS = 16;
@@ -755,7 +756,9 @@ void GS::validateBasicDrawing(
   psmct32WordAddress(primitiveRegister.context, 0, 0);
   if (drawingContext.test.depthTestEnabled)
   {
-    psmz32WordAddress(primitiveRegister.context, 0, 0);
+    psmzWordAddress(
+      primitiveRegister.context, 0, 0,
+      drawingContext.depthBuffer.pixelStorageMode);
   }
 }
 
@@ -813,10 +816,12 @@ std::uint32_t GS::shadeTexturedFragment(
       "GS texture coordinates are outside the supported range.");
   }
 
-  const std::uint32_t texel = sampleTextureNearest(
-    contextIndex,
-    static_cast<std::int32_t>(std::floor(fixedU)),
-    static_cast<std::int32_t>(std::floor(fixedV)));
+  const auto u = static_cast<std::int32_t>(std::floor(fixedU));
+  const auto v = static_cast<std::int32_t>(std::floor(fixedV));
+  const std::uint32_t texel =
+    textureState.magnificationLinear && textureState.minificationFilter == 1 ?
+    sampleTextureBilinear(contextIndex, u, v) :
+    sampleTextureNearest(contextIndex, u, v);
   const std::uint8_t textureRed =
     colorChannel(texel, GS_RED_SHIFT);
   const std::uint8_t textureGreen =
@@ -911,10 +916,23 @@ bool GS::writeFragment(
       return false;
     }
   }
+  std::size_t depthAddress = 0;
+  std::uint32_t depthMask = UINT32_C(0xffffffff);
   if (drawingContext.test.depthTestEnabled)
   {
+    depthAddress = psmzWordAddress(
+      contextIndex, x, y, drawingContext.depthBuffer.pixelStorageMode);
+    if (drawingContext.depthBuffer.pixelStorageMode ==
+        GSPixelStorageMode::PSMZ24)
+    {
+      depthMask = GS_PSMZ24_MASK;
+      if (!drawingContext.depthBuffer.drawingMasked)
+      {
+        sourceDepth = std::min(sourceDepth, depthMask);
+      }
+    }
     const std::uint32_t destinationDepth =
-      readPSMZ32(contextIndex, x, y);
+      localMemory[depthAddress] & depthMask;
     bool passes = false;
     switch (drawingContext.test.depthTest)
     {
@@ -1013,7 +1031,9 @@ bool GS::writeFragment(
   if (drawingContext.test.depthTestEnabled &&
       !drawingContext.depthBuffer.drawingMasked)
   {
-    writePSMZ32(contextIndex, x, y, sourceDepth);
+    localMemory[depthAddress] =
+      (localMemory[depthAddress] & ~depthMask) |
+      (sourceDepth & depthMask);
   }
   ++writtenPixels;
   return true;
@@ -1410,7 +1430,8 @@ void GS::rasterizeTriangle(
   }
   if (drawingContext.test.depthTestEnabled)
   {
-    psmz32WordAddress(contextIndex, 0, 0);
+    psmzWordAddress(
+      contextIndex, 0, 0, drawingContext.depthBuffer.pixelStorageMode);
   }
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
@@ -1780,7 +1801,60 @@ std::uint32_t GS::sampleTextureNearest(
   std::int32_t fixedV) const
 {
   const GSContext &samplingContext =
-    checkedContext(contextIndex);
+    checkedTextureContext(contextIndex, TextureFilter::Nearest);
+  return readTextureTexel(
+    samplingContext,
+    floorDivide(fixedU, GS_TEXTURE_COORDINATE_ONE),
+    floorDivide(fixedV, GS_TEXTURE_COORDINATE_ONE));
+}
+
+std::uint32_t GS::sampleTextureBilinear(
+  std::size_t contextIndex,
+  std::int32_t fixedU,
+  std::int32_t fixedV) const
+{
+  const GSContext &samplingContext =
+    checkedTextureContext(contextIndex, TextureFilter::Bilinear);
+  const std::int64_t adjustedU =
+    static_cast<std::int64_t>(fixedU) - GS_TEXTURE_COORDINATE_ONE / 2;
+  const std::int64_t adjustedV =
+    static_cast<std::int64_t>(fixedV) - GS_TEXTURE_COORDINATE_ONE / 2;
+  const auto u = static_cast<std::int32_t>(
+    floorDivide64(adjustedU, GS_TEXTURE_COORDINATE_ONE));
+  const auto v = static_cast<std::int32_t>(
+    floorDivide64(adjustedV, GS_TEXTURE_COORDINATE_ONE));
+  const auto fractionU = static_cast<std::uint32_t>(
+    adjustedU - static_cast<std::int64_t>(u) * GS_TEXTURE_COORDINATE_ONE);
+  const auto fractionV = static_cast<std::uint32_t>(
+    adjustedV - static_cast<std::int64_t>(v) * GS_TEXTURE_COORDINATE_ONE);
+  const std::uint32_t topLeft = readTextureTexel(samplingContext, u, v);
+  const std::uint32_t topRight = readTextureTexel(samplingContext, u + 1, v);
+  const std::uint32_t bottomLeft = readTextureTexel(samplingContext, u, v + 1);
+  const std::uint32_t bottomRight =
+    readTextureTexel(samplingContext, u + 1, v + 1);
+  std::uint32_t result = 0;
+  for (const std::uint8_t shift : {
+         GS_RED_SHIFT, GS_GREEN_SHIFT, GS_BLUE_SHIFT, GS_ALPHA_SHIFT})
+  {
+    const std::uint32_t top =
+      colorChannel(topLeft, shift) * (GS_TEXTURE_COORDINATE_ONE - fractionU) +
+      colorChannel(topRight, shift) * fractionU;
+    const std::uint32_t bottom =
+      colorChannel(bottomLeft, shift) * (GS_TEXTURE_COORDINATE_ONE - fractionU) +
+      colorChannel(bottomRight, shift) * fractionU;
+    result |=
+      ((top * (GS_TEXTURE_COORDINATE_ONE - fractionV) +
+        bottom * fractionV) /
+       (GS_TEXTURE_COORDINATE_ONE * GS_TEXTURE_COORDINATE_ONE)) << shift;
+  }
+  return result;
+}
+
+const GSContext &GS::checkedTextureContext(
+  std::size_t contextIndex,
+  TextureFilter filter) const
+{
+  const GSContext &samplingContext = checkedContext(contextIndex);
   const GSTexture &texture = samplingContext.texture;
   if (texture.bufferWidth == 0)
   {
@@ -1798,18 +1872,39 @@ std::uint32_t GS::sampleTextureNearest(
     throw std::runtime_error(
       "GS texture dimensions exceed the supported range.");
   }
-  if (texture.magnificationLinear ||
-      texture.minificationFilter != 0)
+  if (filter == TextureFilter::Nearest)
+  {
+    if (texture.magnificationLinear || texture.minificationFilter != 0)
+    {
+      throw std::runtime_error(
+        "GS texture sampling requires nearest filtering.");
+    }
+  }
+  else if (!texture.magnificationLinear || texture.minificationFilter != 1)
   {
     throw std::runtime_error(
-      "GS texture sampling requires nearest filtering.");
+      "GS texture sampling requires matching base-level linear filters.");
   }
   if (texture.maximumMipLevel != 0)
   {
     throw std::runtime_error(
       "GS texture mipmapping is not implemented.");
   }
+  if (filter == TextureFilter::Bilinear &&
+      (texture.widthExponent < 3 || texture.heightExponent < 3))
+  {
+    throw std::runtime_error(
+      "GS bilinear sampling requires textures of at least 8x8 texels.");
+  }
+  return samplingContext;
+}
 
+std::uint32_t GS::readTextureTexel(
+  const GSContext &samplingContext,
+  std::int32_t integerU,
+  std::int32_t integerV) const
+{
+  const GSTexture &texture = samplingContext.texture;
   const std::int32_t width =
     1 << texture.widthExponent;
   const std::int32_t height =
@@ -1844,13 +1939,9 @@ std::uint32_t GS::sampleTextureNearest(
              minimum) |
             maximum);
       }
-      return 0;
+      throw std::runtime_error("GS texture wrap mode is invalid.");
     };
 
-  const std::int32_t integerU =
-    floorDivide(fixedU, GS_TEXTURE_COORDINATE_ONE);
-  const std::int32_t integerV =
-    floorDivide(fixedV, GS_TEXTURE_COORDINATE_ONE);
   const std::int32_t u = wrap(
     integerU,
     width,
@@ -1986,19 +2077,48 @@ std::size_t GS::psmz32WordAddress(
   std::uint16_t x,
   std::uint16_t y) const
 {
+  return psmzWordAddress(
+    contextIndex, x, y, GSPixelStorageMode::PSMZ32);
+}
+
+std::size_t GS::psmz24WordAddress(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  return psmzWordAddress(
+    contextIndex, x, y, GSPixelStorageMode::PSMZ24);
+}
+
+std::size_t GS::psmzWordAddress(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y,
+  std::uint8_t pixelStorageMode) const
+{
   const GSContext &drawingContext =
     checkedContext(contextIndex);
+  if (pixelStorageMode != GSPixelStorageMode::PSMZ32 &&
+      pixelStorageMode != GSPixelStorageMode::PSMZ24)
+  {
+    throw std::runtime_error(
+      "GS depth buffer uses an unsupported pixel storage mode.");
+  }
+  const char *formatName =
+    pixelStorageMode == GSPixelStorageMode::PSMZ32 ?
+    "PSMZ32" : "PSMZ24";
   if (drawingContext.frame.width == 0 ||
       drawingContext.frame.width > GS_FRAME_WIDTH_LIMIT)
   {
     throw std::runtime_error(
-      "GS PSMZ32 access requires a valid frame-buffer width.");
+      std::string("GS ") + formatName +
+      " access requires a valid frame-buffer width.");
   }
-  if (drawingContext.depthBuffer.pixelStorageMode !=
-      GSPixelStorageMode::PSMZ32)
+  if (drawingContext.depthBuffer.pixelStorageMode != pixelStorageMode)
   {
     throw std::runtime_error(
-      "GS depth buffer is not configured for PSMZ32.");
+      std::string("GS depth buffer is not configured for ") +
+      formatName + ".");
   }
 
   const std::size_t pageX = x / GS_PSMCT32_PAGE_WIDTH;
@@ -2049,6 +2169,25 @@ void GS::writePSMZ32(
   std::uint32_t value)
 {
   localMemory[psmz32WordAddress(contextIndex, x, y)] = value;
+}
+
+std::uint32_t GS::readPSMZ24(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  return localMemory[psmz24WordAddress(contextIndex, x, y)] &
+    GS_PSMZ24_MASK;
+}
+
+void GS::writePSMZ24(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y,
+  std::uint32_t value)
+{
+  auto &word = localMemory[psmz24WordAddress(contextIndex, x, y)];
+  word = (word & ~GS_PSMZ24_MASK) | (value & GS_PSMZ24_MASK);
 }
 
 void GS::decodeTransferBuffer(std::uint64_t data)

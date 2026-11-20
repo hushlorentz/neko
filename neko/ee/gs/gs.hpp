@@ -49,6 +49,7 @@ namespace GSPixelStorageMode
   constexpr std::uint8_t PSMCT32 = 0x00;
   constexpr std::uint8_t PSMCT16 = 0x02;
   constexpr std::uint8_t PSMZ32 = 0x00;
+  constexpr std::uint8_t PSMZ24 = 0x01;
 }
 
 namespace GSPrivilegedRegisterAddress
@@ -289,9 +290,26 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t x,
       std::uint16_t y,
       std::uint32_t value);
+    std::size_t psmz24WordAddress(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    std::uint32_t readPSMZ24(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    void writePSMZ24(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y,
+      std::uint32_t value);
     std::uint32_t localMemoryWord(std::size_t address) const;
     std::size_t localMemoryWordCount() const;
     std::uint32_t sampleTextureNearest(
+      std::size_t contextIndex,
+      std::int32_t fixedU,
+      std::int32_t fixedV) const;
+    std::uint32_t sampleTextureBilinear(
       std::size_t contextIndex,
       std::int32_t fixedU,
       std::int32_t fixedV) const;
@@ -323,6 +341,12 @@ class GS : public GIFRegisterWriteHandler
       Draw
     };
 
+    enum class TextureFilter : std::uint8_t
+    {
+      Nearest,
+      Bilinear
+    };
+
     struct PrimitiveAssemblyResult
     {
       GSPrimitiveType type = GSPrimitiveType::Point;
@@ -336,6 +360,11 @@ class GS : public GIFRegisterWriteHandler
 
     GSContext &mutableContext(std::size_t index);
     const GSContext &checkedContext(std::size_t index) const;
+    const GSContext &checkedTextureContext(
+      std::size_t index, TextureFilter filter) const;
+    std::uint32_t readTextureTexel(
+      const GSContext &samplingContext,
+      std::int32_t u, std::int32_t v) const;
     void decodePrimitive(std::uint64_t data);
     void decodeColor(std::uint64_t data);
     void decodeST(std::uint64_t data);
@@ -375,6 +404,11 @@ class GS : public GIFRegisterWriteHandler
       std::uint8_t bufferWidth,
       std::uint16_t x,
       std::uint16_t y) const;
+    std::size_t psmzWordAddress(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y,
+      std::uint8_t pixelStorageMode) const;
     PrimitiveAssemblyResult assemblePrimitive();
     void queueCurrentVertex();
     void dispatchPrimitive(

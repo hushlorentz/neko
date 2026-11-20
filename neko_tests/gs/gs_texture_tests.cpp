@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "catch.hpp"
@@ -249,6 +250,107 @@ TEST_CASE("GS PSMCT32 Nearest Texture Sampling Tests")
     REQUIRE_THROWS_WITH(
       gs.sampleTextureNearest(0, 0, 0),
       "GS texture mipmapping is not implemented.");
+  }
+}
+
+TEST_CASE("GS PSMCT32 bilinear sampling uses half-texel four-channel weights",
+          "[gs][bilinear]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 0, 3, 3));
+  gs.writeRegister(GSRegisterAddress::TEX1_1,
+    (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, UINT32_C(0x10203040));
+  gs.writeDisplayPSMCT32(32, 1, 1, 0, UINT32_C(0x50607080));
+  gs.writeDisplayPSMCT32(32, 1, 0, 1, UINT32_C(0x90a0b0c0));
+  gs.writeDisplayPSMCT32(32, 1, 1, 1, UINT32_C(0xd0e0f000));
+  REQUIRE(gs.sampleTextureBilinear(0, 8, 8) == UINT32_C(0x10203040));
+  REQUIRE(gs.sampleTextureBilinear(0, 24, 8) == UINT32_C(0x50607080));
+  REQUIRE(gs.sampleTextureBilinear(0, 24, 24) == UINT32_C(0xd0e0f000));
+  REQUIRE(gs.sampleTextureBilinear(0, 16, 16) == UINT32_C(0x70809060));
+  REQUIRE(gs.sampleTextureBilinear(0, 12, 12) == UINT32_C(0x40506060));
+
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, 0);
+  gs.writeDisplayPSMCT32(32, 1, 1, 0, UINT32_C(0x01010101));
+  gs.writeDisplayPSMCT32(32, 1, 0, 1, UINT32_C(0x01010101));
+  gs.writeDisplayPSMCT32(32, 1, 1, 1, UINT32_C(0x02020202));
+  REQUIRE(gs.sampleTextureBilinear(0, 16, 16) == UINT32_C(0x01010101));
+  REQUIRE_THROWS_WITH(gs.sampleTextureNearest(0, 16, 16),
+    "GS texture sampling requires nearest filtering.");
+}
+
+TEST_CASE("GS PSMCT32 bilinear sampling wraps each neighbor",
+          "[gs][bilinear]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 0, 3, 3));
+  gs.writeRegister(GSRegisterAddress::TEX1_1,
+    (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, UINT32_C(0x20202020));
+  gs.writeDisplayPSMCT32(32, 1, 7, 0, UINT32_C(0x60606060));
+  gs.writeDisplayPSMCT32(32, 1, 0, 7, UINT32_C(0xa0a0a0a0));
+  gs.writeDisplayPSMCT32(32, 1, 7, 7, UINT32_C(0xe0e0e0e0));
+  REQUIRE(gs.sampleTextureBilinear(0, 0, 0) == UINT32_C(0x80808080));
+  gs.writeRegister(GSRegisterAddress::CLAMP_1,
+    UINT64_C(1) | (UINT64_C(1) << 2));
+  REQUIRE(gs.sampleTextureBilinear(0, 0, 0) == UINT32_C(0x20202020));
+  REQUIRE(gs.sampleTextureBilinear(0,
+    std::numeric_limits<std::int32_t>::min(),
+    std::numeric_limits<std::int32_t>::max()) == UINT32_C(0xa0a0a0a0));
+
+  gs.writeDisplayPSMCT32(32, 1, 1, 1, UINT32_C(0x11111111));
+  gs.writeRegister(GSRegisterAddress::CLAMP_1,
+    UINT64_C(2) | (UINT64_C(2) << 2) |
+    (UINT64_C(1) << 4) | (UINT64_C(2) << 14) |
+    (UINT64_C(1) << 24) | (UINT64_C(2) << 34));
+  REQUIRE(gs.sampleTextureBilinear(0, 0, 0) == UINT32_C(0x11111111));
+  gs.writeDisplayPSMCT32(32, 1, 4, 4, UINT32_C(0x10101010));
+  gs.writeDisplayPSMCT32(32, 1, 5, 4, UINT32_C(0x30303030));
+  gs.writeDisplayPSMCT32(32, 1, 4, 5, UINT32_C(0x50505050));
+  gs.writeDisplayPSMCT32(32, 1, 5, 5, UINT32_C(0x70707070));
+  gs.writeRegister(GSRegisterAddress::CLAMP_1,
+    UINT64_C(3) | (UINT64_C(3) << 2) |
+    (UINT64_C(1) << 4) | (UINT64_C(4) << 14) |
+    (UINT64_C(1) << 24) | (UINT64_C(4) << 34));
+  REQUIRE(gs.sampleTextureBilinear(0, 16, 16) == UINT32_C(0x40404040));
+}
+
+TEST_CASE("GS bilinear sampling retains configuration guards",
+          "[gs][bilinear]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::TEX1_1,
+    (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 0, 0, 3, 3));
+  REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+    "GS texture sampling requires a valid buffer width.");
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 2, 3, 3));
+  REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+    "GS texture sampling requires PSMCT32.");
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 0, 11, 3));
+  REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+    "GS texture dimensions exceed the supported range.");
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 0, 3, 2));
+  REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+    "GS bilinear sampling requires textures of at least 8x8 texels.");
+  gs.writeRegister(GSRegisterAddress::TEX0_1,
+    textureValue(32, 1, 0, 3, 3));
+  gs.writeRegister(GSRegisterAddress::TEX1_1,
+    (UINT64_C(1) << 2) | (UINT64_C(1) << 5) | (UINT64_C(1) << 6));
+  REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+    "GS texture mipmapping is not implemented.");
+  for (const std::uint64_t filter : {
+         UINT64_C(0), UINT64_C(1) << 5, UINT64_C(1) << 6})
+  {
+    gs.writeRegister(GSRegisterAddress::TEX1_1, filter);
+    REQUIRE_THROWS_WITH(gs.sampleTextureBilinear(0, 8, 8),
+      "GS texture sampling requires matching base-level linear filters.");
   }
 }
 
