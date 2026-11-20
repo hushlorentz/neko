@@ -4277,8 +4277,17 @@ not requirements for exhaustive subsystem coverage.
       contract, using the existing GS raw-register and local-memory owners.
 - [x] Support nearest/linear sampling with focused red/green and authored
       primitive/transport/restored conformance; preserve other format guards.
-- [ ] Verify fresh unchanged-input BIOS retirement and bounded presentation
+- [x] Verify fresh unchanged-input BIOS retirement and bounded presentation
       with required same-build comparisons and next-origin attribution.
+
+### SPU2 Live Voice Start-Address Programming Dependency
+
+- [x] Establish the evidenced live SSA-write contract and bounded provisional
+      policy through the existing programmed-address and voice-source owners.
+- [x] Implement focused red/green and authored restored/trace conformance for
+      paired-core live and pending-key programming; independently review.
+- [ ] Verify fresh unchanged-input BIOS retirement with required same-build
+      comparisons and next-origin attribution or bounded observation.
 
 ### Additional CD/DVD Command and Configuration Scope
 

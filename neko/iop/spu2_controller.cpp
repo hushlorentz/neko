@@ -398,8 +398,6 @@ std::uint16_t SPU2Controller::readVoiceStartAddress(std::size_t index) const
 bool SPU2Controller::writeVoiceStartAddress(std::size_t index, std::uint16_t value)
 {
   auto &address = voiceStartAddresses.at(index);
-  if (isVoiceActive(index / 2))
-    return false;
   address = static_cast<std::uint16_t>(value & voiceStartAddressMask(index));
   return true;
 }

@@ -239,7 +239,6 @@ TEST_CASE("SPU2 KON admission and pending mode guards are atomic",
   REQUIRE(spu.writeVoiceModeMask(0, 1)); // Voice zero ignores PMON.
   REQUIRE(bus.write16(0x1f9001a0, 1).status == IOPBusStatus::Completed);
   const auto pending = system.iopStateHash();
-  REQUIRE(bus.write16(0x1f9001c0, 1).status == IOPBusStatus::Unmapped);
   REQUIRE(bus.write16(0x1f900184, 1).status == IOPBusStatus::Unmapped);
   REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
   REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Unmapped);
@@ -253,6 +252,139 @@ TEST_CASE("SPU2 KON admission and pending mode guards are atomic",
   REQUIRE(spu.writeKeyOn(1, 0xff00));
   REQUIRE(spu.readKeyOn(1) == 0xff00);
   REQUIRE(SPU2VoiceTestAccess::valid(spu));
+}
+
+TEST_CASE("SPU2 live SSA writes preserve the current source until the next KON",
+          "[iop][spu2][spu2-live-ssa]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    for (const auto age : {0u, 1u, 3u, 4u})
+    {
+      NekoSystem system;
+      auto &spu = system.spu2Controller();
+      const auto index = core * 24 + 2;
+      const IOPAddress address = 0x1f9001d8 + static_cast<IOPAddress>(core * 0x400);
+      block(spu, 0x4000, 0x070c, 0x1111);
+      block(spu, 0x19000, 0x070c, 0x2222);
+      program(spu, index, 0x4000, 0);
+      REQUIRE(SPU2VoiceTestAccess::start(spu, index));
+      samples(spu, age);
+      if (core == 1 && age == 4)
+        SPU2Envelope::keyOff(SPU2VoiceTestAccess::voice(spu, index).envelope);
+      SaveStateMutation expected(system.saveState());
+      REQUIRE(system.iopBus().write16(address, 0xfff1).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write16(address + 2, 0x9007).status == IOPBusStatus::Completed);
+      const auto path = "system.iop.spu2.voiceStartAddresses[" +
+        std::to_string(index * 2);
+      expected.writeScalar(path + "].value", 1);
+      expected.writeScalar("system.iop.spu2.voiceStartAddresses[" +
+        std::to_string(index * 2 + 1) + "].value", 0x9000);
+      expected.refreshChecksum();
+      REQUIRE(system.saveState() == expected.bytes());
+      REQUIRE(SPU2VoiceTestAccess::valid(spu));
+      REQUIRE(spu.readVoiceStartAddress(index * 2) == 1);
+      REQUIRE(spu.readVoiceStartAddress(index * 2 + 1) == 0x9000);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress == 0x4001 + age);
+      samples(spu, 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress < 0x19000);
+      REQUIRE(spu.writeKeyOn(core * 2, 4));
+      samples(spu, 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, index).age == 1);
+      REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress == 0x19002);
+    }
+  }
+}
+
+TEST_CASE("SPU2 pending KON consumes the latest SSA without starting early",
+          "[iop][spu2][spu2-live-ssa]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    SPU2Controller spu;
+    const auto index = core * 24 + 23;
+    program(spu, index, 0x4000, 0);
+    block(spu, 0x18000, 0x070c, 0x2222);
+    REQUIRE(spu.writeKeyOn(core * 2 + 1, 0x80));
+    REQUIRE(spu.writeVoiceStartAddress(index * 2, 0xfff1));
+    REQUIRE(spu.writeVoiceStartAddress(index * 2 + 1, 0x8007));
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress == 0);
+    REQUIRE(spu.readKeyOn(core * 2 + 1) == 0x80);
+    samples(spu, 1);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, index).nextAddress == 0x18002);
+  }
+}
+
+TEST_CASE("SPU2 live SSA guest writes retain early decoder state across trace and restore modes",
+          "[iop][spu2][spu2-live-ssa][save-state]")
+{
+  const auto prepare = [](NekoSystem &system)
+  {
+    auto &spu = system.spu2Controller();
+    for (const auto index : {2u, 26u})
+    {
+      block(spu, 0x4000, 0x070c, 0x1111);
+      block(spu, 0x19000, 0x070c, 0x2222);
+      program(spu, index, 0x4000, 0);
+      REQUIRE(SPU2VoiceTestAccess::start(spu, index));
+    }
+    const std::array<std::uint32_t, 10> program{{
+      0x3c01bf90, 0x24020001, 0xa42201d8, 0xa42205d8,
+      0x34029007, 0xa42201da, 0xa42205da, 0x942301da,
+      0x1000ffff, 0
+    }};
+    for (std::size_t index = 0; index < program.size(); ++index)
+      REQUIRE(system.iopBus().write32(static_cast<IOPAddress>(index * 4),
+        program[index]).status == IOPBusStatus::Completed);
+    system.runMasterCycles(6136);
+    system.iopCore().startExecution(0xa0000000);
+    system.runMasterCycles(9);
+    REQUIRE(SPU2VoiceTestAccess::voice(spu, 2).age == 1);
+  };
+  NekoSystem source;
+  NekoSystem plain;
+  prepare(source);
+  prepare(plain);
+  const auto checkpoint = source.saveState();
+  REQUIRE(plain.saveState() == checkpoint);
+  NekoSystem restored;
+  NekoSystem restoredPlain;
+  restored.loadState(checkpoint);
+  restoredPlain.loadState(checkpoint);
+  source.startTrace();
+  restored.startTrace();
+  for (auto *system : {&source, &plain, &restored, &restoredPlain})
+  {
+    system->runMasterCycles(64);
+    REQUIRE(system->iopCore().generalRegister(3) == 0x9000);
+    REQUIRE(system->iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(SPU2VoiceTestAccess::valid(system->spu2Controller()));
+  }
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  for (const auto *system : {&plain, &restored, &restoredPlain})
+    IOPTraceTest::requireMachine(*system, source);
+  const auto rewritten = source.saveState();
+  NekoSystem earlyRestore;
+  earlyRestore.loadState(rewritten);
+  REQUIRE(earlyRestore.saveState() == rewritten);
+  earlyRestore.runMasterCycles(6144);
+  REQUIRE(SPU2VoiceTestAccess::voice(earlyRestore.spu2Controller(), 2).age == 2);
+  REQUIRE(SPU2VoiceTestAccess::voice(earlyRestore.spu2Controller(), 2).nextAddress == 0x4003);
+  for (auto *system : {&source, &plain, &restored, &restoredPlain})
+  {
+    REQUIRE(system->spu2Controller().writeKeyOn(0, 4));
+    REQUIRE(system->spu2Controller().writeKeyOn(2, 4));
+    system->runMasterCycles(6144);
+    for (const auto index : {2u, 26u})
+    {
+      const auto &voice = SPU2VoiceTestAccess::voice(system->spu2Controller(), index);
+      REQUIRE(voice.age == 1);
+      REQUIRE(voice.nextAddress == 0x19002);
+    }
+  }
+  IOPTraceTest::requireEvents(source.trace(), restored.trace());
+  for (const auto *system : {&plain, &restored, &restoredPlain})
+    IOPTraceTest::requireMachine(*system, source);
 }
 
 TEST_CASE("SPU2 ESA programming preserves live voices PCM PIO commands and restored progress",
@@ -1157,8 +1289,8 @@ TEST_CASE("SPU2 waveform live controls cannot fabricate idle or unsupported exec
     program(spu, index, 0x4000, 0);
     REQUIRE(SPU2VoiceTestAccess::start(spu, index));
   }
-  REQUIRE(bus.write16(0x1f9001c0, 1).status != IOPBusStatus::Completed);
-  REQUIRE(spu.readVoiceStartAddress(0) == 0);
+  REQUIRE(bus.write16(0x1f9001c0, 1).status == IOPBusStatus::Completed);
+  REQUIRE(spu.readVoiceStartAddress(0) == 1);
   REQUIRE(bus.read16(0x1f900344).status != IOPBusStatus::Completed);
   REQUIRE(bus.read16(0x1f900744).status != IOPBusStatus::Completed);
   REQUIRE(bus.write16(0x1f9001a4, 1).status == IOPBusStatus::Completed);

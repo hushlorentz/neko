@@ -327,10 +327,10 @@ bool SPU2Controller::hasValidVoiceState() const noexcept
       return false;
     if (phase != Phase::Stopped && voice.age < 4)
     {
-      const auto start = (std::uint32_t{voiceStartAddresses[index * 2]} << 16) |
-        voiceStartAddresses[index * 2 + 1];
       const auto bit = std::uint32_t{1} << (index % VOICE_COUNT_PER_CORE);
-      if (voice.nextAddress != start + voice.age + 1 ||
+      // The captured source remains aligned even after programmed SSA changes.
+      if (voice.nextAddress < voice.age + 1u ||
+          ((voice.nextAddress - voice.age - 1) & 7) != 0 ||
           voice.fifoHead + voice.fifoCount != voice.age * 4 ||
           voice.headerValid != (voice.age != 0) || voice.loopOverride ||
           (voiceEndMasks[index / VOICE_COUNT_PER_CORE] & bit) != 0)
