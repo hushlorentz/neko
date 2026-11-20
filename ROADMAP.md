@@ -4259,8 +4259,17 @@ not requirements for exhaustive subsystem coverage.
       reader; preserve block-addressed texture and transfer access.
 - [x] Repair scanout conversion with focused red/green and authored restored/
       traced presentation conformance, including both circuits and memory wrap.
-- [ ] Verify the unchanged-input BIOS presentation with bounded same-build
+- [x] Verify the unchanged-input BIOS presentation with bounded same-build
       comparisons; distinguish scanout from recognizable shell responsiveness.
+
+### VSQRT Macro Unused-Field Dependency
+
+- [x] Attribute the real BIOS encoding and select a bounded macro-only unused
+      `fsf` policy with manual-first evidence and shared decoding ownership.
+- [x] Implement focused red/green and authored restored/trace conformance,
+      preserving micro decoding, operand guards and existing FDIV timing.
+- [ ] Independently review and verify fresh unchanged-input BIOS retirement
+      with required same-build comparisons and next-origin attribution.
 
 ### Additional CD/DVD Command and Configuration Scope
 

@@ -856,8 +856,7 @@ bool VPU::macroInstructionReady(
   if (instructionKind == VUMacroInstructionKind::Lower)
   {
     lowerInstruction =
-      decodeLowerInstruction(
-        instruction | VPU_I_BIT);
+      decodeVUMacroLowerInstruction(instruction);
     if (lowerInstructionStalls(lowerInstruction))
     {
       return false;
@@ -1059,8 +1058,7 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
   if (instructionKind == VUMacroInstructionKind::Lower)
   {
     lowerInstruction =
-      decodeLowerInstruction(
-        instruction | VPU_I_BIT);
+      decodeVUMacroLowerInstruction(instruction);
   }
   if (state == VPU_STATE_RUN &&
       mode == VPU_MODE_MICRO)

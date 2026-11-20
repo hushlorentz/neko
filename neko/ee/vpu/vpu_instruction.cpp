@@ -205,6 +205,22 @@ bool decodeVUUpperInstruction(
   return true;
 }
 
+LowerInstruction decodeVUMacroLowerInstruction(std::uint32_t instruction)
+{
+  instruction = (instruction & UINT32_C(0x01ffffff)) | VPU_I_BIT;
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQRT_ENCODING)
+  {
+    // Macro VSQRT compatibility ignores its unused fsf field.
+    instruction &= ~UINT32_C(0x00600000);
+  }
+  const auto lower = decodeLowerInstruction(instruction);
+  if (!isMacroLowerInstruction(lower))
+  {
+    throw std::runtime_error("Unsupported VU macro lower instruction.");
+  }
+  return lower;
+}
+
 VUMacroInstructionKind classifyVUMacroInstruction(
   std::uint32_t instruction)
 {
@@ -216,12 +232,8 @@ VUMacroInstructionKind classifyVUMacroInstruction(
 
   try
   {
-    const LowerInstruction lower =
-      decodeLowerInstruction(instruction | VPU_I_BIT);
-    if (isMacroLowerInstruction(lower))
-    {
-      return VUMacroInstructionKind::Lower;
-    }
+    decodeVUMacroLowerInstruction(instruction);
+    return VUMacroInstructionKind::Lower;
   }
   catch (const std::runtime_error &)
   {

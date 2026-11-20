@@ -1,12 +1,15 @@
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "catch.hpp"
 #include "ee_core.hpp"
+#include "iop/iop_trace_test_utils.hpp"
 #include "neko_system.hpp"
 #include "vpu_field_mask.hpp"
 #include "vpu_flags.hpp"
 #include "vpu_instruction.hpp"
+#include "vpu_lower_instruction.hpp"
 #include "vpu_opcodes.hpp"
 
 namespace
@@ -749,6 +752,107 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
     REQUIRE(result->z == 4);
     REQUIRE(result->w == 4);
   }
+
+TEST_CASE("EE VSQRT ignores only unused macro fsf bits",
+          "[ee][vu][vsqrt-fsf]")
+{
+  const std::uint32_t roots[] = {
+    UINT32_C(0x3f800000), UINT32_C(0x40000000),
+    UINT32_C(0x40400000), UINT32_C(0x40800000)
+  };
+  for (std::uint32_t ftf = 0; ftf < 4; ++ftf)
+  {
+    for (std::uint32_t fsf = 0; fsf < 4; ++fsf)
+    {
+      const auto instruction = macroLowerInstruction(
+        VPU_SQRT_ENCODING | (UINT32_C(5) << 16) |
+        (ftf << 23) | (fsf << 21));
+      REQUIRE(decodeEEInstruction(instruction).operation ==
+        EEOperation::VectorMacroArithmetic);
+      NekoSystem system;
+      system.vu0().loadFPRegister(5, 1, 4, 9, 16);
+      system.eeBus().write32(0, instruction);
+      system.eeBus().write32(4, macroLowerInstruction(VPU_WAITQ_ENCODING));
+      system.eeCore().startExecution(0);
+      REQUIRE(system.stepEEInstruction(8).instructions == 1);
+      REQUIRE(system.eeCore().programCounter() == 4);
+      REQUIRE(system.stepEEInstruction(32).instructions == 1);
+      system.runMasterCycles(32);
+      REQUIRE(system.vu0().qRegisterBits() == roots[ftf]);
+    }
+  }
+}
+
+TEST_CASE("VSQRT compatibility preserves micro and macro operand guards",
+          "[ee][vu][vsqrt-fsf]")
+{
+  for (std::uint32_t fsf = 0; fsf < 4; ++fsf)
+  {
+    const std::uint32_t instruction = VPU_SQRT_ENCODING |
+      (UINT32_C(5) << 16) | (fsf << 21);
+    REQUIRE(classifyVUMacroInstruction(macroLowerInstruction(
+      instruction | (UINT32_C(1) << 11))) == VUMacroInstructionKind::Invalid);
+    if (fsf != 0)
+    {
+      REQUIRE_THROWS_AS(decodeLowerInstruction(instruction), std::runtime_error);
+    }
+  }
+  REQUIRE(classifyVUMacroInstruction(macroLowerInstruction(
+    VPU_WAITQ_ENCODING | (UINT32_C(1) << 21))) == VUMacroInstructionKind::Invalid);
+}
+
+TEST_CASE("BIOS VSQRT unused fsf agrees cold restored and traced",
+          "[ee][vu][vsqrt-fsf][conformance]")
+{
+  const auto prepare = [](NekoSystem &system)
+  {
+    system.vu0().loadFPRegister(5, 16, 25, 36, 49);
+    system.eeBus().write32(0, UINT32_C(0x4a2503bd));
+    system.eeBus().write32(4, macroLowerInstruction(VPU_WAITQ_ENCODING));
+    system.eeCore().startExecution(0);
+  };
+  NekoSystem origin;
+  prepare(origin);
+  const auto staged = origin.saveState();
+  origin.clockMasterCycle();
+  REQUIRE(origin.eeCore().programCounter() == 4);
+  const auto active = origin.saveState();
+  origin.runMasterCycles(31);
+  REQUIRE(origin.vu0().qRegisterBits() == UINT32_C(0x40800000));
+  const auto expected = origin.saveState();
+  for (const auto restoredAt : {UINT64_C(0), UINT64_C(1)})
+  {
+    NekoSystem coldTraced;
+    NekoSystem coldPlain;
+    NekoSystem restoredTraced;
+    NekoSystem restoredPlain;
+    prepare(coldTraced);
+    prepare(coldPlain);
+    const auto &checkpoint = restoredAt == 0 ? staged : active;
+    restoredTraced.loadState(checkpoint);
+    restoredPlain.loadState(checkpoint);
+    REQUIRE(restoredTraced.saveState() == checkpoint);
+    coldTraced.startTrace();
+    restoredTraced.startTrace();
+    coldTraced.runMasterCycles(32);
+    coldPlain.runMasterCycles(32);
+    restoredTraced.runMasterCycles(32 - restoredAt);
+    restoredPlain.runMasterCycles(32 - restoredAt);
+    REQUIRE(coldTraced.saveState() == expected);
+    REQUIRE(coldPlain.saveState() == expected);
+    REQUIRE(restoredTraced.saveState() == expected);
+    REQUIRE(restoredPlain.saveState() == expected);
+    IOPTraceTest::Events suffix;
+    for (const auto &event : coldTraced.trace())
+    {
+      if (event.masterCycle > restoredAt)
+      {
+        suffix.push_back(event);
+      }
+    }
+    IOPTraceTest::requireEvents(restoredTraced.trace(), suffix);
+  }
+}
 
 TEST_CASE("EE VU macro divider instructions share one resource")
 {
