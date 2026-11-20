@@ -656,12 +656,10 @@ namespace
       "direction");
     transfer.active =
       reader->readFieldBool("active");
-    const std::uint64_t pixelCount =
-      static_cast<std::uint64_t>(transfer.width) *
-      transfer.height;
-    require(
-      transfer.transferredPixels <= pixelCount,
-      "GS image-transfer progress is invalid");
+    if (const char *error = transfer.stateError())
+    {
+      require(false, error);
+    }
     return transfer;
   }}
 

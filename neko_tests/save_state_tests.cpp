@@ -581,6 +581,262 @@ TEST_CASE("Neko save states are canonical and deterministic")
   REQUIRE(traceCount == 1);
 }
 
+TEST_CASE("GS completed transfers survive smaller pending register restore", "[gs16]")
+{
+  NekoSystem original;
+  NekoSystem restored;
+  original.gs().writeRegister(GSRegisterAddress::BITBLTBUF, UINT64_C(1) << 48);
+  original.gs().writeRegister(
+    GSRegisterAddress::TRXREG, UINT64_C(8) | (UINT64_C(1) << 32));
+  original.gs().writeRegister(GSRegisterAddress::TRXDIR, 0);
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    original.gs().writeRegister(
+      GSRegisterAddress::HWREG, UINT64_C(0x2222222211111111));
+  }
+  original.gs().writeRegister(
+    GSRegisterAddress::BITBLTBUF, (UINT64_C(2) << 56) | (UINT64_C(1) << 48));
+  original.gs().writeRegister(
+    GSRegisterAddress::TRXREG, UINT64_C(4) | (UINT64_C(1) << 32));
+  const auto checkpoint = original.saveState();
+  REQUIRE_NOTHROW(restored.loadState(checkpoint));
+  REQUIRE(restored.gs().imageTransfer().width == 8);
+  REQUIRE(restored.gs().imageTransfer().transferredPixels == 8);
+  REQUIRE(restored.gs().imageTransfer().destinationPixelStorageMode == 0);
+  REQUIRE(
+    restored.gs().registerValue(GSRegisterAddress::BITBLTBUF) ==
+    ((UINT64_C(2) << 56) | (UINT64_C(1) << 48)));
+  REQUIRE(restored.saveState() == checkpoint);
+}
+
+TEST_CASE("GS active transfer restore rejects impossible requests", "[gs16]")
+{
+  NekoSystem source;
+  NekoSystem destination;
+  source.gs().writeRegister(GSRegisterAddress::BITBLTBUF, UINT64_C(1) << 48);
+  source.gs().writeRegister(
+    GSRegisterAddress::TRXREG, UINT64_C(8) | (UINT64_C(1) << 32));
+  source.gs().writeRegister(GSRegisterAddress::TRXDIR, 0);
+  destination.eeBus().write32(0x1000, 0xfeedbeef);
+  const auto checkpoint = source.saveState();
+  const auto before = destination.saveState();
+  struct InvalidField
+  {
+    const char *name;
+    std::uint64_t value;
+  };
+  for (const auto field : {
+         InvalidField{"sourceBasePointer", 0x4000},
+         InvalidField{"sourceBufferWidth", 0x40},
+         InvalidField{"destinationPixelStorageMode", 0x40},
+         InvalidField{"destinationX", 0x800},
+         InvalidField{"width", 0x1000},
+         InvalidField{"height", 0x1000},
+         InvalidField{"width", 0},
+         InvalidField{"transferredPixels", 8},
+         InvalidField{"direction", 2},
+         InvalidField{"direction", 3},
+         InvalidField{"destinationBufferWidth", 0},
+         InvalidField{"destinationPixelStorageMode", 1}})
+  {
+    CAPTURE(field.name);
+    CAPTURE(field.value);
+    SaveStateMutation invalid(checkpoint);
+    invalid.writeScalar(std::string("system.gs.transfer.") + field.name, field.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+
+  source.gs().writeRegister(
+    GSRegisterAddress::BITBLTBUF, (UINT64_C(2) << 56) | (UINT64_C(1) << 48));
+  source.gs().writeRegister(GSRegisterAddress::TRXDIR, 0);
+  const auto checkpoint16 = source.saveState();
+  for (const auto field : {
+         InvalidField{"destinationBufferWidth", 0},
+         InvalidField{"destinationBufferWidth", 33},
+         InvalidField{"width", 6}})
+  {
+    CAPTURE(field.name);
+    CAPTURE(field.value);
+    SaveStateMutation invalid(checkpoint16);
+    invalid.writeScalar(std::string("system.gs.transfer.") + field.name, field.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
+TEST_CASE("GS passive rejected and empty requests restore without reactivation", "[gs16]")
+{
+  for (const bool empty : {false, true})
+  {
+    NekoSystem original;
+    NekoSystem restored;
+    original.gs().writeRegister(GSRegisterAddress::BITBLTBUF,
+      (static_cast<std::uint64_t>(empty ? 2 : 63) << 56) | (UINT64_C(63) << 48));
+    original.gs().writeRegister(
+      GSRegisterAddress::TRXREG, UINT64_C(3) | (static_cast<std::uint64_t>(!empty) << 32));
+    if (empty)
+    {
+      REQUIRE_NOTHROW(original.gs().writeRegister(GSRegisterAddress::TRXDIR, 0));
+    }
+    else
+    {
+      REQUIRE_THROWS(original.gs().writeRegister(GSRegisterAddress::TRXDIR, 0));
+    }
+    original.gs().writeRegister(GSRegisterAddress::BITBLTBUF, 0);
+    const auto saved = original.saveState();
+    REQUIRE_NOTHROW(restored.loadState(saved));
+    REQUIRE_FALSE(restored.gs().imageTransfer().active);
+    REQUIRE(restored.gs().imageTransfer().destinationBufferWidth == 63);
+    REQUIRE(restored.gs().registerValue(GSRegisterAddress::BITBLTBUF) == 0);
+    REQUIRE(restored.saveState() == saved);
+  }
+}
+
+TEST_CASE("GS PSMCT16 authored DMA preserves staged and active four-mode conformance",
+  "[gs16][save-state][guest][trace]")
+{
+  std::uint32_t remaining = 519;
+  SECTION("after BITBLTBUF") {}
+  SECTION("after smaller TRXREG") { remaining = 517; }
+  SECTION("active with different pending parameters") { remaining = 511; }
+  constexpr std::uint32_t packetAddress = 0x20000;
+  constexpr std::uint32_t packetQuadwords = 521;
+  const auto prepare = [&](NekoSystem &system)
+  {
+    auto &gs = system.gs();
+    gs.writeRegister(GSRegisterAddress::BITBLTBUF, UINT64_C(4) << 48);
+    gs.writeRegister(GSRegisterAddress::TRXREG, UINT64_C(256) | (UINT64_C(64) << 32));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+    for (unsigned index = 0; index < 8192; ++index)
+    {
+      gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0xa55ac33ca55ac33c));
+    }
+    std::vector<GIFQuadword> packet = {
+      gifTag(4, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(0x02012cc000000000)),
+      adWrite(GSRegisterAddress::TRXPOS, 0),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(64) | (UINT64_C(64) << 32)),
+      adWrite(GSRegisterAddress::TRXDIR, 0),
+      gifTag(2, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(63) << 56),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(4) | (UINT64_C(1) << 32)),
+      gifTag(512, true, GIFDataFormat::Image, 0)
+    };
+    for (std::uint32_t index = 0; index < 512; ++index)
+    {
+      GIFQuadword payload{};
+      for (std::uint32_t word = 0; word < 4; ++word)
+      {
+        const auto pixel = UINT32_C(0x8000) | (index * 8 + word * 2);
+        payload[word] = pixel | ((pixel + 1) << 16);
+      }
+      packet.push_back(payload);
+    }
+    REQUIRE(packet.size() == packetQuadwords);
+    for (std::uint32_t index = 0; index < packet.size(); ++index)
+    {
+      REQUIRE(system.eeBus().writeQuadword(packetAddress + index * 16, packet[index]));
+    }
+    const std::uint32_t program[] = {
+      0xac620000, 0xac640010, 0xac65fff0, 0x1000ffff, 0
+    };
+    for (std::uint32_t index = 0; index < 5; ++index)
+    {
+      system.eeBus().write32(0x10000 + index * 4, program[index]);
+    }
+    system.eeBus().write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+    auto &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(2, {packetAddress, 0});
+    core.setGeneralRegister(3, {0xb000a010, 0});
+    core.setGeneralRegister(4, {packetQuadwords, 0});
+    core.setGeneralRegister(5, {0x101, 0});
+    core.startExecution(0xa0010000);
+    for (unsigned cycle = 0;
+         cycle < 64 && system.gifDMAC().quadwordCount() != remaining; ++cycle)
+    {
+      system.runMasterCycles(1);
+    }
+    REQUIRE(system.gifDMAC().quadwordCount() == remaining);
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    const auto &transfer = gs.imageTransfer();
+    REQUIRE(transfer.width == (remaining == 511 ? 64 : 256));
+    REQUIRE(transfer.transferredPixels == (remaining == 511 ? 8 : 16384));
+    REQUIRE(transfer.active == (remaining == 511));
+    if (remaining == 517)
+    {
+      REQUIRE(gs.registerValue(GSRegisterAddress::TRXREG) ==
+        (UINT64_C(64) | (UINT64_C(64) << 32)));
+    }
+    if (remaining == 511)
+    {
+      REQUIRE(transfer.destinationPixelStorageMode == 2);
+      REQUIRE(gs.registerValue(GSRegisterAddress::BITBLTBUF) == (UINT64_C(63) << 56));
+      REQUIRE(gs.registerValue(GSRegisterAddress::TRXREG) ==
+        (UINT64_C(4) | (UINT64_C(1) << 32)));
+    }
+  };
+  NekoSystem original;
+  NekoSystem originalPlain;
+  prepare(original);
+  prepare(originalPlain);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  NekoSystem restoredPlain;
+  restored.loadState(saved);
+  restoredPlain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restoredPlain.saveState() == saved);
+  original.startTrace(20000);
+  restored.startTrace(20000);
+  for (auto *system : {&original, &originalPlain, &restored, &restoredPlain})
+  {
+    system->runMasterCycles(600);
+    REQUIRE(system->eeCore().pendingException() == EEException::None);
+    REQUIRE(system->gifDMAC().quadwordCount() == 0);
+    REQUIRE(system->gifDMAC().transferredQuadwordCount() == packetQuadwords);
+    REQUIRE_FALSE(system->gs().imageTransfer().active);
+    REQUIRE(system->gs().imageTransfer().transferredPixels == 4096);
+    REQUIRE(system->gs().imageTransfer().destinationBasePointer == 0x2cc0);
+    REQUIRE(system->gs().registerValue(GSRegisterAddress::BITBLTBUF) == (UINT64_C(63) << 56));
+    REQUIRE(system->gs().localMemoryWord(0) == 0xa55ac33c);
+    REQUIRE(system->gs().localMemoryWord(0x2cc0 * 64 - 1) == 0);
+    REQUIRE(system->gs().localMemoryWord(0x2cc0 * 64 + 2048) == 0);
+    // Inverse GSUSER_E pp165-166 bit planes, independent of the forward block mapper.
+    constexpr unsigned xBits[] = {1, 3, 4, 0, 8, 10};
+    constexpr unsigned yBits[] = {2, 5, 6, 7, 9, 11};
+    for (unsigned word = 0; word < 2048; ++word)
+    {
+      std::uint32_t expected = 0;
+      for (unsigned half = 0; half < 2; ++half)
+      {
+        const auto address = word * 2 + half;
+        unsigned x = 0;
+        unsigned y = 0;
+        for (unsigned bit = 0; bit < 6; ++bit)
+        {
+          x |= ((address >> xBits[bit]) & 1) << bit;
+          y |= ((address >> yBits[bit]) & 1) << bit;
+        }
+        expected |= (UINT32_C(0x8000) | (y * 64 + x)) << (half * 16);
+      }
+      CAPTURE(word);
+      REQUIRE(system->gs().localMemoryWord(0x2cc0 * 64 + word) == expected);
+    }
+  }
+  REQUIRE_FALSE(original.traceTruncated());
+  REQUIRE_FALSE(restored.traceTruncated());
+  REQUIRE_FALSE(original.trace().empty());
+  REQUIRE(original.traceHash() == restored.traceHash());
+  const auto ending = original.saveState();
+  REQUIRE(restored.saveState() == ending);
+  REQUIRE(restoredPlain.saveState() == ending);
+  REQUIRE(originalPlain.saveState() == ending);
+}
+
 TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
 {
   NekoSystem original;
@@ -646,7 +902,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 133 save-state layout is byte-stable",
+TEST_CASE("Version 134 save-state layout is byte-stable",
   "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model][ba0-write32]")
 {
   NekoSystem system;
@@ -662,12 +918,12 @@ TEST_CASE("Version 133 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 133);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 134);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 132;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 133;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);

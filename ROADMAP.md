@@ -4205,8 +4205,29 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved policy with focused and authored restored/trace
       conformance, versioned persistence, due optimized/ASan gates and independent
       review before the user-owned implementation commit.
-- [ ] Verify fresh unchanged-input BIOS progress after user commits, including
+- [x] Verify fresh unchanged-input BIOS progress after user commits, including
       the required persistence-related cold/restored conformance gate.
+
+### GS Host-to-Local Transfer Origin Scope
+
+- [x] Attribute the originating GS transfer with bounded same-build evidence
+      and local manuals; identify its format, producer and existing-owner
+      contract without inferring them from the runtime-error message.
+- [x] Expand only the evidenced dependency into implementation and authored
+      conformance work, with explicit contract/policy selection before code.
+
+### GS PSMCT16 Host-to-Local Upload Dependency
+
+- [x] Freeze the manual-backed programmed/active transfer and PSMCT16
+      admission/lifecycle contract, with required policy approval before code.
+- [x] Implement PSMCT16-only host uploads in the existing GS owner, with
+      packed halfword/swizzle preservation and focused red/green, transport
+      and persistence coverage; preserve unsupported-format/direction guards.
+- [x] Add authored staged/active cold/restored traced/plain full canonical
+      conformance; resolve architectural review and due validation before
+      the user-owned implementation commit.
+- [ ] Verify fresh unchanged-input BIOS progress after the user commits,
+      with bounded same-build full conformance and next-origin attribution.
 
 ### Additional CD/DVD Command and Configuration Scope
 

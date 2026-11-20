@@ -47,6 +47,7 @@ namespace GSRegisterAddress
 namespace GSPixelStorageMode
 {
   constexpr std::uint8_t PSMCT32 = 0x00;
+  constexpr std::uint8_t PSMCT16 = 0x02;
   constexpr std::uint8_t PSMZ32 = 0x00;
 }
 
@@ -224,6 +225,9 @@ struct GSImageTransfer
   GSImageTransferDirection direction =
     GSImageTransferDirection::Deactivated;
   bool active = false;
+
+  const char *activationError() const;
+  const char *stateError() const;
 };
 
 class GS : public GIFRegisterWriteHandler
@@ -362,6 +366,11 @@ class GS : public GIFRegisterWriteHandler
     void writeTransferPixel(std::uint32_t value);
     std::uint32_t readTransferPixel();
     std::size_t psmct32WordAddress(
+      std::uint16_t basePointer,
+      std::uint8_t bufferWidth,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    std::size_t psmct16HalfwordAddress(
       std::uint16_t basePointer,
       std::uint8_t bufferWidth,
       std::uint16_t x,
