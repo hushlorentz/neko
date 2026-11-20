@@ -4253,6 +4253,15 @@ not requirements for exhaustive subsystem coverage.
 - [ ] Verify fresh unchanged-input BIOS retirement with the selected same-build
       comparisons and next origin or explicit bounded observation limit.
 
+### GS Display Framebuffer Addressing Dependency
+
+- [x] Verify manual-defined DISPFB page units against the existing local-memory
+      reader; preserve block-addressed texture and transfer access.
+- [x] Repair scanout conversion with focused red/green and authored restored/
+      traced presentation conformance, including both circuits and memory wrap.
+- [ ] Verify the unchanged-input BIOS presentation with bounded same-build
+      comparisons; distinguish scanout from recognizable shell responsiveness.
+
 ### Additional CD/DVD Command and Configuration Scope
 
 - [ ] Expand command dependencies required by the selected shell profile into

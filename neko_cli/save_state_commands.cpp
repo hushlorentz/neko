@@ -2,7 +2,9 @@
 
 #include "save_state_diagnostics.hpp"
 #include "iop_cache.hpp"
+#include "neko_system.hpp"
 
+#include <array>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -18,7 +20,73 @@ namespace
     "       neko save-state locate <file> <path> [--bytes]\n"
     "       neko save-state diff <left> <right> [--bytes <path>]...\n"
     "       neko save-state iop-memory <file> <physical-address> --words <1-256>\n"
-    "       neko save-state ee-memory <file> <physical-address> --words <1-256>";
+    "       neko save-state ee-memory <file> <physical-address> --words <1-256>\n"
+    "       neko save-state frame <file> [--bios <image>] > frame.bmp";
+
+  int exportFrame(const std::vector<std::string> &arguments,
+    const neko_cli::SaveStateFileLoader &loadFile, std::ostream &output)
+  {
+    if ((arguments.size() != 2 && arguments.size() != 4) ||
+        arguments[1].empty() ||
+        (arguments.size() == 4 &&
+         (arguments[2] != "--bios" || arguments[3].empty())))
+    {
+      throw std::invalid_argument(USAGE);
+    }
+    NekoSystem system;
+    if (arguments.size() == 4)
+    {
+      system.installBootROM(loadFile(arguments[3]));
+    }
+    system.loadState(loadFile(arguments[1]));
+    const auto frame = system.videoOutput();
+    if (frame.width == 0 || frame.height == 0)
+    {
+      throw std::runtime_error("GS presentation is disabled.");
+    }
+    const std::uint32_t rowBytes = (frame.width * 3u + 3u) & ~3u;
+    const std::uint32_t pixelBytes = rowBytes * frame.height;
+    std::array<char, 54> header = {};
+    header[0] = 'B';
+    header[1] = 'M';
+    const auto word = [&](std::size_t offset, std::uint32_t value)
+    {
+      for (unsigned int byte = 0; byte < 4; ++byte)
+      {
+        header[offset + byte] = static_cast<char>(value >> (byte * 8));
+      }
+    };
+    word(2, static_cast<std::uint32_t>(header.size()) + pixelBytes);
+    word(10, static_cast<std::uint32_t>(header.size()));
+    word(14, 40);
+    word(18, frame.width);
+    word(22, frame.height);
+    header[26] = 1;
+    header[28] = 24;
+    word(34, pixelBytes);
+    output.write(header.data(), header.size());
+    const std::array<char, 3> padding = {};
+    for (std::uint32_t y = frame.height; y != 0; --y)
+    {
+      for (std::uint32_t x = 0; x < frame.width; ++x)
+      {
+        const std::size_t pixel = ((y - 1) * frame.width + x) * 4;
+        const char bgr[] = {
+          static_cast<char>(frame.rgba[pixel + 2]),
+          static_cast<char>(frame.rgba[pixel + 1]),
+          static_cast<char>(frame.rgba[pixel])
+        };
+        output.write(bgr, sizeof(bgr));
+      }
+      output.write(padding.data(), rowBytes - frame.width * 3u);
+    }
+    output.flush();
+    if (!output)
+    {
+      throw std::runtime_error("Cannot write GS frame.");
+    }
+    return 0;
+  }
 
   std::uint32_t parseMemoryInteger(const std::string &text)
   {
@@ -358,6 +426,10 @@ int neko_cli::runSaveStateCommand(
     if (arguments[0] == "inspect")
     {
       return inspect(arguments, loadFile, output);
+    }
+    if (arguments[0] == "frame")
+    {
+      return exportFrame(arguments, loadFile, output);
     }
     if (arguments[0] == "iop-memory")
     {

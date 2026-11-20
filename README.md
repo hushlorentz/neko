@@ -72,6 +72,18 @@ ROM-fingerprint provenance:
 This read-only view accepts 1-256 aligned physical EE RAM words. It neither
 executes instructions nor models the saved instruction-cache/fetch view.
 
+Export the saved GS scanout without advancing the machine:
+
+```sh
+./out/build/neko save-state frame state.neko > frame.bmp
+./out/build/neko save-state frame bios.neko --bios path/to/bios.bin > bios.bmp
+```
+
+The output is a 24-bit RGB bitmap of the composed presentation, not a raw
+framebuffer dump. Disabled presentation returns status 2 without an image.
+BIOS-backed states require the matching external image; identity checks remain.
+Use binary-preserving redirection; diagnostics go to stderr.
+
 Byte ranges show their size and FNV-1a hash by default. Add
 `--bytes <path>` to `inspect` or `diff`, or `--bytes` to `locate`, to include
 the selected range's bytes. Invalid files and arguments return status 2;

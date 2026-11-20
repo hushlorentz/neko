@@ -108,6 +108,125 @@ TEST_CASE("Save-state commands read binary files")
     std::string::npos);
 }
 
+TEST_CASE("Save-state frame export uses restored scanout and BMP row layout",
+          "[checkpoint-frame]")
+{
+  NekoSystem system;
+  system.gs().writeRegister(GSRegisterAddress::FRAME_1,
+    UINT64_C(1) | (UINT64_C(1) << 16));
+  system.gs().writePSMCT32(0, 0, 0, UINT32_C(0xff332211));
+  system.gs().writePSMCT32(0, 1, 0, UINT32_C(0x80665544));
+  system.gs().writePSMCT32(0, 0, 1, UINT32_C(0xff998877));
+  system.gs().writePSMCT32(0, 1, 1, UINT32_C(0xffccbbaa));
+  system.eeBus().write64(EEMemoryMap::GS_DISPFB1,
+    UINT64_C(1) | (UINT64_C(1) << 9));
+  system.eeBus().write64(EEMemoryMap::GS_DISPLAY1,
+    (UINT64_C(1) << 32) | (UINT64_C(1) << 44));
+  system.eeBus().write64(EEMemoryMap::GS_PMODE,
+    GSDisplayMode::ENABLE_CIRCUIT_1);
+  const auto state = system.saveState();
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"frame", "left.state"}, loaderFor(state), output, error) == 0);
+  REQUIRE(error.str().empty());
+  const auto bytes = output.str();
+  const std::vector<std::uint8_t> expected = {
+    0x42, 0x4d, 70, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0,
+    40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 1, 0, 24, 0,
+    0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0x99, 0x88, 0x77, 0xcc, 0xbb, 0xaa, 0, 0,
+    0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 0, 0
+  };
+  REQUIRE(std::vector<std::uint8_t>(bytes.begin(), bytes.end()) == expected);
+  REQUIRE(system.saveState() == state);
+  std::ostringstream failedOutput;
+  failedOutput.setstate(std::ios::badbit);
+  std::ostringstream failedError;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"frame", "left.state"}, loaderFor(state), failedOutput, failedError) == 2);
+  REQUIRE(failedError.str() == "Cannot write GS frame.\n");
+}
+
+TEST_CASE("Save-state frame export rejects invalid or disabled evidence",
+          "[checkpoint-frame]")
+{
+  NekoSystem system;
+  auto corrupt = system.saveState();
+  corrupt.back() ^= 0x80;
+  for (const auto &state : {std::vector<std::uint8_t>{1, 2, 3},
+      corrupt, system.saveState()})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runSaveStateCommand(
+      {"frame", "left.state"}, loaderFor(state), output, error) == 2);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+    REQUIRE(error.str().find("Usage:") == std::string::npos);
+  }
+  unsigned int loads = 0;
+  const neko_cli::SaveStateFileLoader loader =
+    [&](const std::string &) -> std::vector<std::uint8_t>
+    {
+      ++loads;
+      throw std::runtime_error("unexpected load");
+    };
+  for (const auto &arguments : std::vector<std::vector<std::string>>{
+      {"frame"}, {"frame", ""}, {"frame", "left.state", "extra"},
+      {"frame", "left.state", "--bios"},
+      {"frame", "left.state", "--bios", ""},
+      {"frame", "left.state", "--image", "right.state"},
+      {"frame", "left.state", "--bios", "right.state", "extra"}})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runSaveStateCommand(arguments, loader, output, error) == 2);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+  }
+  REQUIRE(loads == 0);
+}
+
+TEST_CASE("Save-state frame export requires the matching external BIOS",
+          "[checkpoint-frame]")
+{
+  NekoSystem system;
+  std::vector<std::uint8_t> bios(4 * 1024 * 1024, 0);
+  system.installBootROM(bios);
+  system.gs().writeRegister(GSRegisterAddress::FRAME_1, UINT64_C(1) << 16);
+  system.gs().writePSMCT32(0, 0, 0, UINT32_C(0xff332211));
+  system.eeBus().write64(EEMemoryMap::GS_DISPFB1, UINT64_C(1) << 9);
+  system.eeBus().write64(EEMemoryMap::GS_DISPLAY1, 0);
+  system.eeBus().write64(EEMemoryMap::GS_PMODE,
+    GSDisplayMode::ENABLE_CIRCUIT_1);
+  const auto state = system.saveState();
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"frame", "left.state", "--bios", "right.state"},
+    loaderFor(state, bios), output, error) == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().size() == 58);
+  REQUIRE(output.str().substr(54) == std::string("\x33\x22\x11\0", 4));
+  REQUIRE(system.saveState() == state);
+
+  bios.back() ^= 1;
+  for (const auto &arguments : std::vector<std::vector<std::string>>{
+      {"frame", "left.state"},
+      {"frame", "left.state", "--bios", "right.state"}})
+  {
+    std::ostringstream rejectedOutput;
+    std::ostringstream rejectedError;
+    REQUIRE(neko_cli::runSaveStateCommand(arguments,
+      loaderFor(state, bios), rejectedOutput, rejectedError) == 2);
+    REQUIRE(rejectedOutput.str().empty());
+    REQUIRE_FALSE(rejectedError.str().empty());
+    REQUIRE(rejectedError.str().find("external ROM") != std::string::npos);
+  }
+}
+
 TEST_CASE("Save-state IOP memory inspection distinguishes RAM from cached words",
   "[checkpoint-memory]")
 {

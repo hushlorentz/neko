@@ -71,7 +71,7 @@ TEST_CASE("GS Display Circuit Tests")
     system.gs().writeDisplayPSMCT32(
       0, 1, 0, 0, 0x40000064);
     system.gs().writeDisplayPSMCT32(
-      1, 1, 0, 0, 0xffc80000);
+      32, 1, 0, 0, 0xffc80000);
 
     bus.write64(EEMemoryMap::GS_DISPFB1, displayFrame(0, 1));
     bus.write64(EEMemoryMap::GS_DISPLAY1, displayArea(1, 1));
@@ -85,6 +85,89 @@ TEST_CASE("GS Display Circuit Tests")
     REQUIRE(
       system.gsDisplay().presentation().rgba ==
       std::vector<std::uint8_t>{50, 0, 99, 0x40});
+  }
+}
+
+TEST_CASE("GS display bases use FRAME page units for both circuits",
+          "[gs][display-base]")
+{
+  for (const std::uint16_t base : {1, 0x46, 0x1ff})
+  {
+    for (const bool secondCircuit : {false, true})
+    {
+      NekoSystem system;
+      GS &gs = system.gs();
+      EEBus &bus = system.eeBus();
+      gs.writeRegister(GSRegisterAddress::FRAME_1,
+        base | (UINT64_C(1) << 16));
+      gs.writePSMCT32(0, 63, 31, UINT32_C(0xff332211));
+      gs.writePSMCT32(0, 64, 31, UINT32_C(0x80665544));
+      bus.write64(secondCircuit ?
+        EEMemoryMap::GS_DISPFB2 : EEMemoryMap::GS_DISPFB1,
+        displayFrame(base, 1, 63, 31));
+      bus.write64(secondCircuit ?
+        EEMemoryMap::GS_DISPLAY2 : EEMemoryMap::GS_DISPLAY1,
+        displayArea(2, 1));
+      bus.write64(EEMemoryMap::GS_PMODE, secondCircuit ?
+        GSDisplayMode::ENABLE_CIRCUIT_2 : GSDisplayMode::ENABLE_CIRCUIT_1);
+
+      const GSPresentation presentation = system.gsDisplay().presentation();
+      REQUIRE(presentation.width == 2);
+      REQUIRE(presentation.height == 1);
+      REQUIRE(presentation.rgba == std::vector<std::uint8_t>{
+        0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0x80});
+    }
+  }
+}
+
+TEST_CASE("GS display page selection agrees cold restored and traced",
+          "[gs][display-base][conformance]")
+{
+  const auto prepare = [](NekoSystem &system)
+  {
+    GS &gs = system.gs();
+    gs.writeRegister(GSRegisterAddress::FRAME_1,
+      UINT64_C(0x46) | (UINT64_C(1) << 16));
+    gs.writePSMCT32(0, 0, 0, UINT32_C(0xff332211));
+    gs.writeRegister(GSRegisterAddress::FRAME_1,
+      UINT64_C(0x118) | (UINT64_C(1) << 16));
+    gs.writePSMCT32(0, 0, 0, UINT32_C(0x80665544));
+    system.eeBus().write64(EEMemoryMap::GS_DISPFB2, displayFrame(0x46, 1));
+    system.eeBus().write64(EEMemoryMap::GS_DISPLAY2, displayArea(1, 1));
+    system.eeBus().write64(EEMemoryMap::GS_PMODE,
+      GSDisplayMode::ENABLE_CIRCUIT_2);
+  };
+  NekoSystem origin;
+  prepare(origin);
+  const auto checkpoint = origin.saveState();
+  origin.eeBus().write64(EEMemoryMap::GS_DISPFB2, displayFrame(0x118, 1));
+  const auto expected = origin.saveState();
+
+  for (const bool restored : {false, true})
+  {
+    for (const bool traced : {false, true})
+    {
+      NekoSystem system;
+      if (restored)
+      {
+        system.loadState(checkpoint);
+      }
+      else
+      {
+        prepare(system);
+      }
+      if (traced)
+      {
+        system.startTrace();
+      }
+      REQUIRE(system.gsDisplay().presentation().rgba ==
+        std::vector<std::uint8_t>{0x11, 0x22, 0x33, 0xff});
+      REQUIRE(system.saveState() == checkpoint);
+      system.eeBus().write64(EEMemoryMap::GS_DISPFB2, displayFrame(0x118, 1));
+      REQUIRE(system.gsDisplay().presentation().rgba ==
+        std::vector<std::uint8_t>{0x44, 0x55, 0x66, 0x80});
+      REQUIRE(system.saveState() == expected);
+    }
   }
 }
 

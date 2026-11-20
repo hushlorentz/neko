@@ -16,6 +16,7 @@ namespace
   }
 
   constexpr std::uint8_t COMPONENTS_PER_PIXEL = 4;
+  constexpr std::uint16_t BLOCKS_PER_FRAMEBUFFER_PAGE = 32;
 
   std::uint8_t component(
     std::uint32_t pixel,
@@ -356,7 +357,7 @@ std::uint32_t GSDisplay::circuitPixel(
     return static_cast<std::uint32_t>(backgroundColor);
   }
   return gsComponent->readDisplayPSMCT32(
-    circuit.basePointer,
+    circuit.basePointer * BLOCKS_PER_FRAMEBUFFER_PAGE,
     circuit.bufferWidth,
     circuit.sourceX + x,
     circuit.sourceY + y);
