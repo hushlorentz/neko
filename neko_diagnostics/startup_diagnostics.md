@@ -905,6 +905,46 @@ These hand-defined results and traced/plain/restored comparisons are covered
 by BIOS-free native tests. Finite variants are correctness fixtures, not
 sustained-performance workloads.
 
+#### COP1 reference conformance
+
+The separate `cop1` kind requires finite iterations; it is not a sustained
+performance control. EE guest code alternates integer work with
+`LWC1` -> `ADD.S` -> `MFC1` -> a dependent integer store, then drains before
+the next iteration. IOP executes only the scalar control path. Both CPUs
+publish the completion marker and counters at `0x2000`; EE's fourth word
+is raw `3.0` (`0x40400000`), while IOP retains the scalar XOR result.
+EE `0x4000`/`0x4004` contain raw `1.0` and the stored raw `3.0`.
+
+```sh
+python3 -B tools/create_benchmark_rom.py cop1 --iterations 3 --output out/cop1-conformance.bin
+```
+
+The native fixtures in `tools/test_create_benchmark_rom.py` use three iterations
+and a 512-master-cycle ceiling. They require complete traces, completed-load
+interlocks and all three load producers, select an active load boundary from
+the reference trace, and compare cold/plain/traced and restored continuations
+using the maintained inspector and full canonical save-state bytes. Corrupted
+trace payloads and canonical bytes must fail comparison even when the ending
+summary alone would agree.
+
+Set `NEKO_TEST_BINARY` to the current headless executable. For cross-build
+comparison, explicitly supply a retained reference executable as
+`NEKO_REFERENCE_BINARY`; the fixture creates each build's own checkpoint at
+the same selected boundary, never restores one build's checkpoint in the other.
+
+```sh
+NEKO_TEST_BINARY="$PWD/out/check/neko" \
+NEKO_REFERENCE_BINARY="$PWD/out/performance-cop1-reference-20261121/neko" \
+python3 -B -m unittest discover -s tools -p 'test_create_benchmark_rom.py'
+```
+
+Freeze and record the reference executable identity before changing/rebuilding
+execution. No supplied reference means the cross-build test explicitly skips;
+traced/plain/restored self-comparison still runs. Identical executable identities
+validate the harness only, not reference/optimized acceptance. These BIOS-free
+fixtures do not build executables, launch retail campaigns, sample performance
+or establish BIOS correctness or a speedup.
+
 Use the existing campaign driver and a new directory for each control:
 
 ```sh

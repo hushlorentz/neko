@@ -9,6 +9,7 @@ import sys
 
 
 KINDS = ("cpu", "ram", "devices")
+CONFORMANCE_KINDS = ("cop1",)
 ROM_BYTES = 4194304
 
 
@@ -68,11 +69,59 @@ def loop(words, kind, iterations):
         branch(words, 5, 7, 0, start)
 
 
+def publish_results(words):
+    store(words, 0xa0002000, 0x4e454b4f)
+    words.extend((0xad220004, 0xad230008, 0xad24000c))
+
+
+def encode_rom(words):
+    image = bytearray(ROM_BYTES)
+    for index, word in enumerate(words):
+        struct.pack_into("<I", image, index * 4, word)
+    return bytes(image)
+
+
+def cop1_conformance_rom(iterations):
+    words = [0x34020000, 0x34030000, 0x34070000 | iterations]
+    words.extend((0x40087800, 0, 0x3409001f))  # mfc0 PRId; delay; IOP revision.
+    dispatch = len(words)
+    words.extend((0, 0))
+    store(words, 0xa0004000, 0x3f800000)
+    constant(words, 1, 0xa0004000)
+    constant(words, 8, 0x40000000)
+    words.extend((0x44881000, 0, 0, 0))  # mtc1 r8,f2; drain the initial move.
+    start = len(words)
+    words.extend((
+        0x24420001, 0x24630003,  # Integer work with no older COP1 producer.
+        0xc4210000,             # lwc1 f1,0(r1)
+        0x460208c0,             # add.s f3,f1,f2: 1.0 + 2.0
+        0x44041800,             # mfc1 r4,f3
+        0xac240004,             # sw r4,4(r1): wait for the GPR producer.
+    ))
+    words.extend([0] * 8)  # Return to empty work before the next iteration.
+    words.append(0x24e7ffff)
+    branch(words, 5, 7, 0, start)
+    to_marker = len(words)
+    words.extend((0, 0))
+    iop_start = len(words)
+    loop(words, "cpu", iterations)
+    marker = len(words)
+    words[dispatch] = 0x11090000 | (iop_start - dispatch - 1)
+    words[to_marker] = 0x10000000 | (marker - to_marker - 1)
+    publish_results(words)
+    words.extend((0x1000ffff, 0))
+    return encode_rom(words)
+
+
 def create_rom(kind, iterations=None):
-    if kind not in KINDS:
+    if kind not in KINDS + CONFORMANCE_KINDS:
         raise ValueError(f"Unknown benchmark kind: {kind}")
     if iterations is not None and (type(iterations) is not int or not 1 <= iterations <= 65535):
         raise ValueError("Finite iterations must be between 1 and 65535")
+    if kind == "cop1":
+        if iterations is None:
+            raise ValueError("COP1 conformance requires finite iterations")
+        return cop1_conformance_rom(iterations)
     words = [0x34020000, 0x34030000]
     if iterations is not None:
         words.append(0x34070000 | iterations)
@@ -109,18 +158,14 @@ def create_rom(kind, iterations=None):
         words[dispatch] = 0x11090000 | offset  # beq r8,r9,IOP setup
         words[to_marker] = 0x10000000 | (marker - to_marker - 1)
     if iterations is not None:
-        store(words, 0xa0002000, 0x4e454b4f)
-        words.extend((0xad220004, 0xad230008, 0xad24000c))  # publish counters and final XOR.
+        publish_results(words)
     words.extend((0x1000ffff, 0))  # Park; both CPUs remain bounded by the host ceiling.
-    image = bytearray(ROM_BYTES)
-    for index, word in enumerate(words):
-        struct.pack_into("<I", image, index * 4, word)
-    return bytes(image)
+    return encode_rom(words)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=KINDS)
+    parser.add_argument("kind", choices=KINDS + CONFORMANCE_KINDS)
     parser.add_argument("--iterations", type=int,
                         help="Finite correctness variant; omitted for sustained host-bounded execution.")
     parser.add_argument("--output", type=Path, required=True,

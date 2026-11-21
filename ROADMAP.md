@@ -4531,30 +4531,28 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Establish and measure repeatable authored CPU/memory and inactive/active-
       device controls, with guest-observable results, separate sampling and
       traced/plain/restored canonical acceptance.
-- [ ] Agree finite retail BIOS profiling scope and sample representative phases;
+- [x] Agree finite retail BIOS profiling scope and sample representative phases;
       distinguish untraced, failure-probe and required traced execution with
       same-build provenance while discovery remains paused.
-- [ ] Record ranked native costs, wall/CPU throughput and repeated-run spread;
+- [x] Record ranked native costs, wall/CPU throughput and repeated-run spread;
       select one owner-local optimization with measured headroom, regression
       scope and explicit acceptance before changing execution.
 
 ### Backend Correctness Reference and Regression Gates
 
-- [ ] Extend existing authored conformance helpers for the selected optimization,
-      comparing reference and optimized canonical state and required traces at
-      identical guest-cycle boundaries; avoid a separate semantic engine.
-- [ ] Add affected differential boundaries as each optimization becomes
-      actionable: faults, simultaneous events, code changes and split runs;
-      cover warmed reset/restore state when derived execution state is added.
-- [ ] Require a failing focused regression before each observable behavior fix;
-      retain immediate integration coverage, risk-triggered complete gates and
-      independent timing/architecture/persistence review.
+- [x] Extend existing authored conformance helpers for the selected optimization,
+      establishing frozen-reference/current canonical and required-trace
+      comparisons at identical authored COP1 guest-cycle boundaries.
+- [ ] Cover the selected COP1 query boundary's faults, simultaneous events,
+      code changes, split runs and warmed reset/restore transitions through
+      existing authored conformance owners.
 
 ### Measured Constant-Cost and Build Optimization
 
 - [ ] Remove the first demonstrated per-cycle allocation, copying, dispatch or
       observation cost through its existing owner; preserve component order,
       inactive/active transitions, exception cleanup and full diagnostics.
+      Require red/green for observable fixes and reference/optimized agreement.
 - [ ] Evaluate inlining/LTO separately from source changes in assertion-enabled
       builds with unchanged floating-point semantics and portable defaults;
       defer PGO until a representative training and holdout corpus is stable.
