@@ -170,6 +170,176 @@ TEST_CASE("EE issue readiness preserves COP1 memory exception order")
   REQUIRE(core.programCounter() == 4);
 }
 
+TEST_CASE(
+  "EE COP1 query boundaries preserve fault IRQ order across warmed restore",
+  "[cop1-query-boundary]")
+{
+  for (const std::uint8_t opcode : {0x31, 0x39})
+  {
+    CAPTURE(opcode);
+    NekoSystem original;
+    EECore &core = original.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    mapLowKusegForTest(&core);
+    const std::uint32_t faultAddress =
+      EEMemoryMap::KSEG0_BASE +
+      EEMemoryMap::MAIN_MEMORY_SIZE;
+    core.setGeneralRegister(1, {faultAddress, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    original.eeBus().write32(
+      0,
+      cop1MemoryInstruction(opcode, 1, 3, 0));
+    core.startExecution(0);
+    original.clockMasterCycle();
+    assertCOP1TestInterrupt(&original);
+
+    NekoSystem restored;
+    restored.eeCore().setFloatingPointRegister(
+      2,
+      UINT32_C(0x40c00000));
+    restored.eeCore().setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    runInstruction(
+      &restored,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    restored.loadState(original.saveState());
+    REQUIRE(core.stateHash() == restored.eeCore().stateHash());
+    original.startTrace();
+    restored.startTrace();
+
+    original.runMasterCycles(3);
+    restored.runMasterCycles(1);
+    restored.runMasterCycles(2);
+
+    REQUIRE(
+      core.pendingException() ==
+      (opcode == 0x31
+        ? EEException::DataBusErrorLoad
+        : EEException::DataBusErrorStore));
+    REQUIRE(core.exceptionAddress() == faultAddress);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(core.floatingPointRegister(3) == UINT32_C(0x89abcdef));
+    REQUIRE(core.floatingPointRegister(4) == 0);
+    std::size_t faults = 0;
+    std::size_t deliveredInterrupts = 0;
+    for (const NekoTraceEvent &event : original.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::EE)
+      {
+        continue;
+      }
+      faults += event.type == NekoTraceEventType::ExceptionEntered;
+      deliveredInterrupts +=
+        event.type == NekoTraceEventType::InterruptDelivered;
+    }
+    REQUIRE(faults == 1);
+    REQUIRE(deliveredInterrupts == 0);
+    REQUIRE(original.traceHash() == restored.traceHash());
+    REQUIRE(original.saveState() == restored.saveState());
+  }
+}
+
+TEST_CASE(
+  "EE COP1 query boundaries preserve changed code across warmed restore",
+  "[cop1-query-boundary]")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x00, 4, 5, 6));
+  core.startExecution(0);
+  original.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  original.eeBus().write32(4, 0);
+
+  NekoSystem restored;
+  restored.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x3f800000));
+  runInstruction(
+    &restored,
+    cop1TransferInstruction(0x00, 7, 2));
+  restored.loadState(original.saveState());
+  REQUIRE(core.stateHash() == restored.eeCore().stateHash());
+  original.startTrace();
+  restored.startTrace();
+  original.runMasterCycles(16);
+  restored.runMasterCycles(3);
+  restored.runMasterCycles(13);
+
+  REQUIRE(core.floatingPointRegister(5) == UINT32_C(0x40800000));
+  REQUIRE(original.traceHash() == restored.traceHash());
+  REQUIRE(original.saveState() == restored.saveState());
+
+  for (NekoSystem *system : {&original, &restored})
+  {
+    system->eeBus().write32(
+      0x100,
+      cop1TransferInstruction(0x00, 7, 5));
+    system->eeCore().setProgramCounter(0x100);
+  }
+  original.runMasterCycles(4);
+  restored.runMasterCycles(1);
+  restored.runMasterCycles(3);
+
+  REQUIRE(core.generalRegister(7).low == UINT32_C(0x40800000));
+  REQUIRE(original.traceHash() == restored.traceHash());
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
+TEST_CASE(
+  "EE COP1 query boundaries reenter dependent work after warmed system reset",
+  "[cop1-query-boundary]")
+{
+  NekoSystem warmed;
+  warmed.eeCore().setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  warmed.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
+  runInstruction(
+    &warmed,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  warmed.reset();
+  NekoSystem fresh;
+  fresh.reset();
+  for (NekoSystem *system : {&warmed, &fresh})
+  {
+    EECore &core = system->eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      system->eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system->eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    system->eeBus().write32(
+      4,
+      cop1TransferInstruction(0x00, 6, 3));
+    core.startExecution(0);
+    system->startTrace();
+  }
+
+  fresh.runMasterCycles(12);
+  warmed.runMasterCycles(2);
+  warmed.runMasterCycles(10);
+
+  REQUIRE(warmed.eeCore().floatingPointRegister(4) == 0);
+  REQUIRE(
+    warmed.eeCore().generalRegister(6).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(fresh.traceHash() == warmed.traceHash());
+  REQUIRE(fresh.saveState() == warmed.saveState());
+}
+
 TEST_CASE("EE accepts delayed COP1 work before completion")
 {
   NekoSystem system;

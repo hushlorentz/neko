@@ -4543,7 +4543,7 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Extend existing authored conformance helpers for the selected optimization,
       establishing frozen-reference/current canonical and required-trace
       comparisons at identical authored COP1 guest-cycle boundaries.
-- [ ] Cover the selected COP1 query boundary's faults, simultaneous events,
+- [x] Cover the selected COP1 query boundary's faults, simultaneous events,
       code changes, split runs and warmed reset/restore transitions through
       existing authored conformance owners.
 
