@@ -50,6 +50,7 @@ namespace GSPixelStorageMode
   constexpr std::uint8_t PSMCT32 = 0x00;
   constexpr std::uint8_t PSMCT24 = 0x01;
   constexpr std::uint8_t PSMCT16 = 0x02;
+  constexpr std::uint8_t PSMT4 = 0x14;
   constexpr std::uint8_t PSMZ32 = 0x00;
   constexpr std::uint8_t PSMZ24 = 0x01;
 }
@@ -402,6 +403,11 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t x,
       std::uint16_t y) const;
     std::size_t psmct16HalfwordAddress(
+      std::uint16_t basePointer,
+      std::uint8_t bufferWidth,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    std::size_t psmt4NibbleAddress(
       std::uint16_t basePointer,
       std::uint8_t bufferWidth,
       std::uint16_t x,

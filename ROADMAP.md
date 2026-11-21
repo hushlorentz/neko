@@ -4295,8 +4295,17 @@ not requirements for exhaustive subsystem coverage.
       error evidence without fabricating completed checkpoints or verification.
 - [x] Validate authored runtime failures and unchanged successful campaign
       gates; independently review.
-- [ ] Attribute the real BIOS transfer format from retained bounded diagnostic
+- [x] Attribute the real BIOS transfer format from retained bounded diagnostic
       replay without claiming completed boot or runtime-error conformance.
+
+### GS PSMT4 Host Upload Dependency
+
+- [x] Establish manual-evidenced nibble packing, swizzled local-memory layout
+      and admission bounds through existing GS transfer/state owners.
+- [x] Implement host uploads with focused red/green and authored DMA,
+      staged/active restored and traced/plain conformance; independently review.
+- [ ] Verify fresh unchanged-input BIOS retirement with full cold/restored
+      comparisons and next-origin attribution or bounded observation.
 
 ### Additional CD/DVD Command and Configuration Scope
 

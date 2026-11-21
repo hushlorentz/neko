@@ -26,6 +26,12 @@ namespace
   constexpr std::uint16_t GS_PSMCT16_BLOCK_WIDTH = 16;
   constexpr std::uint16_t GS_PSMCT16_BLOCK_HEIGHT = 8;
   constexpr std::uint16_t GS_PSMCT16_HALF_COLUMN_WIDTH = 8;
+  constexpr std::uint16_t GS_PSMT4_PAGE_SIZE = 128;
+  constexpr std::uint16_t GS_PSMT4_BLOCK_WIDTH = 32;
+  constexpr std::uint16_t GS_PSMT4_BLOCK_HEIGHT = 16;
+  constexpr std::uint16_t GS_PSMT4_COLUMN_HEIGHT = 4;
+  constexpr std::uint8_t GS_NIBBLE_BITS = 4;
+  constexpr std::uint32_t GS_NIBBLE_MASK = 0x0f;
   constexpr std::uint32_t GS_HALFWORD_MASK = 0xffff;
   constexpr std::uint32_t GS_PSMZ24_MASK = 0x00ffffff;
   constexpr std::uint32_t GS_RGB24_MASK = 0x00ffffff;
@@ -151,7 +157,7 @@ namespace
   constexpr std::size_t GS_TRANSFER_BASE_WORDS = 64;
 
   constexpr std::array<std::array<std::uint8_t, 4>, 8>
-    GS_PSMCT16_BLOCKS = {{
+    GS_PSMCT16_PSMT4_BLOCKS = {{
       {{0, 2, 8, 10}},
       {{1, 3, 9, 11}},
       {{4, 6, 12, 14}},
@@ -292,15 +298,28 @@ const char *GSImageTransfer::activationError() const
   if (direction == GSImageTransferDirection::HostToLocal)
   {
     if (destinationPixelStorageMode != GSPixelStorageMode::PSMCT32 &&
-        destinationPixelStorageMode != GSPixelStorageMode::PSMCT16)
+        destinationPixelStorageMode != GSPixelStorageMode::PSMCT16 &&
+        destinationPixelStorageMode != GSPixelStorageMode::PSMT4)
     {
-      return "GS host-to-local transfer requires PSMCT32 or PSMCT16.";
+      return "GS host-to-local transfer requires PSMCT32, PSMCT16 or PSMT4.";
     }
     if (width == 0 || height == 0)
     {
       return nullptr;
     }
-    if (destinationPixelStorageMode == GSPixelStorageMode::PSMCT16)
+    if (destinationPixelStorageMode == GSPixelStorageMode::PSMT4)
+    {
+      if (destinationBufferWidth == 0 || destinationBufferWidth > 32 ||
+          destinationBufferWidth % 2 != 0)
+      {
+        return "GS PSMT4 transfer requires an even destination width from 2 to 32.";
+      }
+      if (destinationX % 4 != 0 || width % 8 != 0)
+      {
+        return "GS PSMT4 transfer requires aligned destination X and a width multiple of eight.";
+      }
+    }
+    else if (destinationPixelStorageMode == GSPixelStorageMode::PSMCT16)
     {
       if (destinationBufferWidth == 0 || destinationBufferWidth > 32)
       {
@@ -2068,7 +2087,7 @@ std::size_t GS::psmct16HalfwordAddress(
     x / GS_PSMCT16_PAGE_SIZE;
   const std::uint16_t pageX = x % GS_PSMCT16_PAGE_SIZE;
   const std::uint16_t pageY = y % GS_PSMCT16_PAGE_SIZE;
-  const std::uint8_t block = GS_PSMCT16_BLOCKS[
+  const std::uint8_t block = GS_PSMCT16_PSMT4_BLOCKS[
     pageY / GS_PSMCT16_BLOCK_HEIGHT][
     pageX / GS_PSMCT16_BLOCK_WIDTH];
   const std::size_t column =
@@ -2085,6 +2104,35 @@ std::size_t GS::psmct16HalfwordAddress(
     word;
   return (address % localMemory.size()) * 2 +
     blockX / GS_PSMCT16_HALF_COLUMN_WIDTH;
+}
+
+std::size_t GS::psmt4NibbleAddress(
+  std::uint16_t basePointer,
+  std::uint8_t bufferWidth,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  const std::size_t page =
+    (y / GS_PSMT4_PAGE_SIZE) * (bufferWidth / 2) +
+    x / GS_PSMT4_PAGE_SIZE;
+  const std::uint16_t pageX = x % GS_PSMT4_PAGE_SIZE;
+  const std::uint16_t pageY = y % GS_PSMT4_PAGE_SIZE;
+  const std::uint8_t block = GS_PSMCT16_PSMT4_BLOCKS[
+    pageY / GS_PSMT4_BLOCK_HEIGHT][pageX / GS_PSMT4_BLOCK_WIDTH];
+  const std::size_t column =
+    (pageY % GS_PSMT4_BLOCK_HEIGHT) / GS_PSMT4_COLUMN_HEIGHT;
+  const std::uint16_t blockX = pageX % GS_PSMT4_BLOCK_WIDTH;
+  const std::uint16_t columnY = pageY % GS_PSMT4_COLUMN_HEIGHT;
+  // GSUSER_E p169 swaps the word's high bit on alternate columns/row pairs.
+  const std::size_t word =
+    (blockX & 1) | ((columnY & 1) << 1) | ((blockX & 2) << 1) |
+    (((blockX & 4) << 1) ^ ((columnY & 2) << 2) ^ ((column & 1) << 3));
+  const std::size_t address =
+    basePointer * GS_TRANSFER_BASE_WORDS +
+    page * GS_PAGE_WORDS + block * GS_BLOCK_WORDS +
+    column * GS_COLUMN_WORDS + word;
+  return (address % localMemory.size()) * 8 +
+    (blockX / 8) * 2 + columnY / 2;
 }
 
 std::size_t GS::psmz32WordAddress(
@@ -2276,8 +2324,10 @@ void GS::writeTransferData(std::uint64_t data)
     return;
   }
   const std::uint8_t pixelBits =
-    transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMCT16 ?
-      GS_HALFWORD_BITS : 32;
+    transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMT4 ?
+      GS_NIBBLE_BITS :
+      transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMCT16 ?
+        GS_HALFWORD_BITS : 32;
   for (std::uint8_t shift = 0; shift < 64 && transfer.active; shift += pixelBits)
   {
     writeTransferPixel(static_cast<std::uint32_t>(data >> shift));
@@ -2324,7 +2374,19 @@ void GS::writeTransferPixel(std::uint32_t value)
     (transfer.destinationY +
      (pixelIndex / transfer.width)) &
     GS_TRANSFER_COORDINATE_MASK;
-  if (transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMCT16)
+  if (transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMT4)
+  {
+    const std::size_t address = psmt4NibbleAddress(
+      transfer.destinationBasePointer,
+      transfer.destinationBufferWidth,
+      x,
+      y);
+    auto &word = localMemory[address / 8];
+    const std::uint8_t shift = (address % 8) * GS_NIBBLE_BITS;
+    word = (word & ~(GS_NIBBLE_MASK << shift)) |
+      ((value & GS_NIBBLE_MASK) << shift);
+  }
+  else if (transfer.destinationPixelStorageMode == GSPixelStorageMode::PSMCT16)
   {
     const std::size_t address = psmct16HalfwordAddress(
       transfer.destinationBasePointer,

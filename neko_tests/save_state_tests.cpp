@@ -880,6 +880,147 @@ TEST_CASE("GS PSMCT16 authored DMA preserves staged and active four-mode conform
   REQUIRE(originalPlain.saveState() == ending);
 }
 
+TEST_CASE("GS PSMT4 authored DMA preserves staged and active four-mode conformance",
+  "[gs4][save-state][guest][trace]")
+{
+  std::uint32_t remaining = 1031;
+  SECTION("after BITBLTBUF") {}
+  SECTION("after TRXREG") { remaining = 1029; }
+  SECTION("active with different pending parameters") { remaining = 1023; }
+  constexpr std::uint32_t packetAddress = 0x20000;
+  constexpr std::uint32_t packetQuadwords = 1033;
+  const auto prepare = [&](NekoSystem &system)
+  {
+    auto &gs = system.gs();
+    gs.writeDisplayPSMCT32(0, 1, 0, 0, 0xa55ac33c);
+    std::vector<GIFQuadword> packet = {
+      gifTag(4, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(0x14042f0500000000)),
+      adWrite(GSRegisterAddress::TRXPOS, 0),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(128) | (UINT64_C(256) << 32)),
+      adWrite(GSRegisterAddress::TRXDIR, 0),
+      gifTag(2, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(63) << 56),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(8) | (UINT64_C(1) << 32)),
+      gifTag(1024, true, GIFDataFormat::Image, 0)
+    };
+    for (unsigned index = 0; index < 1024; ++index)
+    {
+      GIFQuadword payload{};
+      for (unsigned word = 0; word < 4; ++word)
+      {
+        for (unsigned nibble = 0; nibble < 8; ++nibble)
+        {
+          const unsigned pixel = index * 32 + word * 8 + nibble;
+          const unsigned x = pixel % 128;
+          const unsigned y = pixel / 128;
+          payload[word] |= ((x + y * 3 + y / 128 + 1) % 16) << (nibble * 4);
+        }
+      }
+      packet.push_back(payload);
+    }
+    REQUIRE(packet.size() == packetQuadwords);
+    for (unsigned index = 0; index < packet.size(); ++index)
+    {
+      REQUIRE(system.eeBus().writeQuadword(packetAddress + index * 16, packet[index]));
+    }
+    const std::uint32_t program[] = {
+      0xac620000, 0xac640010, 0xac65fff0, 0x1000ffff, 0
+    };
+    for (unsigned index = 0; index < 5; ++index)
+    {
+      system.eeBus().write32(0x10000 + index * 4, program[index]);
+    }
+    system.eeBus().write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+    auto &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(2, {packetAddress, 0});
+    core.setGeneralRegister(3, {0xb000a010, 0});
+    core.setGeneralRegister(4, {packetQuadwords, 0});
+    core.setGeneralRegister(5, {0x101, 0});
+    core.startExecution(0xa0010000);
+    for (unsigned cycle = 0;
+         cycle < 64 && system.gifDMAC().quadwordCount() != remaining; ++cycle)
+    {
+      system.runMasterCycles(1);
+    }
+    REQUIRE(system.gifDMAC().quadwordCount() == remaining);
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    REQUIRE(gs.imageTransfer().active == (remaining == 1023));
+    REQUIRE(gs.imageTransfer().transferredPixels == (remaining == 1023 ? 32 : 0));
+    if (remaining == 1023)
+    {
+      REQUIRE(gs.imageTransfer().destinationPixelStorageMode == 0x14);
+      REQUIRE(gs.imageTransfer().width == 128);
+      REQUIRE(gs.registerValue(GSRegisterAddress::BITBLTBUF) == (UINT64_C(63) << 56));
+      REQUIRE(gs.registerValue(GSRegisterAddress::TRXREG) ==
+        (UINT64_C(8) | (UINT64_C(1) << 32)));
+    }
+  };
+  NekoSystem original;
+  NekoSystem originalPlain;
+  prepare(original);
+  prepare(originalPlain);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  NekoSystem restoredPlain;
+  restored.loadState(saved);
+  restoredPlain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restoredPlain.saveState() == saved);
+  original.startTrace(50000);
+  restored.startTrace(50000);
+  for (auto *system : {&original, &originalPlain, &restored, &restoredPlain})
+  {
+    system->runMasterCycles(1100);
+    REQUIRE(system->eeCore().pendingException() == EEException::None);
+    REQUIRE(system->gifDMAC().quadwordCount() == 0);
+    REQUIRE(system->gifDMAC().transferredQuadwordCount() == packetQuadwords);
+    REQUIRE_FALSE(system->gs().imageTransfer().active);
+    REQUIRE(system->gs().imageTransfer().transferredPixels == 32768);
+    REQUIRE(system->gs().imageTransfer().destinationBasePointer == 0x2f05);
+    REQUIRE(system->gs().localMemoryWord(0) == 0xa55ac33c);
+    REQUIRE(system->gs().localMemoryWord(0x2f05 * 64 - 1) == 0);
+    REQUIRE(system->gs().localMemoryWord(0x2f05 * 64 + 2048) == 0);
+    REQUIRE(system->gs().localMemoryWord(0x2f05 * 64 + 6144) == 0);
+    // Inverse GSUSER_E pp168-169 bit planes, independent of the forward mapper.
+    constexpr unsigned xBits[] = {3, 5, 6, 1, 2, 10, 12};
+    constexpr unsigned yBits[] = {4, 0, 7, 8, 9, 11, 13};
+    for (unsigned page = 0; page < 2; ++page)
+    {
+      for (unsigned word = 0; word < 2048; ++word)
+      {
+        std::uint32_t expected = 0;
+        for (unsigned nibble = 0; nibble < 8; ++nibble)
+        {
+          const unsigned address = word * 8 + nibble;
+          unsigned x = 0;
+          unsigned y = 0;
+          for (unsigned bit = 0; bit < 7; ++bit)
+          {
+            x |= ((address >> xBits[bit]) & 1) << bit;
+            y |= ((address >> yBits[bit]) & 1) << bit;
+          }
+          x ^= (((y >> 1) ^ (y >> 2)) & 1) << 2;
+          y += page * 128;
+          expected |= ((x + y * 3 + page + 1) % 16) << (nibble * 4);
+        }
+        CAPTURE(page);
+        CAPTURE(word);
+        REQUIRE(system->gs().localMemoryWord(0x2f05 * 64 + page * 4096 + word) == expected);
+      }
+    }
+  }
+  REQUIRE_FALSE(original.traceTruncated());
+  REQUIRE_FALSE(restored.traceTruncated());
+  REQUIRE_FALSE(original.trace().empty());
+  REQUIRE(original.traceHash() == restored.traceHash());
+  const auto ending = original.saveState();
+  REQUIRE(restored.saveState() == ending);
+  REQUIRE(restoredPlain.saveState() == ending);
+  REQUIRE(originalPlain.saveState() == ending);
+}
+
 TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
 {
   NekoSystem original;

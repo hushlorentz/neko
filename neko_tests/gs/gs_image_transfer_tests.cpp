@@ -90,6 +90,171 @@ namespace
   }
 }
 
+TEST_CASE("GS PSMT4 uploads follow manual column word and nibble planes", "[gs4]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 2, 0x14));
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(32, 16));
+  REQUIRE_NOTHROW(gs.writeRegister(GSRegisterAddress::TRXDIR, 0));
+  for (unsigned pixel = 0; pixel < 512; pixel += 16)
+  {
+    std::uint64_t data = 0;
+    for (unsigned nibble = 0; nibble < 16; ++nibble)
+    {
+      const auto index = pixel + nibble;
+      data |= static_cast<std::uint64_t>(
+        ((index % 32) + 3 * (index / 32) + 1) % 16) << (nibble * 4);
+    }
+    gs.writeRegister(GSRegisterAddress::HWREG, data);
+  }
+  constexpr unsigned words[4][8] = {
+    {0, 1, 4, 5, 8, 9, 12, 13},
+    {2, 3, 6, 7, 10, 11, 14, 15},
+    {8, 9, 12, 13, 0, 1, 4, 5},
+    {10, 11, 14, 15, 2, 3, 6, 7}
+  };
+  for (unsigned column = 0; column < 4; ++column)
+  {
+    std::uint32_t expected[16]{};
+    for (unsigned y = 0; y < 4; ++y)
+    {
+      for (unsigned x = 0; x < 32; ++x)
+      {
+        const unsigned row = (y + ((column % 2) * 2)) % 4;
+        const unsigned shift = (x / 8) * 8 + (y / 2) * 4;
+        expected[words[row][x % 8]] |=
+          ((x + 3 * (column * 4 + y) + 1) % 16) << shift;
+      }
+    }
+    for (unsigned word = 0; word < 16; ++word)
+    {
+      CAPTURE(column);
+      CAPTURE(word);
+      REQUIRE(gs.localMemoryWord(column * 16 + word) == expected[word]);
+    }
+  }
+  REQUIRE(gs.imageTransfer().transferredPixels == 512);
+  REQUIRE_FALSE(gs.imageTransfer().active);
+}
+
+TEST_CASE("GS PSMT4 uploads preserve other nibbles and ignore the final tail", "[gs4]")
+{
+  GS gs;
+  gs.writeDisplayPSMCT32(0, 1, 0, 0, 0xa55ac33c);
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 2, 0x14));
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 1));
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0xfffffff087654321));
+  REQUIRE(gs.localMemoryWord(0) == 0xa55ac331);
+  REQUIRE(gs.localMemoryWord(1) == 2);
+  REQUIRE(gs.localMemoryWord(4) == 3);
+  REQUIRE(gs.localMemoryWord(13) == 8);
+  REQUIRE(gs.localMemoryWord(16) == 0);
+  REQUIRE(gs.imageTransfer().transferredPixels == 8);
+  REQUIRE_FALSE(gs.imageTransfer().active);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_MAX);
+  REQUIRE(gs.localMemoryWord(0) == 0xa55ac331);
+
+  gs.writeRegister(GSRegisterAddress::TRXPOS, transferPosition(8, 0));
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x111111119abcdef0));
+  REQUIRE(gs.localMemoryWord(0) == 0xa55ac031);
+  REQUIRE(gs.localMemoryWord(1) == 0x00000f02);
+}
+
+TEST_CASE("GS PSMT4 page block base and coordinate wrapping follow manual anchors", "[gs4]")
+{
+  struct Anchor
+  {
+    std::uint16_t x;
+    std::uint16_t y;
+    std::uint16_t base;
+    std::uint8_t stride;
+    std::size_t word;
+    unsigned shift;
+  };
+  for (const auto anchor : {
+         Anchor{0, 0, 0, 2, 0, 0},
+         Anchor{4, 0, 0, 2, 8, 0},
+         Anchor{8, 0, 0, 2, 0, 8},
+         Anchor{0, 2, 0, 2, 8, 4},
+         Anchor{0, 4, 0, 2, 24, 0},
+         Anchor{0, 8, 0, 2, 32, 0},
+         Anchor{32, 0, 0, 2, 128, 0},
+         Anchor{0, 16, 0, 2, 64, 0},
+         Anchor{64, 0, 0, 2, 512, 0},
+         Anchor{0, 32, 0, 2, 256, 0},
+         Anchor{0, 64, 0, 2, 1024, 0},
+         Anchor{128, 0, 0, 4, 2048, 0},
+         Anchor{0, 128, 0, 4, 4096, 0},
+         Anchor{0, 0, 1, 2, 64, 0},
+         Anchor{32, 0, 0x3fff, 2, 64, 0},
+         Anchor{2044, 2047, 0, 32, 0x7fffa, 28}})
+  {
+    CAPTURE(anchor.x);
+    CAPTURE(anchor.y);
+    CAPTURE(anchor.base);
+    CAPTURE(anchor.stride);
+    GS gs;
+    gs.writeRegister(GSRegisterAddress::BITBLTBUF,
+      transferBuffer(anchor.base, anchor.stride, 0x14));
+    gs.writeRegister(GSRegisterAddress::TRXPOS, transferPosition(anchor.x, anchor.y));
+    gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 1));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+    gs.writeRegister(GSRegisterAddress::HWREG, 1);
+    REQUIRE(gs.localMemoryWord(anchor.word) == (UINT32_C(1) << anchor.shift));
+  }
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 32, 0x14));
+  gs.writeRegister(GSRegisterAddress::TRXPOS, transferPosition(2044, 2047));
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 2));
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x0005000000050000));
+  REQUIRE(gs.localMemoryWord(0) == 5);
+  REQUIRE_FALSE(gs.imageTransfer().active);
+}
+
+TEST_CASE("GS PSMT4 admission restart and pending registers remain bounded", "[gs4]")
+{
+  GS gs;
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 1));
+  for (const std::uint8_t stride : {0, 1, 3, 33, 63})
+  {
+    gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, stride, 0x14));
+    REQUIRE_THROWS_WITH(gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
+      "GS PSMT4 transfer requires an even destination width from 2 to 32.");
+    REQUIRE_FALSE(gs.imageTransfer().active);
+  }
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 2, 0x14));
+  gs.writeRegister(GSRegisterAddress::TRXPOS, transferPosition(2, 0));
+  REQUIRE_THROWS_WITH(gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
+    "GS PSMT4 transfer requires aligned destination X and a width multiple of eight.");
+  gs.writeRegister(GSRegisterAddress::TRXPOS, 0);
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(7, 1));
+  REQUIRE_THROWS_WITH(gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
+    "GS PSMT4 transfer requires aligned destination X and a width multiple of eight.");
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 0));
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 63, 0x14));
+  REQUIRE_NOTHROW(gs.writeRegister(GSRegisterAddress::TRXDIR, 0));
+  REQUIRE_FALSE(gs.imageTransfer().active);
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 2, 0x14));
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(32, 1));
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_MAX);
+  gs.writeRegister(GSRegisterAddress::TRXPOS, transferPosition(8, 0));
+  gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(8, 1));
+  REQUIRE(gs.imageTransfer().width == 32);
+  REQUIRE(gs.imageTransfer().destinationX == 0);
+  REQUIRE(gs.imageTransfer().transferredPixels == 16);
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, 0);
+  REQUIRE(gs.localMemoryWord(0) == 15);
+  REQUIRE(gs.imageTransfer().transferredPixels == 8);
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF, sourceTransferBuffer(0, 2, 0x14));
+  REQUIRE_THROWS_WITH(gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
+    "GS local-to-host transfer requires PSMCT32.");
+}
+
 TEST_CASE("GS transfer parameters latch only on TRXDIR", "[gs16]")
 {
   GS gs;
@@ -267,7 +432,7 @@ TEST_CASE("GS PSMCT16 admission preserves explicit bounds and empty precedence",
   {
     gs.writeRegister(GSRegisterAddress::BITBLTBUF, transferBuffer(0, 1, format));
     REQUIRE_THROWS_WITH(gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
-      "GS host-to-local transfer requires PSMCT32 or PSMCT16.");
+      "GS host-to-local transfer requires PSMCT32, PSMCT16 or PSMT4.");
   }
   gs.writeRegister(GSRegisterAddress::BITBLTBUF, UINT64_MAX);
   gs.writeRegister(GSRegisterAddress::TRXPOS, UINT64_MAX);
@@ -508,7 +673,7 @@ TEST_CASE("GS Host-to-Local Image Transfer Tests")
       transferBuffer(0, 1, 1));
     REQUIRE_THROWS_WITH(
       gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
-      "GS host-to-local transfer requires PSMCT32 or PSMCT16.");
+      "GS host-to-local transfer requires PSMCT32, PSMCT16 or PSMT4.");
     REQUIRE_THROWS_WITH(
       gs.writeRegister(GSRegisterAddress::TRXDIR, 2),
       "GS image transfer direction is not implemented.");
@@ -774,7 +939,7 @@ TEST_CASE("GS empty transfers preserve format and direction rejection")
       transferBuffer(0, 0, 1) | sourceTransferBuffer(0, 0, 1));
     REQUIRE_THROWS_WITH(
       gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
-      "GS host-to-local transfer requires PSMCT32 or PSMCT16.");
+      "GS host-to-local transfer requires PSMCT32, PSMCT16 or PSMT4.");
     REQUIRE_THROWS_WITH(
       gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
       "GS local-to-host transfer requires PSMCT32.");
