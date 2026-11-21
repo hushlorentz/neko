@@ -9608,6 +9608,18 @@ bool EECore::cop1ScoreboardBlocks(
   COP1ScoreboardHazard *hazard,
   COP1ScoreboardQuery query) const
 {
+  if (completedLoadRegisters == 0 &&
+      std::none_of(
+        inFlightCOP1Operations.begin(),
+        inFlightCOP1Operations.end(),
+        [](const InFlightCOP1Operation &operation)
+        {
+          return operation.active;
+        }))
+  {
+    return false;
+  }
+
   const bool includeAllOlderProducers =
     query == COP1ScoreboardQuery::CandidateReadiness;
   const EEInstructionDependencies dependencies =

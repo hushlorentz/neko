@@ -4549,16 +4549,16 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 
 ### Measured Constant-Cost and Build Optimization
 
-- [ ] Remove the first demonstrated per-cycle allocation, copying, dispatch or
-      observation cost through its existing owner; preserve component order,
+- [x] Remove the first demonstrated per-cycle allocation, copying, dispatch or
+      observation cost with the empty-work EE COP1 query guard; preserve
       inactive/active transitions, exception cleanup and full diagnostics.
       Require red/green for observable fixes and reference/optimized agreement.
-- [ ] Evaluate inlining/LTO separately from source changes in assertion-enabled
-      builds with unchanged floating-point semantics and portable defaults;
-      defer PGO until a representative training and holdout corpus is stable.
 - [ ] Accept gains only beyond measured variability without material control
       regressions, with canonical/required trace agreement and independent
       review; reprofile before selecting another optimization or later block.
+- [ ] Evaluate inlining/LTO separately from source changes when remaining
+      profiles justify it, in assertion-enabled builds with unchanged
+      floating-point semantics; defer PGO until the training corpus is stable.
 
 ### Derived Decode Caching
 
