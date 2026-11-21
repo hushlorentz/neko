@@ -219,6 +219,14 @@ def completed_evidence(directory, execution):
                     sample != entry.get("progress")):
                 raise ValueError(f"Command progress changed: {name}")
             evidence[progress.name] = file_identity(progress)
+        if "sampling_seconds" in entry:
+            if (type(entry["sampling_seconds"]) is not int or
+                    not 1 <= entry["sampling_seconds"] <= 60):
+                raise ValueError(f"Invalid sampling duration: {name}")
+            sample = artifact(directory, entry.get("sample_file"))
+            if sample.stat().st_size == 0 or file_identity(sample) != entry.get("sample_identity"):
+                raise ValueError(f"Native sample report changed: {name}")
+            evidence[sample.name] = entry["sample_identity"]
     if scout:
         required = {"scout-summary"}
         if not any(name.startswith("scout-") and name != "scout-summary" for name in names):

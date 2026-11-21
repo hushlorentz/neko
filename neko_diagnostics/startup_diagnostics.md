@@ -836,8 +836,8 @@ Keep the assertion-enabled `-O2` configuration as the initial control, with
 unchanged floating-point rules, input and hardware settings.
 
 The JSON report retains every native stage and groups only matching executable,
-BIOS, start/end/ceiling, observation options, progress interval and checkpoint
-identity. Cold, restored, traced and failure-probe runs remain distinct.
+BIOS, start/end/ceiling, observation options, progress interval, sampling duration
+and checkpoint identity. Cold, restored, traced and failure-probe runs remain distinct.
 Groups report repetitions, median execution wall time and min/max/spread;
 each stage retains wall/process-CPU time, cycles/second and seconds/billion.
 A zero-cycle run has no seconds/billion value. Small authored runs validate
@@ -872,6 +872,74 @@ Sample in a separate run and context; never include profiler overhead in an
 unprofiled speed claim. BIOS benchmarks need their agreed performance-only
 scope and do not resume paused discovery. Do not carry broad discovery ceilings
 into traced matrices merely to collect timings.
+
+### Authored benchmark controls
+
+`tools/create_benchmark_rom.py` creates original synthetic 4 MiB ROMs, not copies
+of retail firmware. It refuses an existing output. Both CPUs execute guest
+instructions from their ordinary reset vectors; setup is never host-seeded.
+
+```sh
+python3 -B tools/create_benchmark_rom.py cpu --output out/performance-controls/inputs/cpu.bin
+python3 -B tools/create_benchmark_rom.py ram --output out/performance-controls/inputs/ram.bin
+python3 -B tools/create_benchmark_rom.py devices --output out/performance-controls/inputs/devices.bin
+```
+
+`cpu` sustains scalar arithmetic and branches with no guest-armed DMA/timers.
+`ram` adds uncached loads/stores across sixteen words in each CPU's separate
+RAM. `devices` dispatches on the implemented CPU PRId profiles: EE guest code
+initializes scratchpad with normal toSPR DMA, repeatedly copies four qwords
+back through fromSPR, and enables Timer0 compare/zero-return IRQs. IOP guest
+code runs the scalar loop with its Timer0 target/repeat IRQ enabled. IRQ
+latches are exercised without enabling CPU interrupt admission.
+Other devices retain their normal reset/timing behavior; "CPU control" does
+not mean the entire machine stops advancing.
+
+Omitting `--iterations` selects sustained execution bounded only by the host
+cycle ceiling. A finite `--iterations <1-65535>` variant publishes four RAM
+words at physical `0x2000` on each CPU, then parks in a branch loop: `0x4e454b4f`,
+iteration count, three times that count, and the final XOR. The RAM variant's
+XOR uses the previously loaded word; after 32 iterations it is `16 ^ 32`.
+Device copies end with words `0x12340000` through `0x1234000f` at EE `0x4000`.
+These hand-defined results and traced/plain/restored comparisons are covered
+by BIOS-free native tests. Finite variants are correctness fixtures, not
+sustained-performance workloads.
+
+Use the existing campaign driver and a new directory for each control:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/performance-controls/cpu-timing --mode conformance --bios out/performance-controls/inputs/cpu.bin --cycles 5000000
+```
+
+The ordinary matrix keeps two sequential unprofiled repetitions, repeated
+traced captures, snapshot comparisons and full canonical endings. Traces keep
+their configured prefix/explicit truncation semantics; do not claim full
+history beyond a truncated prefix. Controls isolate implemented costs but
+are not representative retail BIOS phases, graphics/audio benchmarks or proof
+of the retail BIOS performance gate.
+
+On macOS, sample a separate fresh conformance batch:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/performance-controls/cpu-profile --mode conformance --bios out/performance-controls/inputs/cpu.bin --cycles 5000000 --sample-seconds 1
+```
+
+`--sample-seconds <1-60>` attaches `/usr/bin/sample` to the driver's owned
+`plain1` native PID, using a 1 ms interval and `-mayDie`; the default 0 disables
+sampling. It is unavailable for scout or overlapping checkpoint-creation
+matrices. Each native receipt retains its `process_pid`; the profiled receipt
+also retains duration, report filename and SHA-256. Sampler command/exit,
+stdout and stderr remain separate receipts. Missing/failed sampling is an
+explicit campaign error, not a successful profile. Finalization protects the
+retained report identity along with existing evidence.
+
+Sampling starts near native process launch and can include ROM loading and
+initialization, or a shortened capture if the process exits. Inspect the actual
+sample report; requested duration is not guaranteed execution-only coverage.
+Distinguish core-loop stacks from setup/report stacks. Increase a workload's
+finite ceiling only under its authorized measurement scope if it is too short
+to sample reliably. Mark the sampling context explicitly and keep its timing
+out of the unprofiled baseline.
 
 Required compact JSON must parse, recorded output sizes must agree, required comparisons
 must agree and retained canonical/checkpoint bytes are hashed,

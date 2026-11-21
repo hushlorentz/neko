@@ -161,6 +161,14 @@ class TimingReportTests(unittest.TestCase):
         self.assertTrue(all(stage["workload"]["stage_window_overlap"]
                             for stage in report["stages"]))
 
+    def test_sampled_stages_are_not_grouped_with_unprofiled_repetitions(self):
+        directories = [self.batch("one"), self.batch("sampled")]
+        self.rewrite(directories[1], lambda manifest: manifest["commands"][0].update(
+            sampling_seconds=1))
+        report = timings.report(directories, self.context)
+        self.assertEqual(len(report["groups"]), 2)
+        self.assertEqual(report["stages"][1]["workload"]["sampling_seconds"], 1)
+
     def test_cli_outputs_json_and_surfaces_errors(self):
         directory = self.batch("one")
         output, errors = io.StringIO(), io.StringIO()

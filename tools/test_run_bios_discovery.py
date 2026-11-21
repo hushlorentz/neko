@@ -452,6 +452,11 @@ class DiscoveryTests(unittest.TestCase):
         return REAL_RUN(command, **kwargs)
 
     def spawn(self, command, **kwargs):
+        if command[0] == "/usr/bin/sample":
+            self.calls.append(command)
+            Path(command[command.index("-file") + 1]).write_text("Authored sample report\n")
+            return Mock(stdout=None, pid=5432,
+                        wait=Mock(return_value=getattr(self, "sample_status", 0)), kill=Mock())
         if command[0] not in ("cmake", str(self.binary)):
             self.calls.append(command)
             return REAL_POPEN(command, **kwargs)
@@ -461,7 +466,7 @@ class DiscoveryTests(unittest.TestCase):
                               stderr=kwargs["stderr"])
         if piped:
             output.seek(0)
-        process = Mock(stdout=output if piped else None,
+        process = Mock(stdout=output if piped else None, pid=4321,
                        wait=Mock(return_value=result.returncode), kill=Mock())
         if "--save-checkpoint" in command:
             path = Path(command[command.index("--save-checkpoint") + 1])
@@ -469,10 +474,11 @@ class DiscoveryTests(unittest.TestCase):
         return process
 
     def invoke(self, status=0, *, failure_context=False, cycles=None,
-               checkpoint_at=None, checkpoint=None):
+               checkpoint_at=None, checkpoint=None, sample_seconds=None):
         output = io.StringIO()
         errors = io.StringIO()
-        with patch.object(discovery.subprocess, "run", side_effect=self.execute), \
+        with patch.object(discovery.sys, "platform", "darwin"), \
+             patch.object(discovery.subprocess, "run", side_effect=self.execute), \
              patch.object(discovery.subprocess, "Popen", side_effect=self.spawn):
             with redirect_stdout(output), redirect_stderr(errors):
                 arguments = [str(self.output), "--bios", str(self.bios)]
@@ -484,6 +490,8 @@ class DiscoveryTests(unittest.TestCase):
                     arguments += ["--checkpoint-at", str(checkpoint_at)]
                 if checkpoint is not None:
                     arguments += ["--checkpoint", str(checkpoint)]
+                if sample_seconds is not None:
+                    arguments += ["--sample-seconds", str(sample_seconds)]
                 result = discovery.main(arguments)
         self.assertEqual(result, status, errors.getvalue())
         return output.getvalue(), errors.getvalue()
@@ -509,6 +517,43 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(manifest["commands"][0]["uncompressed_bytes"],
                          len(raw[:20]) * 10000)
         self.assertEqual(manifest["commands"][0]["output_bytes"], path.stat().st_size)
+
+    def test_sampling_uses_the_owned_plain_pid_and_retains_its_report(self):
+        self.invoke(sample_seconds=1)
+        samples = [command for command in self.calls if command[0] == "/usr/bin/sample"]
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0][1:4], ["4321", "1", "1"])
+        self.assertIn("-mayDie", samples[0])
+        manifest = self.read("manifest.json")
+        plain = next(entry for entry in manifest["commands"] if entry["name"] == "plain1")
+        self.assertEqual(plain["sampling_seconds"], 1)
+        self.assertEqual(plain["sample_identity"],
+                         discovery.file_identity(self.output / plain["sample_file"]))
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "execution_finished")
+        (self.output / plain["sample_file"]).write_text("changed")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_sampler_failure_reaps_the_owned_native_capture_and_stays_failed(self):
+        self.sample_status = 1
+        self.invoke(status=2, sample_seconds=1)
+        self.processes["plain1-final"].kill.assert_called_once()
+        self.assertEqual(self.run_count, 3)
+        self.assertEqual(self.read("manifest.json")["status"], "error")
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_invalid_sampling_scope_fails_before_build_or_capture(self):
+        for seconds, checkpoint_at in ((-1, None), (61, None), (1, 0)):
+            with self.subTest(seconds=seconds, checkpoint_at=checkpoint_at):
+                self.invoke(status=2, sample_seconds=seconds, checkpoint_at=checkpoint_at)
+                self.assertEqual(self.calls, [])
+                self.assertFalse(self.output.exists())
+
+    def test_sampling_on_other_hosts_fails_before_build_or_capture(self):
+        with patch.object(discovery.sys, "platform", "linux"):
+            with self.assertRaisesRegex(ValueError, "macOS"):
+                discovery.run_batch(self.output, self.bios, sample_seconds=1)
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.output.exists())
 
     def test_compression_failure_reaps_child_and_preserves_partial_receipt(self):
         self.output.mkdir()

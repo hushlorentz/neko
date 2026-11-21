@@ -149,6 +149,9 @@ def stage(directory, manifest, entry):
     if not resumed and start != 0:
         raise ValueError("Cold timing command has a restored start cycle")
     traced = "--trace-events" in selected
+    sampling = entry.get("sampling_seconds", 0)
+    if type(sampling) is not int or not 0 <= sampling <= 60:
+        raise ValueError("Invalid native sampling duration")
     if (("--scout" in selected and traced) or
             ("--trace-from-cycle" in selected and not traced) or
             traced and not start <= selected.get("--trace-from-cycle", start) <= selected["--cycles"]):
@@ -164,6 +167,7 @@ def stage(directory, manifest, entry):
         trace_from_cycle=selected.get("--trace-from-cycle", start) if traced else None,
         failure_context=selected.get("--failure-context", False),
         stop_on_first_failure=selected.get("--stop-on-first-failure", False),
+        sampling_seconds=sampling,
         progress_every=selected.get("--progress-every", 1000000),
         checkpoint=checkpoint_identity(directory, manifest, start) if resumed else None)
     wall = reported["elapsed_wall_seconds"] - initial["elapsed_wall_seconds"]

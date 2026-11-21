@@ -4528,9 +4528,12 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Establish maintained timing reports and benchmark recipes through existing
       native diagnostics/campaign receipts; separate execution, reporting,
       checkpoint export and external overhead with recorded host/build/inputs.
-- [ ] Establish repeatable authored CPU/memory and inactive/active-device
-      controls, then sample representative BIOS phases; distinguish untraced,
-      failure-probe and required traced execution with same-build provenance.
+- [x] Establish and measure repeatable authored CPU/memory and inactive/active-
+      device controls, with guest-observable results, separate sampling and
+      traced/plain/restored canonical acceptance.
+- [ ] Agree finite retail BIOS profiling scope and sample representative phases;
+      distinguish untraced, failure-probe and required traced execution with
+      same-build provenance while discovery remains paused.
 - [ ] Record ranked native costs, wall/CPU throughput and repeated-run spread;
       select one owner-local optimization with measured headroom, regression
       scope and explicit acceptance before changing execution.

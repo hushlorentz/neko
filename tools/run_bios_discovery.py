@@ -29,7 +29,7 @@ RUN_NAMES = ("traced1", "traced2", "plain1", "plain2")
 
 @contextmanager
 def running_capture(directory, manifest, name, command, *, extension="stdout",
-                    accepted=(0,), compressed=False):
+                    accepted=(0,), compressed=False, sample_seconds=0):
     command = list(command)
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
@@ -49,6 +49,20 @@ def running_capture(directory, manifest, name, command, *, extension="stdout",
                                    stdout=subprocess.PIPE if compressed else stdout,
                                    stderr=stderr)
         try:
+            if len(command) > 1 and command[1] == "bios-startup":
+                entry["process_pid"] = process.pid
+                write_json(directory / "manifest.json", manifest)
+            if sample_seconds:
+                entry.update(sampling_seconds=sample_seconds, sample_file=f"{name}.sample.txt")
+                write_json(directory / "manifest.json", manifest)
+                capture(directory, manifest, f"sample-{name}", [
+                    "/usr/bin/sample", str(process.pid), str(sample_seconds), "1",
+                    "-mayDie", "-file", str(directory / entry["sample_file"]),
+                ])
+                sample = directory / entry["sample_file"]
+                if not sample.is_file() or sample.stat().st_size == 0:
+                    raise ValueError(f"Sampler did not retain a report: {name}")
+                entry["sample_identity"] = file_identity(sample)
             yield process, stdout, entry
             status = process.wait()
         except BaseException:
@@ -78,9 +92,10 @@ def running_capture(directory, manifest, name, command, *, extension="stdout",
 
 
 def capture(directory, manifest, name, command, *, extension="stdout",
-            accepted=(0,), compressed=False):
+            accepted=(0,), compressed=False, sample_seconds=0):
     with running_capture(directory, manifest, name, command, extension=extension,
-                         accepted=accepted, compressed=compressed) as (process, stdout, entry):
+                         accepted=accepted, compressed=compressed,
+                         sample_seconds=sample_seconds) as (process, stdout, entry):
         if compressed:
             with gzip.GzipFile(filename="", mode="wb", fileobj=stdout,
                                compresslevel=6, mtime=0) as zipped:
@@ -276,12 +291,16 @@ def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
 
 
 def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=False,
-              checkpoint=None, checkpoint_at=None, invocation=None):
+              checkpoint=None, checkpoint_at=None, invocation=None, sample_seconds=0):
     master_cycles = uint(master_cycles, "Cycle ceiling")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
     if checkpoint is not None and checkpoint_at is not None:
         raise ValueError("Select checkpoint reuse or checkpoint creation, not both")
+    if type(sample_seconds) is not int or not 0 <= sample_seconds <= 60:
+        raise ValueError("Sample duration must be between 0 and 60 seconds")
+    if sample_seconds and (sys.platform != "darwin" or checkpoint_at is not None):
+        raise ValueError("Sampling requires macOS and the sequential conformance matrix")
     metadata = (read_checkpoint(checkpoint, bios, master_cycles)
                 if checkpoint is not None else None)
     if checkpoint_at is not None:
@@ -327,7 +346,8 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
             command += ["--save-checkpoint", str(directory / f"{name}-final.state")]
             exits[name] = capture(directory, manifest, name, command,
                                   extension="jsonl", accepted=(0, 1),
-                                  compressed=name.startswith("traced"))
+                                  compressed=name.startswith("traced"),
+                                  sample_seconds=sample_seconds if name == "plain1" else 0)
         equal, failure = inspect_batch(directory, manifest)
         states = compare_final_states(directory, RUN_NAMES)
         manifest["final_states"] = states
@@ -565,6 +585,9 @@ def main(argv=None):
                         help="Retain a scheduled scout checkpoint at this absolute cycle; repeatable.")
     parser.add_argument("--failure-context", action="store_true",
                         help="Retain bounded first-failure context in traced runs.")
+    parser.add_argument("--sample-seconds", type=int, default=0,
+                        help="macOS only: sample the owned plain1 native PID for 1-60 seconds; "
+                             "use a separate profiling batch, not an unprofiled timing control.")
     checkpoints = parser.add_mutually_exclusive_group()
     checkpoints.add_argument("--checkpoint", type=Path,
                              help="Reuse a validated checkpoint from this executable.")
@@ -574,7 +597,8 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     try:
         if arguments.mode == "scout":
-            if arguments.checkpoint or arguments.checkpoint_at or arguments.failure_context:
+            if (arguments.checkpoint or arguments.checkpoint_at or arguments.failure_context or
+                    arguments.sample_seconds):
                 raise ValueError("Scout mode starts cold and manages its own checkpoints and capture")
             report = run_scout_batch(
                 arguments.directory.resolve(), arguments.bios.resolve(),
@@ -596,7 +620,7 @@ def main(argv=None):
                            checkpoint=(arguments.checkpoint.resolve()
                                        if arguments.checkpoint is not None else None),
                            checkpoint_at=arguments.checkpoint_at,
-                           invocation=invocation)
+                           invocation=invocation, sample_seconds=arguments.sample_seconds)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1
     except (OSError, ValueError) as error:

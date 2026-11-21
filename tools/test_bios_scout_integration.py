@@ -12,12 +12,31 @@ from unittest.mock import patch
 
 import run_bios_discovery as discovery
 import report_bios_timings as timings
+import create_benchmark_rom as benchmark
 from inspect_startup import first_difference
 
 
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    def test_authored_benchmark_controls_match_traced_plain_and_restored_execution(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for kind in benchmark.KINDS:
+                with self.subTest(kind=kind):
+                    bios = root / f"{kind}.bin"
+                    bios.write_bytes(benchmark.create_rom(kind))
+                    directory = root / kind
+                    with patch.object(discovery, "build_neko", return_value=binary), \
+                         redirect_stderr(io.StringIO()):
+                        result = discovery.run_batch(
+                            directory, bios, master_cycles=4096, checkpoint_at=1024)
+                    self.assertTrue(result["comparisons_equal"])
+                    self.assertIsNone(result["first_failure"])
+                    self.assertEqual(discovery.campaign.status(directory)["state"],
+                                     "execution_finished")
+
     def test_native_progress_is_observational_across_trace_and_resume_boundaries(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:
