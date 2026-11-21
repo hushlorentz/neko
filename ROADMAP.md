@@ -4250,7 +4250,7 @@ not requirements for exhaustive subsystem coverage.
       for the evidenced sprite; retain format, mipmap and transfer guards.
 - [x] Implement focused red/green and authored primitive/transport/restored
       conformance, preserving masks and PSMZ32 behavior; review before commit.
-- [ ] Verify fresh unchanged-input BIOS retirement with the selected same-build
+- [x] Verify fresh unchanged-input BIOS retirement with the selected same-build
       comparisons and next origin or explicit bounded observation limit.
 
 ### GS Display Framebuffer Addressing Dependency
@@ -4304,7 +4304,7 @@ not requirements for exhaustive subsystem coverage.
       and admission bounds through existing GS transfer/state owners.
 - [x] Implement host uploads with focused red/green and authored DMA,
       staged/active restored and traced/plain conformance; independently review.
-- [ ] Verify fresh unchanged-input BIOS retirement with full cold/restored
+- [x] Verify fresh unchanged-input BIOS retirement with full cold/restored
       comparisons and next-origin attribution or bounded observation.
 
 ### Additional CD/DVD Command and Configuration Scope
@@ -4512,16 +4512,106 @@ compatibility policy into a frontend.
 
 ## Performance Strategy
 
-1. Preserve correctness and determinism.
-2. Profile realistic programs.
-3. Predecode microinstructions and remove avoidable allocation.
-4. Use compact array-based pipeline storage and efficient dispatch.
-5. Consider an optional recompiler only if the reference interpreter cannot
-   meet the required performance.
+Optimize native execution without JIT or runtime-generated host machine code.
+Keep the cycle-oriented interpreter as the correctness reference. Pursue
+near-real-time BIOS execution through measured improvements, not guest-clock
+changes, weakened evidence, BIOS-specific patches or an assumed speedup.
+Order work within each block by representative profiles; begin later blocks
+only when their prerequisites and measured remaining costs justify them.
+The first performance gate is at most 10 minutes of native execution per billion
+master cycles on representative workloads on the reference host, with 5 minutes
+as the stretch target. BIOS discovery stays paused pending measured improvement
+and explicit direction to resume; near-real-time remains a longer-term goal.
 
-- [ ] Compare every optimized execution path continuously against the
-      cycle-oriented interpreter, including the floating-point integration
-      corpus
+### Reproducible Execution Baseline and Profiling
+
+- [ ] Establish maintained benchmark/profile recipes through existing native
+      diagnostics and campaign owners, separating native execution, load/save,
+      reporting and orchestration costs; fix host/build/input identities and
+      agree finite performance-only BIOS scope before execution.
+- [ ] Establish repeatable authored CPU/memory and inactive/active-device
+      controls, then sample representative BIOS phases; distinguish untraced,
+      failure-probe and required traced execution with same-build provenance.
+- [ ] Record ranked native costs, wall/CPU throughput and repeated-run spread;
+      select one owner-local optimization with measured headroom, regression
+      scope and explicit acceptance before changing execution.
+
+### Backend Correctness Reference and Regression Gates
+
+- [ ] Extend existing authored conformance helpers for the selected optimization,
+      comparing reference and optimized canonical state and required traces at
+      identical guest-cycle boundaries; avoid a separate semantic engine.
+- [ ] Add affected differential boundaries as each optimization becomes
+      actionable: faults, simultaneous events, code changes and split runs;
+      cover warmed reset/restore state when derived execution state is added.
+- [ ] Require a failing focused regression before each observable behavior fix;
+      retain immediate integration coverage, risk-triggered complete gates and
+      independent timing/architecture/persistence review.
+
+### Measured Constant-Cost and Build Optimization
+
+- [ ] Remove the first demonstrated per-cycle allocation, copying, dispatch or
+      observation cost through its existing owner; preserve component order,
+      inactive/active transitions, exception cleanup and full diagnostics.
+- [ ] Evaluate inlining/LTO separately from source changes in assertion-enabled
+      builds with unchanged floating-point semantics and portable defaults;
+      defer PGO until a representative training and holdout corpus is stable.
+- [ ] Accept gains only beyond measured variability without material control
+      regressions, with canonical/required trace agreement and independent
+      review; reprofile before selecting another optimization or later block.
+
+### Derived Decode Caching
+
+- [ ] Cache pure EE, IOP or VU decoding in profile-selected order, preserving
+      architectural fetch, cache, translation, issue and exception behavior.
+- [ ] Bound host-only cache storage and define reset/load lifetime; validate
+      changed instruction words and macro/micro mode distinctions without
+      adding derived cache contents to canonical guest state.
+- [ ] Compare cached and reference execution on authored and representative
+      workloads, including self-modifying code and floating-point conformance.
+
+### Deadline-Driven Device Advancement
+
+- [ ] Preserve shared clock ownership and component order while moving measured
+      inactive-device work to owner-defined deadlines and eligibility changes.
+- [ ] Define deadline invalidation on MMIO, DMA, IRQ, reset and restore; advance
+      timers, display, serial and audio only through their existing authorities.
+- [ ] Validate simultaneous events, clock phases, pending work and split runs
+      against reference execution, retaining full trace/failure contracts.
+- [ ] Pass independent timing/persistence review and complete required gates
+      before fresh same-build cold/restored BIOS verification.
+
+### Non-JIT Decoded-Block Interpretation
+
+- [ ] If dispatch remains material, execute bounded decoded instruction groups
+      through precompiled handlers; treat blocks as data, not executable memory.
+- [ ] Retain exact issue, pipeline, fetch/cache and exception boundaries, with
+      reference fallback for unsupported groups and observable execution modes.
+- [ ] Validate interrupted and restored blocks, code changes, memory effects
+      and full required observations; measure gains before expanding coverage.
+
+### Bounded Idle-Loop Acceleration
+
+- [ ] If profiles justify it, recognize a narrow side-effect-bounded loop family;
+      enumerate all CPU, cache, memory and device effects before acceleration.
+- [ ] Stop at the earliest relevant interrupt, DMA, timer or other wake event;
+      preserve exact guest progress and use reference execution when uncertain.
+- [ ] Cover delayed wakeups, changing conditions, exceptions and restored loops;
+      retain observer/failure evidence without fabricated readiness or skipped
+      architectural effects.
+
+### Non-JIT Performance Acceptance
+
+- [ ] Demonstrate at most 600 seconds of native execution per billion master
+      cycles on representative reference-host workloads; target 300 seconds,
+      recording configuration, variability and correctness comparisons.
+- [ ] Compare cumulative gains across representative workloads, including the
+      floating-point corpus, with complete optimized/ASan and closure review.
+- [ ] Verify unchanged-input BIOS execution and required cold/restored,
+      traced/plain and canonical comparisons; report native execution speed
+      separately from checkpoint savings and campaign overhead.
+- [ ] Reassess remaining bottlenecks against the near-real-time objective;
+      document achieved speed and limitations without reopening JIT implicitly.
 
 ### Deferred Validation Optimization
 
