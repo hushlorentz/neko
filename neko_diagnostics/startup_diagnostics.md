@@ -711,6 +711,25 @@ python3 -B -m unittest discover -s tools -p 'test_*.py' -v
 
 ### Campaign ownership and completion
 
+Scouts retain bounded diagnostic replay on native runtime-error exit2. The
+helper still exits2 and status remains `failed`; replay agreement is not
+verification. `runtime-replay.jsonl.gz`, `runtime-plain.jsonl`,
+`runtime-error-summary.json`, `runtime-error-events.json` (bounded GIF writes)
+and `compare-runtime-replay-plain.json` preserve the available evidence.
+The last successful same-build scout checkpoint is reused only for this
+origin-only diagnostic. No incomplete-cycle checkpoint or canonical ending
+is fabricated; normal fault and conformance comparisons remain unchanged.
+
+Runtime reports additionally contain `gs_transfer`, copied from the GS owner
+after unwinding. It identifies attempted parameters on a GS activation error;
+on other errors it is retained GS state, not a claim of causality. Historical
+reports without it remain supported. The inspector validates its field bounds.
+Because a synchronous device exception may occur before the scheduler advances
+its clock, diagnostic replay includes at most one tick beyond the reported
+clock, capped by the original native ceiling. Error identity and full retained
+runtime snapshots must agree; disagreement remains explicitly recorded and
+failed. This does not change guest execution, trace events or save-state layout.
+
 Retain campaign ownership through completion, monitor progress, reconcile the
 actual process exit and finalize evidence before reporting verification.
 A background launch is **running**, never done. Recovery starts from the

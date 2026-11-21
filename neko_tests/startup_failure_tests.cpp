@@ -624,6 +624,42 @@ TEST_CASE("Startup runtime messages are escaped and formatting stays local",
   REQUIRE(output.getloc() == locale);
 }
 
+TEST_CASE("Startup runtime errors retain the attempted GS transfer parameters",
+  "[startup-failure][startup-runtime-gs]")
+{
+  NekoSystem system;
+  system.runDualCPUBIOS(std::vector<std::uint8_t>(BootROMImage::SIZE), 0);
+  system.gs().writeRegister(GSRegisterAddress::BITBLTBUF,
+    (UINT64_C(0x3120) << 32) | (UINT64_C(1) << 48) | (UINT64_C(0x13) << 56));
+  system.gs().writeRegister(GSRegisterAddress::TRXPOS,
+    (UINT64_C(17) << 32) | (UINT64_C(9) << 48));
+  system.gs().writeRegister(GSRegisterAddress::TRXREG,
+    UINT64_C(64) | (UINT64_C(32) << 32));
+  REQUIRE(system.eeBus().writeQuadword(0x1000,
+    {{0x8001, 0x10000000, GIFRegisterDescriptor::AD, 0}}));
+  REQUIRE(system.eeBus().writeQuadword(0x1010,
+    {{0, 0, GSRegisterAddress::TRXDIR, 0}}));
+  system.eeBus().write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+  system.eeBus().write32(EEMemoryMap::D2_MADR, 0x1000);
+  system.eeBus().write32(EEMemoryMap::D2_QWC, 2);
+  system.eeBus().write32(EEMemoryMap::D2_CHCR, GIFDMACChannelControl::START);
+  const auto evidence = runDualCPUWithStartupEvidence(system, 16);
+  REQUIRE(evidence.outcome == StartupRunOutcome::RuntimeError);
+  REQUIRE(evidence.error.message ==
+    "GS host-to-local transfer requires PSMCT32 or PSMCT16.");
+  std::ostringstream output;
+  writeStartupRuntimeErrorJsonLine(output, evidence.error);
+  REQUIRE(output.str().find(
+    "\"gs_transfer\":{\"source_base_pointer\":0,\"source_buffer_width\":0,"
+    "\"source_pixel_storage_mode\":0,\"destination_base_pointer\":12576,"
+    "\"destination_buffer_width\":1,\"destination_pixel_storage_mode\":19,"
+    "\"source_x\":0,\"source_y\":0,\"destination_x\":17,\"destination_y\":9,"
+    "\"width\":64,\"height\":32,\"transferred_pixels\":0,\"direction\":0,"
+    "\"active\":false}") != std::string::npos);
+  REQUIRE(output.str().find("\"execution_boundary\":\"incomplete_cycle\"") !=
+    std::string::npos);
+}
+
 TEST_CASE("Startup failure writers reject invalid boundaries without partial output",
   "[startup-failure]")
 {

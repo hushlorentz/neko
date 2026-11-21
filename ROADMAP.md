@@ -4286,8 +4286,17 @@ not requirements for exhaustive subsystem coverage.
       policy through the existing programmed-address and voice-source owners.
 - [x] Implement focused red/green and authored restored/trace conformance for
       paired-core live and pending-key programming; independently review.
-- [ ] Verify fresh unchanged-input BIOS retirement with required same-build
+- [x] Verify fresh unchanged-input BIOS retirement with required same-build
       comparisons and next-origin attribution or bounded observation.
+
+### GS Transfer Runtime-Origin Diagnostics
+
+- [x] Retain attempted GS transfer parameters and bounded traced/plain runtime
+      error evidence without fabricating completed checkpoints or verification.
+- [x] Validate authored runtime failures and unchanged successful campaign
+      gates; independently review.
+- [ ] Attribute the real BIOS transfer format from retained bounded diagnostic
+      replay without claiming completed boot or runtime-error conformance.
 
 ### Additional CD/DVD Command and Configuration Scope
 

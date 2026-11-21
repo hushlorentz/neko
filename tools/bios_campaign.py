@@ -195,8 +195,8 @@ def completed_evidence(directory, execution):
         accepted = entry.get("accepted_exit_codes")
         if (name in names or type(code) is not int or
                 type(accepted) is not list or not accepted or
-                any(type(value) is not int or value not in (0, 1) for value in accepted) or
-                code not in accepted):
+                any(type(value) is not int or value not in (0, 1, 2) for value in accepted) or
+                code not in (0, 1) or code not in accepted):
             raise ValueError(f"Incomplete or unsuccessful command: {name}")
         names.add(name)
         for field in ("stdout", "stderr"):

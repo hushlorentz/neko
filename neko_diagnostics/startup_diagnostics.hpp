@@ -189,6 +189,7 @@ struct StartupRuntimeError
 {
   std::string message;
   StartupSummary startup;
+  GSImageTransfer gsTransfer;
 };
 
 enum class StartupRunOutcome { Completed, RuntimeError };

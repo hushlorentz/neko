@@ -71,8 +71,9 @@ def running_capture(directory, manifest, name, command, *, extension="stdout",
             f"{name} exited {status}; see {output} and {errors}")
     if "progress_file" in entry:
         entry["progress"] = campaign.read_progress(directory, entry["progress_file"])
-        if entry["progress"] is None or entry["progress"]["phase"] != "finished":
-            raise ValueError(f"{name} did not publish finished progress")
+        expected_phase = "runtime_error" if status == 2 else "finished"
+        if entry["progress"] is None or entry["progress"]["phase"] != expected_phase:
+            raise ValueError(f"{name} did not publish {expected_phase} progress")
         write_json(directory / "manifest.json", manifest)
 
 
@@ -151,6 +152,45 @@ def inspect_failure(directory, manifest, traced):
             capture(directory, manifest, f"first-failure-{command}",
                     inspector + [command, traced, *filters], extension="json")
     return failure
+
+
+def capture_runtime_error(directory, manifest, binary, bios, checkpoint, report, log, window):
+    cycle = uint(log.result["snapshot"]["master_cycle"], "Runtime error cycle")
+    start = checkpoint["master_cycle"] if checkpoint is not None else 0
+    trace_start = max(start, cycle - min(window, cycle))
+    ceiling = min(log.input["max_master_cycles"], cycle + 1)
+    manifest["runtime_error"] = dict(master_cycle=cycle, message=log.result["message"])
+    for name in ("runtime-replay", "runtime-plain"):
+        command = [str(binary), "bios-startup", str(bios), "--cycles", str(ceiling)]
+        if checkpoint is not None:
+            verify_scout_checkpoint(checkpoint, binary, bios)
+            command += ["--resume-checkpoint", checkpoint["path"]]
+        elif (file_identity(binary) != manifest["binary_identity"] or
+              file_identity(bios) != manifest["bios_identity"]):
+            raise ValueError("Runtime replay input/executable changed")
+        if name == "runtime-replay":
+            command += ["--trace-events", str(TRACE_EVENTS), "--failure-context",
+                        "--trace-from-cycle", str(trace_start)]
+        capture(directory, manifest, name, command, extension="jsonl",
+                accepted=(0, 1, 2), compressed=name == "runtime-replay")
+    replay = directory / "runtime-replay.jsonl.gz"
+    plain = directory / "runtime-plain.jsonl"
+    manifest["runtime_error_reproduced"] = all(
+        load_log(path).result == log.result for path in (replay, plain))
+    for name, path in (("scout-summary", report),
+                       ("runtime-error-summary", replay)):
+        capture(directory, manifest, name,
+                [sys.executable, "-B", str(INSPECTOR), "summary", str(path)],
+                extension="json")
+    capture(directory, manifest, "runtime-error-events",
+            [sys.executable, "-B", str(INSPECTOR), "events", str(replay),
+             "--subsystem", "gif", "--from-cycle", str(trace_start),
+             "--to-cycle", str(ceiling), "--limit", "200"], extension="json")
+    comparison = capture(directory, manifest, "compare-runtime-replay-plain",
+        [sys.executable, "-B", str(INSPECTOR), "compare", str(replay), str(plain),
+         "--mode", "continuation"], extension="json", accepted=(0, 1))
+    manifest["runtime_error_comparisons_equal"] = comparison == 0
+    write_json(directory / "manifest.json", manifest)
 
 
 def compare_reports(directory, manifest, comparisons):
@@ -386,11 +426,20 @@ def run_scout_batch(directory, bios, *, master_cycles, checkpoint_every,
                 command += ["--resume-checkpoint", checkpoint["path"]]
             stage_start = time.monotonic()
             status = capture(directory, manifest, name, command,
-                             extension="jsonl", accepted=(0, 1))
+                             extension="jsonl", accepted=(0, 1, 2))
             log = load_log(directory / f"{name}.jsonl")
             end = uint(log.result["snapshot"]["master_cycle"], "Scout cycle")
             if not start <= end <= target:
                 raise ValueError("Scout returned a cycle outside its requested interval")
+            if status == 2:
+                if log.result["type"] != "startup_runtime_error":
+                    raise ValueError("Scout exit 2 did not retain a runtime error")
+                capture_runtime_error(
+                    directory, manifest, binary, bios, checkpoint,
+                    directory / f"{name}.jsonl", log, window)
+                raise ValueError(
+                    f"{name} runtime error at {end}: {log.result['message']}; "
+                    "bounded diagnostic replay retained, not verified")
             failure = log.failure_record["failure"] if log.failure_record else None
             limited = log.result["run"]["cycle_limit_reached"]
             if (limited != (status == 0) or (limited and end != target) or

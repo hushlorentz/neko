@@ -833,6 +833,25 @@ class InspectorTests(unittest.TestCase):
                 self.assertEqual(report["outcome"], "startup_runtime_error")
                 self.assertEqual(report["runtime_error"], "authored error")
 
+    def test_runtime_error_gs_parameters_are_preserved_and_validated(self):
+        rows = records(False)
+        transfer = dict(source_base_pointer=0, source_buffer_width=0,
+                        source_pixel_storage_mode=0, destination_base_pointer=12576,
+                        destination_buffer_width=1, destination_pixel_storage_mode=19,
+                        source_x=0, source_y=0, destination_x=17, destination_y=9,
+                        width=64, height=32, transferred_pixels=0, direction=0, active=False)
+        rows[1] = dict(type="startup_runtime_error", run=None,
+                       execution_boundary="incomplete_cycle", message="authored error",
+                       snapshot=rows[1]["snapshot"], gs_transfer=transfer)
+        self.write(self.path, rows)
+        self.assertEqual(self.report("summary", self.path)["gs_transfer"], transfer)
+        for field, value in (("destination_pixel_storage_mode", 64),
+                             ("direction", 4), ("active", 0)):
+            with self.subTest(field=field):
+                rows[1]["gs_transfer"] = {**transfer, field: value}
+                self.write(self.path, rows)
+                self.invoke("summary", self.path, status=2)
+
     def test_comparison_modes_and_first_difference(self):
         other = self.path.with_name("other.jsonl")
         self.write(other, records(False))

@@ -34,6 +34,8 @@ class StagedDiscoveryTests(unittest.TestCase):
         self.replay_mismatch = False
         self.capture = discovery.capture
         self.before_scout = None
+        self.runtime_error = False
+        self.runtime_replay_mismatch = False
 
     def fake_capture(self, directory, manifest, name, command, **kwargs):
         if command[0] != str(self.binary):
@@ -77,7 +79,22 @@ class StagedDiscoveryTests(unittest.TestCase):
                     dict(type="startup_first_failure", trace_truncated=False,
                          execution_boundary="complete_cycle", failure=None),
                 ]
-        if "--save-checkpoint" in command:
+        if failed and self.runtime_error:
+            rows[1].update(type="startup_runtime_error", run=None,
+                           execution_boundary="incomplete_cycle",
+                           message="Authored GS transfer runtime error")
+            if self.runtime_replay_mismatch and name == "runtime-replay":
+                rows[1]["message"] = "Different authored runtime error"
+            if "--scout" in command:
+                rows = rows[:2] + [
+                    dict(type="startup_trace_summary", event_limit=16,
+                         captured_events=0, truncated=False),
+                    dict(type="startup_first_failure", trace_truncated=False,
+                         execution_boundary="incomplete_cycle", failure=None),
+                ]
+            elif traced:
+                rows[-1].update(execution_boundary="incomplete_cycle", failure=None)
+        if "--save-checkpoint" in command and not (failed and self.runtime_error):
             path = Path(command[command.index("--save-checkpoint") + 1])
             path.write_text(json.dumps(rows[1]["snapshot"], sort_keys=True))
         extension = kwargs.get("extension", "stdout")
@@ -90,6 +107,8 @@ class StagedDiscoveryTests(unittest.TestCase):
         (directory / f"{name}.stderr").touch()
         status = 1 if failed and "--stop-on-first-failure" in command or (
             failed and "--scout" in command and cycle < ceiling) else 0
+        if failed and self.runtime_error:
+            status = 2
         manifest["commands"].append(dict(name=name, command=command,
                                          returncode=status, elapsed_seconds=0.1,
                                          accepted_exit_codes=list(kwargs.get("accepted", (0,))),
@@ -136,6 +155,35 @@ class StagedDiscoveryTests(unittest.TestCase):
         status = discovery.campaign.status(self.output)
         self.assertEqual(status["state"], "execution_finished")
         self.assertEqual(status["scope"], "scout_ceiling")
+
+    def test_scout_runtime_error_retains_bounded_replays_but_stays_failed(self):
+        self.runtime_error = True
+        manifest = self.invoke(expected=2)
+        self.assertEqual(manifest["status"], "error")
+        self.assertEqual(len(self.commands), 5)
+        replay, plain = self.commands[-2:]
+        self.assertEqual(replay[replay.index("--cycles") + 1], "26")
+        self.assertEqual(replay[replay.index("--trace-from-cycle") + 1], "22")
+        self.assertNotIn("--trace-events", plain)
+        self.assertTrue(manifest["runtime_error_reproduced"])
+        self.assertTrue(manifest["runtime_error_comparisons_equal"])
+        self.assertNotIn("final_states", manifest)
+        self.assertFalse((self.output / "scout-30.state").exists())
+        self.assertTrue((self.output / "scout-20.state").exists())
+        self.assertTrue((self.output / "runtime-error-events.json").exists())
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+        with self.assertRaises(ValueError):
+            discovery.campaign.finalize(self.output, 2)
+
+    def test_runtime_replay_disagreement_does_not_claim_reproduction(self):
+        self.runtime_error = True
+        self.runtime_replay_mismatch = True
+        manifest = self.invoke(expected=2)
+        self.assertFalse(manifest["runtime_error_reproduced"])
+        self.assertFalse(manifest["runtime_error_comparisons_equal"])
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+        self.assertTrue((self.output / "runtime-replay.jsonl.gz").is_file())
+        self.assertTrue((self.output / "runtime-plain.jsonl").is_file())
 
     def test_scout_replay_disagreement_is_preserved_as_a_mismatch(self):
         self.replay_mismatch = True

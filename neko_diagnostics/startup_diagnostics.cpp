@@ -472,7 +472,8 @@ StartupRunEvidence runDualCPUWithStartupEvidence(
   }
   catch (const std::exception &error)
   {
-    return {StartupRunOutcome::RuntimeError, {}, {error.what(), inspectStartup(system)}};
+    return {StartupRunOutcome::RuntimeError, {},
+      {error.what(), inspectStartup(system), system.gs().imageTransfer()}};
   }
   return {StartupRunOutcome::Completed, {execution, inspectStartup(system)}, {}};
 }
@@ -502,6 +503,19 @@ void writeStartupRuntimeErrorJsonLine(
   }
   json << "\",\"snapshot\":";
   writeSnapshot(json, error.startup);
+  const auto &transfer = error.gsTransfer;
+  json << ",\"gs_transfer\":{\"source_base_pointer\":" << transfer.sourceBasePointer <<
+    ",\"source_buffer_width\":" << static_cast<unsigned>(transfer.sourceBufferWidth) <<
+    ",\"source_pixel_storage_mode\":" << static_cast<unsigned>(transfer.sourcePixelStorageMode) <<
+    ",\"destination_base_pointer\":" << transfer.destinationBasePointer <<
+    ",\"destination_buffer_width\":" << static_cast<unsigned>(transfer.destinationBufferWidth) <<
+    ",\"destination_pixel_storage_mode\":" << static_cast<unsigned>(transfer.destinationPixelStorageMode) <<
+    ",\"source_x\":" << transfer.sourceX << ",\"source_y\":" << transfer.sourceY <<
+    ",\"destination_x\":" << transfer.destinationX << ",\"destination_y\":" << transfer.destinationY <<
+    ",\"width\":" << transfer.width << ",\"height\":" << transfer.height <<
+    ",\"transferred_pixels\":" << transfer.transferredPixels <<
+    ",\"direction\":" << static_cast<unsigned>(transfer.direction) <<
+    ",\"active\":" << (transfer.active ? "true" : "false") << '}';
   json << "}\n";
   emitJson(output, json);
 }

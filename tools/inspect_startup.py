@@ -16,7 +16,7 @@ import zlib
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
 CPUS = {10: "ee", 11: "iop"}
 EVENT_CPUS = {**CPUS, 17: "iop"}
-SUBSYSTEMS = {**CPUS, 14: "sif", 15: "cdvd", 16: "spu2", 17: "sio2"}
+SUBSYSTEMS = {**CPUS, 4: "gif", 6: "gs", 14: "sif", 15: "cdvd", 16: "spu2", 17: "sio2"}
 EVENTS = {1: "state_changed", 5: "instruction_issued", 7: "memory_access",
           8: "exception_entered", 21: "fault_context",
           20: "dma_beat",
@@ -351,6 +351,18 @@ def validate_record(record):
                 raise ValueError("runtime error must have incomplete_cycle boundary")
             if "run" not in record or record["run"] is not None:
                 raise ValueError("runtime error run must be null")
+            if "gs_transfer" in record:
+                transfer = require(record, "gs_transfer", dict)
+                widths = dict(source_base_pointer=14, source_buffer_width=6,
+                              source_pixel_storage_mode=6, destination_base_pointer=14,
+                              destination_buffer_width=6, destination_pixel_storage_mode=6,
+                              source_x=11, source_y=11, destination_x=11, destination_y=11,
+                              width=12, height=12, transferred_pixels=32, direction=2)
+                if transfer.keys() != widths.keys() | {"active"}:
+                    raise ValueError("runtime GS transfer has invalid fields")
+                for field, bits in widths.items():
+                    uint(transfer[field], f"gs_transfer.{field}", bits)
+                require(transfer, "active", bool)
     elif kind == "startup_trace_summary":
         uint(record.get("event_limit"), "event_limit")
         uint(record.get("captured_events"), "captured_events")
@@ -502,6 +514,8 @@ def execution_context(log):
                             log.result["type"] == "startup_runtime_error"
                             else "complete_cycle"),
         runtime_error=log.result.get("message"),
+        **({"gs_transfer": log.result["gs_transfer"]}
+           if "gs_transfer" in log.result else {}),
     )
 
 

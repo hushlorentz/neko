@@ -1,6 +1,6 @@
 """Opt-in BIOS-free end-to-end coverage against the built headless executable."""
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import os
@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import run_bios_discovery as discovery
+from inspect_startup import first_difference
 
 
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
@@ -271,6 +272,63 @@ class ScoutIntegrationTests(unittest.TestCase):
             self.assertGreater(manifest["pruned_state_bytes"], 0)
             self.assertEqual(json.loads((directory / "summary.json").read_text())[
                 "failure_event_source"], "failure_capture")
+
+    def test_native_runtime_error_retains_replays_without_verifying(self):
+        binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "authored.bin"
+            # Packed AD writes: unsupported PSMT8 host-to-local transfer, 64x32.
+            packet = [0x8004, 0x10000000, 0x0e, 0,
+                      0, 0x13013120, 0x50, 0,
+                      0, 0, 0x51, 0,
+                      64, 32, 0x52, 0,
+                      0, 0, 0x53, 0]
+            stores = [(0x1000 + index * 4, value)
+                      for index, value in enumerate(packet)]
+            stores += [(0xb000e000, 1), (0xb000a010, 0x1000),
+                       (0xb000a020, 5), (0xb000a000, 0x100)]
+            words = []
+            for address, value in stores:
+                words += [0x3c010000 | (address >> 16),
+                          0x34210000 | (address & 0xffff),
+                          0x3c020000 | (value >> 16),
+                          0x34420000 | (value & 0xffff), 0xac220000]
+            words += [0x1000ffff, 0]
+            image = b"".join(word.to_bytes(4, "little") for word in words)
+            bios.write_bytes(image + bytes(4194304 - len(image)))
+            directory = root / "discovery"
+            with patch.object(discovery, "build_neko", return_value=binary), \
+                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                result = discovery.main([
+                    str(directory), "--bios", str(bios), "--mode", "scout",
+                    "--cycles", "256", "--checkpoint-every", "32", "--replay-window", "16"])
+            manifest = json.loads((directory / "manifest.json").read_text())
+            self.assertEqual(result, 2, manifest["commands"][-1])
+            self.assertEqual(manifest["status"], "error")
+            scout = next(item for item in reversed(manifest["commands"])
+                         if item["name"].startswith("scout-") and item["returncode"] == 2)
+            self.assertTrue(manifest["runtime_error_reproduced"], first_difference(
+                discovery.load_log(directory / scout["stdout"]).result,
+                discovery.load_log(directory / "runtime-replay.jsonl.gz").result))
+            self.assertTrue(manifest["runtime_error_comparisons_equal"])
+            self.assertNotIn("final_states", manifest)
+            self.assertEqual(discovery.campaign.status(directory)["state"], "failed")
+            for name in ("runtime-replay", "runtime-plain"):
+                entry = next(item for item in manifest["commands"] if item["name"] == name)
+                self.assertEqual(entry["returncode"], 2)
+                self.assertEqual(entry["progress"]["phase"], "runtime_error")
+            summary = json.loads((directory / "runtime-error-summary.json").read_text())
+            self.assertIsNone(summary["run"])
+            self.assertEqual(summary["execution_boundary"], "incomplete_cycle")
+            self.assertIn("gs_transfer", summary)
+            self.assertEqual(summary["gs_transfer"]["destination_pixel_storage_mode"], 19)
+            self.assertEqual(summary["gs_transfer"]["destination_base_pointer"], 12576)
+            self.assertEqual(summary["gs_transfer"]["width"], 64)
+            self.assertEqual(summary["gs_transfer"]["height"], 32)
+            self.assertTrue((directory / "runtime-error-events.json").is_file())
+            with self.assertRaises(ValueError):
+                discovery.campaign.finalize(directory, 0)
 
 
 if __name__ == "__main__":
