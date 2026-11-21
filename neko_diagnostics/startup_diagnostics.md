@@ -803,6 +803,76 @@ cycle interval. The file's records use `neko-bios-progress-v1`; telemetry is
 separate from stdout JSONL and stderr. Enabling it does not change run/trace
 payloads, guest timing, canonical state, failure-stop policy or cycle ceilings.
 
+## Reproducible execution timing
+
+Analyze completed campaign receipts without executing guest code:
+
+```sh
+python3 -B tools/report_bios_timings.py <batch-directory> [<repeat-directory> ...] --context <launch-context.json>
+```
+
+This command reads only. It does not build, launch, resume, finalize, change or
+certify a campaign. Exit 0 means timing analysis succeeded, not that the BIOS
+booted or conformance was inspected. Exit 2 reports incomplete, changed,
+malformed or unsuccessful execution/timing receipts. Missing historical
+sidecars are an error; no timings are reconstructed from file timestamps.
+
+Record context before the benchmark launch in a separate JSON file:
+
+```json
+{
+  "host": "OS/version, architecture, CPU, RAM, power mode and competing load",
+  "build": "compiler/version, configuration, exact flags, assertions, sampling mode",
+  "revision": "Git commit and any source changes affecting the executable"
+}
+```
+
+These nonempty strings are caller-attested, not independently verified.
+Apply one context only to batches captured with that context. Do not label
+historical captures with the current host or compiler. Record the exact build
+and campaign commands/exits alongside it; retain compiler/options evidence.
+Existing manifests supply the captured executable and BIOS SHA-256 identities.
+Keep the assertion-enabled `-O2` configuration as the initial control, with
+unchanged floating-point rules, input and hardware settings.
+
+The JSON report retains every native stage and groups only matching executable,
+BIOS, start/end/ceiling, observation options, progress interval and checkpoint
+identity. Cold, restored, traced and failure-probe runs remain distinct.
+Groups report repetitions, median execution wall time and min/max/spread;
+each stage retains wall/process-CPU time, cycles/second and seconds/billion.
+A zero-cycle run has no seconds/billion value. Small authored runs validate
+reporting, not representative BIOS performance.
+
+Timing boundaries are explicit:
+
+- `execution_*_seconds`: initial execution sample to the `report` sample.
+  Includes coarse progress writes, trace setup and startup snapshots, but
+  excludes ROM loading/reset, checkpoint restoration and final report export.
+  It is an execution window, not an isolated core-loop measurement.
+- `report_wall_seconds`: `report` to `checkpoint`, or `finished` when no
+  checkpoint is saved. Includes final JSON/trace export.
+- `checkpoint_wall_seconds`: `checkpoint` to `finished`; null without a save.
+- `external_overhead_wall_seconds`: parent stage wall time minus the native
+  window. Combines preparation, process startup and reaping delay; these costs
+  cannot be separated further from existing sidecars.
+
+Native command timestamps and parent durations identify potentially overlapping
+stage windows. `stage_window_overlap: true` or null (missing timestamps) is not
+a sequential baseline; overlapping windows do not prove continuous CPU overlap.
+In particular, `--checkpoint-at` overlaps the two cold captures, so neither
+is a sequential cold-throughput control. Its later restored stages are
+sequential but cover only their continuation, not the whole cold workload.
+
+For a performance baseline, agree finite workload bounds first, then use
+sequential unprofiled native stages from maintained conformance batches
+(`plain1`/`plain2` in the ordinary matrix). Repeat under identical recorded
+conditions, retaining all results rather than selecting the fastest run.
+Use the existing inspection/finalization gates separately for correctness.
+Sample in a separate run and context; never include profiler overhead in an
+unprofiled speed claim. BIOS benchmarks need their agreed performance-only
+scope and do not resume paused discovery. Do not carry broad discovery ceilings
+into traced matrices merely to collect timings.
+
 Required compact JSON must parse, recorded output sizes must agree, required comparisons
 must agree and retained canonical/checkpoint bytes are hashed,
 so status inspection can read tens of MiB. It does not reread large JSONL

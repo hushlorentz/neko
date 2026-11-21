@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import run_bios_discovery as discovery
+import report_bios_timings as timings
 from inspect_startup import first_difference
 
 
@@ -164,6 +165,12 @@ class ScoutIntegrationTests(unittest.TestCase):
                     entry["command"][entry["command"].index("--cycles") + 1]))
             self.assertEqual(discovery.campaign.status(directory)["state"],
                              "execution_finished")
+            timing = timings.report([directory], dict(
+                host="BIOS-free test host", build=str(binary), revision="authored fixture"))
+            self.assertEqual(len(timing["stages"]), 6)
+            self.assertTrue(all(stage["master_cycles"] == 8 for stage in timing["stages"]))
+            self.assertTrue(all(stage["workload"]["observation"] == "failure_probe"
+                                for stage in timing["stages"]))
 
     def test_checkpoint_conformance_preserves_native_cold_restore_equivalence(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
@@ -190,6 +197,17 @@ class ScoutIntegrationTests(unittest.TestCase):
                                         for entry in manifest["commands"]))
                     self.assertEqual(discovery.campaign.status(directory)["state"],
                                      "execution_finished")
+                    timing = timings.report([directory], dict(
+                        host="BIOS-free test host", build=str(binary), revision="authored fixture"))
+                    self.assertEqual({stage["name"] for stage in timing["stages"]},
+                                     {"checkpoint", "cold", "resumed", "resumed-plain"})
+                    restored = next(stage for stage in timing["stages"]
+                                    if stage["name"] == "resumed-plain")
+                    self.assertEqual(restored["master_cycles"], 56)
+                    self.assertEqual(restored["workload"]["start"], "checkpoint")
+                    self.assertEqual(restored["workload"]["observation"], "untraced")
+                    self.assertFalse(restored["workload"]["stage_window_overlap"])
+                    self.assertGreater(restored["execution_wall_seconds"], 0)
 
     def test_native_checkpoint_reuse_retains_and_protects_canonical_ending(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()

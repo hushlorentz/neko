@@ -134,6 +134,10 @@ def read_progress(directory, name):
         sample = json.loads(rows[-2])
     except (ValueError, UnicodeError) as error:
         raise ValueError(f"Invalid progress record: {name}") from error
+    return validate_progress_sample(sample, name)
+
+
+def validate_progress_sample(sample, name):
     if (type(sample) is not dict or sample.get("format") != "neko-bios-progress-v1" or
             sample.get("phase") not in ("execution", "report", "checkpoint",
                                         "finished", "runtime_error")):

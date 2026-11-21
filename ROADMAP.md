@@ -4525,10 +4525,9 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 
 ### Reproducible Execution Baseline and Profiling
 
-- [ ] Establish maintained benchmark/profile recipes through existing native
-      diagnostics and campaign owners, separating native execution, load/save,
-      reporting and orchestration costs; fix host/build/input identities and
-      agree finite performance-only BIOS scope before execution.
+- [x] Establish maintained timing reports and benchmark recipes through existing
+      native diagnostics/campaign receipts; separate execution, reporting,
+      checkpoint export and external overhead with recorded host/build/inputs.
 - [ ] Establish repeatable authored CPU/memory and inactive/active-device
       controls, then sample representative BIOS phases; distinguish untraced,
       failure-probe and required traced execution with same-build provenance.
