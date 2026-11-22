@@ -4556,9 +4556,12 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Accept gains only beyond measured variability without material control
       regressions, with canonical/required trace agreement and independent
       review; reprofile before selecting another optimization or later block.
-- [ ] Evaluate inlining/LTO separately from source changes when remaining
+- [x] Evaluate inlining/LTO separately from source changes when remaining
       profiles justify it, in assertion-enabled builds with unchanged
       floating-point semantics; defer PGO until the training corpus is stable.
+- [ ] Agree and validate representative retail IPO comparisons before adopting
+      the optional build configuration, with repeated unsampled timings,
+      own-build checkpoint provenance and required trace/canonical agreement.
 
 ### Derived Decode Caching
 

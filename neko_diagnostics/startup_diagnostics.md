@@ -883,6 +883,36 @@ unprofiled speed claim. BIOS benchmarks need their agreed performance-only
 scope and do not resume paused discovery. Do not carry broad discovery ceilings
 into traced matrices merely to collect timings.
 
+### Build-only IPO experiments
+
+Use CMake's standard interprocedural-optimization setting in separate
+assertion-enabled configurations; do not combine a build experiment with
+source changes, fast-math, PGO or forced-inlining annotations:
+
+```sh
+cmake -S . -B out/ipo-off -DCMAKE_BUILD_TYPE=Debug -DNEKO_OPTIMIZE_CHECKS=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+cmake -S . -B out/ipo-on -DCMAKE_BUILD_TYPE=Debug -DNEKO_OPTIMIZE_CHECKS=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+cmake --build out/ipo-off --target neko neko_tests --config Debug -j 4
+cmake --build out/ipo-on --target neko neko_tests --config Debug -j 4
+NEKO_REFERENCE_BINARY="$PWD/out/ipo-off/neko" cmake --build out/ipo-on --target check --config Debug -j 4
+```
+
+Inspect the generated compile/link options and retain executable identities.
+The compiler selects the IPO implementation; Apple Clang 21 uses ThinLTO.
+Do not assume another compiler's options or a speedup. An IPO-unavailable
+configuration/build is a failed experiment, not an optimized baseline.
+For the complete sanitizer gate, configure another directory with the same
+options plus `-DNEKO_ENABLE_SANITIZERS=ON`, then run its `check` target.
+These isolated targets retain all native shards, Python/native fixtures and
+repository checks without changing the usual `out/check` or `out/sanitize`.
+
+Use `--executable` in separately authorized conformance batches to measure
+the two prebuilt configurations. Keep all unsampled observations, matched
+inputs/bounds, required trace and full canonical comparisons; checkpoints
+still require their own build's validated provenance. Build-only equivalence
+and authored control gains do not establish retail gains or justify changing
+the default build.
+
 ### Authored benchmark controls
 
 `tools/create_benchmark_rom.py` creates original synthetic 4 MiB ROMs, not copies
