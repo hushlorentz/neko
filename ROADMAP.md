@@ -4553,7 +4553,7 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
       observation cost with the empty-work EE COP1 query guard; preserve
       inactive/active transitions, exception cleanup and full diagnostics.
       Require red/green for observable fixes and reference/optimized agreement.
-- [ ] Accept gains only beyond measured variability without material control
+- [x] Accept gains only beyond measured variability without material control
       regressions, with canonical/required trace agreement and independent
       review; reprofile before selecting another optimization or later block.
 - [ ] Evaluate inlining/LTO separately from source changes when remaining

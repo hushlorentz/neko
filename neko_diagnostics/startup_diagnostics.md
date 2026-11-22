@@ -673,6 +673,16 @@ Use `--cycles <count>` to select an explicit unsigned 64-bit cycle ceiling
 for all four starts, including zero. The selected ceiling is recorded in
 the manifest and each exact run command. The helper never increases it
 automatically, changes the trace cap, or runs tests.
+For conformance-only measurements of an explicitly retained native build,
+`--executable "<path>"` skips configuration/build and uses that prebuilt
+executable. The path must be an executable file; its identity is recorded in
+`manifest.json` and checked before and after every native capture, and before
+publishing checkpoint validation. Receipts bind to the launch identity, not a
+later replacement. Mutation stops the campaign with partial evidence retained.
+Checkpoint executable
+identity validation, native progress, comparisons and lifecycle/finalization
+remain unchanged. Scout mode rejects this option. Build flags/host context
+for a prebuilt executable must be caller-attested, not inferred from its path.
 Its optional `--failure-context` flag enables the bounded recorder only on
 the two traced runs; both untraced runs remain genuinely untraced. The
 manifest records this choice and automatic first-failure windows select the

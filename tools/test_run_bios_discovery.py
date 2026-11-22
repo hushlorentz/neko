@@ -474,7 +474,8 @@ class DiscoveryTests(unittest.TestCase):
         return process
 
     def invoke(self, status=0, *, failure_context=False, cycles=None,
-               checkpoint_at=None, checkpoint=None, sample_seconds=None):
+               checkpoint_at=None, checkpoint=None, sample_seconds=None,
+               executable=None, mode=None):
         output = io.StringIO()
         errors = io.StringIO()
         with patch.object(discovery.sys, "platform", "darwin"), \
@@ -492,12 +493,73 @@ class DiscoveryTests(unittest.TestCase):
                     arguments += ["--checkpoint", str(checkpoint)]
                 if sample_seconds is not None:
                     arguments += ["--sample-seconds", str(sample_seconds)]
+                if executable is not None:
+                    arguments += ["--executable", str(executable)]
+                if mode is not None:
+                    arguments += ["--mode", mode]
                 result = discovery.main(arguments)
         self.assertEqual(result, status, errors.getvalue())
         return output.getvalue(), errors.getvalue()
 
     def read(self, name):
         return json.loads((self.output / name).read_text(encoding="utf-8"))
+
+    def test_prebuilt_matrix_records_identity_without_building(self):
+        self.invoke(executable=self.binary)
+        self.assertFalse(any(command[0] == "cmake" for command in self.calls))
+        self.assertEqual(self.run_count, 4)
+        manifest = self.read("manifest.json")
+        self.assertEqual(manifest["prebuilt_executable"],
+                         dict(path=str(self.binary),
+                              identity=discovery.file_identity(self.binary)))
+        self.assertEqual(manifest["binary_identity"],
+                         manifest["prebuilt_executable"]["identity"])
+        self.assertEqual(discovery.campaign.status(self.output)["state"],
+                         "execution_finished")
+
+    def test_prebuilt_invalid_input_and_scout_scope_do_not_launch(self):
+        self.invoke(status=2, executable=self.root / "missing")
+        self.assertFalse(self.output.exists())
+        self.binary.chmod(0o644)
+        self.invoke(status=2, executable=self.binary)
+        self.assertFalse(self.output.exists())
+        self.binary.chmod(0o755)
+        self.invoke(status=2, executable=self.binary, mode="scout")
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.calls, [])
+
+    def test_prebuilt_change_during_capture_stops_further_execution(self):
+        execute = self.execute
+
+        def change_binary(command, **kwargs):
+            result = execute(command, **kwargs)
+            if command[0] == str(self.binary):
+                self.binary.write_bytes(b"changed executable")
+            return result
+
+        self.execute = change_binary
+        self.invoke(status=2, executable=self.binary)
+        self.assertEqual(self.run_count, 1)
+        self.assertIn("executable changed", self.read("manifest.json")["error"])
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
+
+    def test_prebuilt_change_during_checkpoint_inspection_cannot_be_certified(self):
+        spawn = self.spawn
+        self.run_statuses = [0, 1, 1, 1]
+
+        def change_binary(command, **kwargs):
+            result = spawn(command, **kwargs)
+            if str(discovery.INSPECTOR) in command and "compare" in command:
+                self.assertEqual(self.run_count, 4)
+                self.binary.write_bytes(b"replacement after native captures")
+            return result
+
+        self.spawn = change_binary
+        self.invoke(status=2, executable=self.binary, checkpoint_at=40, cycles=1000)
+        self.assertEqual(self.run_count, 4)
+        self.assertFalse((self.output / "checkpoint.state.json").exists())
+        self.assertIn("executable changed", self.read("manifest.json")["error"])
+        self.assertEqual(discovery.campaign.status(self.output)["state"], "failed")
 
     def test_trace_capture_is_stream_compressed_without_an_uncompressed_copy(self):
         self.output.mkdir()

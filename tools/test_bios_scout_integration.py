@@ -13,12 +13,42 @@ from unittest.mock import patch
 import run_bios_discovery as discovery
 import report_bios_timings as timings
 import create_benchmark_rom as benchmark
-from inspect_startup import first_difference
+from inspect_startup import compare, first_difference, load_log
 
 
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("NEKO_REFERENCE_BINARY"),
+                         "Requires explicitly supplied frozen reference")
+    def test_prebuilt_reference_and_current_keep_checkpoint_and_lifecycle_contracts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "cop1.bin"
+            bios.write_bytes(benchmark.create_rom("cop1", 3))
+            states, traces = [], []
+            for label, variable in (("reference", "NEKO_REFERENCE_BINARY"),
+                                    ("current", "NEKO_TEST_BINARY")):
+                binary = Path(os.environ[variable]).resolve()
+                directory = root / label
+                with redirect_stderr(io.StringIO()):
+                    result = discovery.run_batch(
+                        directory, bios, master_cycles=512, checkpoint_at=16,
+                        executable=binary)
+                self.assertTrue(result["comparisons_equal"])
+                self.assertIsNone(result["first_failure"])
+                manifest = json.loads((directory / "manifest.json").read_text())
+                self.assertEqual(manifest["prebuilt_executable"]["identity"],
+                                 discovery.file_identity(binary))
+                self.assertFalse(any(entry["command"][0] == "cmake"
+                                     for entry in manifest["commands"]))
+                self.assertEqual(discovery.campaign.status(directory)["state"],
+                                 "execution_finished")
+                states.append(discovery.file_identity(directory / "cold-final.state"))
+                traces.append(load_log(discovery.report_path(directory, "cold")))
+            self.assertEqual(states[0], states[1])
+            self.assertTrue(compare(traces[0], traces[1], "trace")["equal"])
+
     def test_authored_benchmark_controls_match_traced_plain_and_restored_execution(self):
         binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
         with tempfile.TemporaryDirectory() as temporary:
@@ -28,10 +58,10 @@ class ScoutIntegrationTests(unittest.TestCase):
                     bios = root / f"{kind}.bin"
                     bios.write_bytes(benchmark.create_rom(kind))
                     directory = root / kind
-                    with patch.object(discovery, "build_neko", return_value=binary), \
-                         redirect_stderr(io.StringIO()):
+                    with redirect_stderr(io.StringIO()):
                         result = discovery.run_batch(
-                            directory, bios, master_cycles=4096, checkpoint_at=1024)
+                            directory, bios, master_cycles=4096, checkpoint_at=1024,
+                            executable=binary)
                     self.assertTrue(result["comparisons_equal"])
                     self.assertIsNone(result["first_failure"])
                     self.assertEqual(discovery.campaign.status(directory)["state"],

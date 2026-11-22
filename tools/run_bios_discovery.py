@@ -27,10 +27,19 @@ TRACE_EVENTS = 3000000
 RUN_NAMES = ("traced1", "traced2", "plain1", "plain2")
 
 
+def verify_prebuilt_executable(manifest, command):
+    selected = manifest.get("prebuilt_executable")
+    if selected is not None and len(command) > 1 and command[1] == "bios-startup":
+        if (command[0] != selected["path"] or
+                file_identity(Path(command[0])) != selected["identity"]):
+            raise ValueError("Prebuilt executable changed during the campaign")
+
+
 @contextmanager
 def running_capture(directory, manifest, name, command, *, extension="stdout",
                     accepted=(0,), compressed=False, sample_seconds=0):
     command = list(command)
+    verify_prebuilt_executable(manifest, command)
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
     entry = dict(name=name, command=command, returncode=None,
@@ -83,6 +92,7 @@ def running_capture(directory, manifest, name, command, *, extension="stdout",
     if status not in accepted:
         raise ValueError(
             f"{name} exited {status}; see {output} and {errors}")
+    verify_prebuilt_executable(manifest, command)
     if "progress_file" in entry:
         entry["progress"] = campaign.read_progress(directory, entry["progress_file"])
         expected_phase = "runtime_error" if status == 2 else "finished"
@@ -280,9 +290,10 @@ def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
     states = compare_final_states(directory, ("cold", "resumed", "resumed-plain"))
     equal = equal and all(state["equal"] for state in states.values())
     manifest["final_states"] = states
+    verify_prebuilt_executable(manifest, base)
     metadata = dict(format="neko-bios-checkpoint-v1", validated=equal,
                     master_cycle=cycle, state=file_identity(checkpoint),
-                    bios=file_identity(bios), binary=file_identity(binary),
+                    bios=file_identity(bios), binary=manifest["binary_identity"],
                     validation_manifest=str(directory / "manifest.json"))
     if equal:
         write_json(Path(str(checkpoint) + ".json"), metadata)
@@ -291,7 +302,8 @@ def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
 
 
 def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=False,
-              checkpoint=None, checkpoint_at=None, invocation=None, sample_seconds=0):
+              checkpoint=None, checkpoint_at=None, invocation=None, sample_seconds=0,
+              executable=None):
     master_cycles = uint(master_cycles, "Cycle ceiling")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
@@ -301,6 +313,12 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
         raise ValueError("Sample duration must be between 0 and 60 seconds")
     if sample_seconds and (sys.platform != "darwin" or checkpoint_at is not None):
         raise ValueError("Sampling requires macOS and the sequential conformance matrix")
+    selected = None
+    if executable is not None:
+        executable = executable.resolve()
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError(f"Prebuilt executable is missing or not executable: {executable}")
+        selected = dict(path=str(executable), identity=file_identity(executable))
     metadata = (read_checkpoint(checkpoint, bios, master_cycles)
                 if checkpoint is not None else None)
     if checkpoint_at is not None:
@@ -317,10 +335,12 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
         manifest["checkpoint_at"] = checkpoint_at
     if failure_context or checkpoint_at is not None:
         manifest["failure_context"] = True
+    if selected is not None:
+        manifest["prebuilt_executable"] = selected
     write_json(directory / "manifest.json", manifest)
     owner = campaign.Owner(directory, invocation)
     try:
-        binary = build_neko(directory, manifest)
+        binary = executable if executable is not None else build_neko(directory, manifest)
         manifest.update(binary_identity=file_identity(binary), bios_identity=file_identity(bios))
         if metadata is not None and metadata.get("binary") != file_identity(binary):
             raise ValueError("Checkpoint executable changed; regenerate and validate "
@@ -588,6 +608,9 @@ def main(argv=None):
     parser.add_argument("--sample-seconds", type=int, default=0,
                         help="macOS only: sample the owned plain1 native PID for 1-60 seconds; "
                              "use a separate profiling batch, not an unprofiled timing control.")
+    parser.add_argument("--executable", type=Path,
+                        help="Conformance only: use this prebuilt executable without rebuilding; "
+                             "record and verify its identity before/after each native capture.")
     checkpoints = parser.add_mutually_exclusive_group()
     checkpoints.add_argument("--checkpoint", type=Path,
                              help="Reuse a validated checkpoint from this executable.")
@@ -598,7 +621,7 @@ def main(argv=None):
     try:
         if arguments.mode == "scout":
             if (arguments.checkpoint or arguments.checkpoint_at or arguments.failure_context or
-                    arguments.sample_seconds):
+                    arguments.sample_seconds or arguments.executable is not None):
                 raise ValueError("Scout mode starts cold and manages its own checkpoints and capture")
             report = run_scout_batch(
                 arguments.directory.resolve(), arguments.bios.resolve(),
@@ -620,7 +643,8 @@ def main(argv=None):
                            checkpoint=(arguments.checkpoint.resolve()
                                        if arguments.checkpoint is not None else None),
                            checkpoint_at=arguments.checkpoint_at,
-                           invocation=invocation, sample_seconds=arguments.sample_seconds)
+                           invocation=invocation, sample_seconds=arguments.sample_seconds,
+                           executable=arguments.executable)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1
     except (OSError, ValueError) as error:
