@@ -463,6 +463,57 @@ TEST_CASE("IOP timer progression preserves exact prescaler phase across register
   }
 }
 
+TEST_CASE("IOP timer pulse-free stable samples preserve all but held-zero counts",
+  "[iop][timing]")
+{
+  for (unsigned int levels = 0; levels < 4; ++levels)
+  {
+    const IOPTimerGateLevels gates = {
+      (levels & 1) != 0, (levels & 2) != 0};
+    for (IOPWord gate = 0; gate < 8; ++gate)
+    for (IOPWord alternate : {IOPWord{0}, IOPWord{0x100}})
+    for (IOPWord prescaler = 0; prescaler < 4; ++prescaler)
+    {
+      CAPTURE(levels);
+      CAPTURE(gate);
+      CAPTURE(alternate);
+      CAPTURE(prescaler);
+      IOPTimers timers;
+      timers.advance(withGates(noPulses, gates));
+      for (std::size_t index = 0; index < 6; ++index)
+      {
+        timers.writeMode(index, gate | alternate | (prescaler << 13) | 0x230);
+        timers.writeTarget(index, 0);
+      }
+      timers.advance(withGates(bothPulses, gates));
+      for (std::size_t index = 0; index < 6; ++index)
+      {
+        timers.writeCount(index, static_cast<IOPWord>(0x1234 + index));
+      }
+      const IOPTimers before = timers;
+      for (unsigned int repeat = 0; repeat < 3; ++repeat)
+      {
+        REQUIRE(timers.advance(withGates(noPulses, gates)).count == 0);
+        REQUIRE(timers.gateLevels().horizontalBlank == gates.horizontalBlank);
+        REQUIRE(timers.gateLevels().verticalBlank == gates.verticalBlank);
+        for (std::size_t index = 0; index < 6; ++index)
+        {
+          CAPTURE(index);
+          auto expected = before.counter(index);
+          const bool externalGate = index == 0 || index == 1 || index == 3;
+          const bool blank = index == 0 ? gates.horizontalBlank : gates.verticalBlank;
+          if (externalGate && gate == 5 && !blank)
+          {
+            expected.count = 0;
+            expected.prescalerRemainder = 0;
+          }
+          requireCounter(timers.counter(index), expected);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("IOP timer progression observes target and natural overflow after increments")
 {
   for (std::size_t index = 0; index < 6; ++index)

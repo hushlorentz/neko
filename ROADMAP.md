@@ -4588,14 +4588,20 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 
 ### Deadline-Driven Device Advancement
 
-- [ ] Preserve shared clock ownership and component order while moving measured
-      inactive-device work to owner-defined deadlines and eligibility changes.
-- [ ] Define deadline invalidation on MMIO, DMA, IRQ, reset and restore; advance
-      timers, display, serial and audio only through their existing authorities.
-- [ ] Validate simultaneous events, clock phases, pending work and split runs
-      against reference execution, retaining full trace/failure contracts.
-- [ ] Pass independent timing/persistence review and complete required gates
-      before fresh same-build cold/restored BIOS verification.
+- [x] Select one device from retained profiles and agree its bounded work-
+      reduction contract and performance acceptance before implementation.
+- [x] Establish reference coverage for the selected owner's no-work and active
+      transitions, simultaneous events, MMIO, reset/restore and observations;
+      reduce only proven redundant work without changing shared clock order.
+- [ ] Measure the owner-local change against matched reference builds on
+      authored and representative workloads; require gains beyond variability,
+      trace/canonical agreement and independent timing/persistence review.
+- [ ] Only if remaining profiles justify cross-cycle deadlines, define owner-
+      supplied eligibility and invalidation on MMIO, DMA, IRQ, reset and restore
+      before changing timer, display, serial or audio scheduling.
+- [ ] Validate any deadline advancement against reference clock phases, pending
+      work and split runs, with complete regression gates and fresh same-build
+      cold/restored BIOS conformance before acceptance.
 
 ### Non-JIT Decoded-Block Interpretation
 

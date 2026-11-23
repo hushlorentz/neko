@@ -943,6 +943,30 @@ TEST_CASE("IOP trace observes routed gate edges but omits ordinary counter incre
   }
 }
 
+TEST_CASE("IOP pulse-free held-zero samples preserve existing observation order",
+  "[iop][trace]")
+{
+  using Access = IOPDeviceObservationTestAccess;
+  IOPTimers timers;
+  timers.writeMode(0, 5);
+  NekoObservationOrder order;
+  Access::enable(timers, &order);
+  timers.writeCount(0, 9);
+  REQUIRE(Access::count(timers) == 1);
+  REQUIRE(order.next == 1);
+  REQUIRE(timers.advance({false, false, {}}).count == 0);
+  REQUIRE(timers.counter(0).count == 0);
+  REQUIRE(Access::count(timers) == 1);
+  REQUIRE(order.next == 1);
+  REQUIRE(timers.advance({false, false, {true, false}}).count == 0);
+  REQUIRE(Access::count(timers) == 2);
+  REQUIRE(order.next == 2);
+  REQUIRE_FALSE(timers.counter(0).gateWaiting);
+  REQUIRE(timers.advance({false, false, {true, false}}).count == 0);
+  REQUIRE(Access::count(timers) == 2);
+  REQUIRE(order.next == 2);
+}
+
 TEST_CASE("IOP publication excludes host setup and preserves machine persistence",
   "[iop][trace]")
 {

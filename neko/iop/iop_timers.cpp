@@ -334,6 +334,25 @@ IOPWord IOPTimers::readMode(std::size_t index)
 IOPTimers::InterruptRequests IOPTimers::advance(
   const IOPTimerTimingSample &sample)
 {
+  if (!sample.systemClockPulse && !sample.pixelClockPulse &&
+      sample.gates.horizontalBlank == blanking.horizontalBlank &&
+      sample.gates.verticalBlank == blanking.verticalBlank)
+  {
+    // Stable, unclocked samples can still hold gated counters at zero.
+    for (std::size_t index = 0; index < COUNTER_COUNT; ++index)
+    {
+      const auto &capability = timerCapabilities[index];
+      if (capability.gate != IOPTimerGate::None &&
+          !gateLevel(capability.gate, blanking))
+      {
+        auto &state = counters[index];
+        applyGateTransition(state,
+          decodeGateMode(capability.gate, state.mode), false, false);
+      }
+    }
+    return {};
+  }
+
   // Release only older requests, before this sample can create another one.
   if (sample.systemClockPulse)
   {
