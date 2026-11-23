@@ -221,6 +221,149 @@ struct EECoreTestAccess
     return core.inFlightCOP1ProgramOrder().size();
   }
 
+  static void requireCOP1ProducerSelection()
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    struct ResourceCase
+    {
+      EECore::COP1ScoreboardResource resource;
+      std::uint8_t destinationMask;
+      EEOperation operation;
+    };
+    const ResourceCase resources[] = {
+      {EECore::COP1ScoreboardResource::FPR,
+       EECore::COP1_DESTINATION_FPR,
+       EEOperation::AddSingleCOP1},
+      {EECore::COP1ScoreboardResource::Accumulator,
+       EECore::COP1_DESTINATION_ACCUMULATOR,
+       EEOperation::AddSingleToAccumulatorCOP1},
+      {EECore::COP1ScoreboardResource::FCR31,
+       EECore::COP1_DESTINATION_FCR31,
+       EEOperation::AddSingleCOP1},
+      {EECore::COP1ScoreboardResource::FCR31,
+       EECore::COP1_DESTINATION_CONDITION,
+       EEOperation::CompareEqualSingleCOP1},
+      {EECore::COP1ScoreboardResource::Condition,
+       EECore::COP1_DESTINATION_CONDITION,
+       EEOperation::CompareEqualSingleCOP1},
+      {EECore::COP1ScoreboardResource::Condition,
+       EECore::COP1_DESTINATION_FCR31,
+       EEOperation::MoveControlWordToCOP1},
+      {EECore::COP1ScoreboardResource::GPR,
+       EECore::COP1_DESTINATION_GPR,
+       EEOperation::MoveWordFromCOP1},
+      {EECore::COP1ScoreboardResource::MemoryException,
+       EECore::COP1_DESTINATION_FPR,
+       EEOperation::LoadWordToCOP1},
+      {EECore::COP1ScoreboardResource::MemoryException,
+       EECore::COP1_DESTINATION_MEMORY,
+       EEOperation::StoreWordFromCOP1}
+    };
+    const std::array<std::size_t, 5> slotOrders[] = {
+      {{14, 0, 9, 7, 5}},
+      {{0, 15, 12, 8, 2}}
+    };
+    const std::uint64_t consumerOrders[] = {
+      0, 10, 11, 30, 31, 60, 61, UINT64_MAX
+    };
+    const std::uint64_t expectedProducers[] = {
+      0, 0, 10, 10, 30, 30, 60, 60
+    };
+    for (const ResourceCase &resource : resources)
+    {
+      for (const auto &slots : slotOrders)
+      {
+        core.inFlightCOP1Operations.fill({});
+        const std::uint64_t producerOrders[] = {10, 30, 50, 60, 55};
+        for (std::size_t index = 0; index < slots.size(); ++index)
+        {
+          auto &operation = core.inFlightCOP1Operations[slots[index]];
+          operation.active = true;
+          operation.programOrder = producerOrders[index];
+          operation.instruction.operation = resource.operation;
+          operation.destination.mask = resource.destinationMask;
+          operation.destination.fprRegister = 3;
+          operation.destination.gprRegister = 3;
+        }
+        auto &nonmatching = core.inFlightCOP1Operations[slots[2]];
+        if (resource.resource == EECore::COP1ScoreboardResource::FPR ||
+            resource.resource == EECore::COP1ScoreboardResource::GPR)
+        {
+          nonmatching.destination.fprRegister = 4;
+          nonmatching.destination.gprRegister = 4;
+        }
+        else
+        {
+          nonmatching.destination.mask = EECore::COP1_DESTINATION_NONE;
+          nonmatching.instruction.operation = EEOperation::Nop;
+        }
+        core.inFlightCOP1Operations[slots[4]].active = false;
+        for (std::size_t index = 0;
+             index < sizeof(consumerOrders) / sizeof(consumerOrders[0]);
+             ++index)
+        {
+          CAPTURE(static_cast<unsigned>(resource.resource));
+          CAPTURE(static_cast<unsigned>(resource.operation));
+          CAPTURE(slots[0]);
+          CAPTURE(consumerOrders[index]);
+          const auto value = core.cop1ScoreboardValueBefore(
+            resource.resource, 3, consumerOrders[index]);
+          CHECK(value.producerOrder == expectedProducers[index]);
+          CHECK(
+            value.availability ==
+            (expectedProducers[index] == 0
+              ? EECore::COP1ScoreboardAvailability::Committed
+              : EECore::COP1ScoreboardAvailability::Unavailable));
+          if (expectedProducers[index] != 0)
+          {
+            CHECK(value.producerOperation == resource.operation);
+            CHECK(value.producerStage == EECore::COP1PipelineStage::R);
+          }
+        }
+        for (std::size_t slot : {slots[3], slots[1], slots[0]})
+        {
+          core.inFlightCOP1Operations[slot].active = false;
+          const std::uint64_t expected =
+            slot == slots[3] ? 30 : slot == slots[1] ? 10 : 0;
+          CHECK(
+            core.cop1ScoreboardValueBefore(
+              resource.resource, 3, UINT64_MAX).producerOrder ==
+            expected);
+        }
+      }
+    }
+  }
+
+  static void requireCOP1MemoryProducerBoundaries()
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    auto &store = core.inFlightCOP1Operations[12];
+    store.active = true;
+    store.programOrder = 10;
+    store.instruction.operation = EEOperation::StoreWordFromCOP1;
+    store.stage = EECore::COP1PipelineStage::X;
+    auto &load = core.inFlightCOP1Operations[0];
+    load.active = true;
+    load.programOrder = 30;
+    load.instruction.operation = EEOperation::LoadWordToCOP1;
+    load.stage = EECore::COP1PipelineStage::X;
+    const auto producerOrder = [&core]()
+    {
+      return core.cop1ScoreboardValueBefore(
+        EECore::COP1ScoreboardResource::MemoryException,
+        0,
+        40).producerOrder;
+    };
+    CHECK(producerOrder() == 10);
+    load.stage = EECore::COP1PipelineStage::R;
+    CHECK(producerOrder() == 30);
+    load.stage = EECore::COP1PipelineStage::X;
+    store.stage = EECore::COP1PipelineStage::Y;
+    CHECK(producerOrder() == 0);
+  }
+
   static bool packedMACContinuationIsFixedCapacity(
     EECore *core)
   {
@@ -1247,6 +1390,20 @@ TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independe
   REQUIRE(order[0] == 2);
   REQUIRE(order[1] == 7);
   REQUIRE(order[2] == 9);
+}
+
+TEST_CASE(
+  "EE COP1 producer lookup follows logical order across reused slots",
+  "[cop1-producer-lookup]")
+{
+  EECoreTestAccess::requireCOP1ProducerSelection();
+}
+
+TEST_CASE(
+  "EE COP1 producer lookup preserves memory fault stage boundaries",
+  "[cop1-producer-lookup]")
+{
+  EECoreTestAccess::requireCOP1MemoryProducerBoundaries();
 }
 
 TEST_CASE("EE packed MAC continuation is fixed-capacity inline state")

@@ -9899,15 +9899,13 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
   }
 
   const InFlightCOP1Operation *producer = nullptr;
-  const COP1ProgramOrderView programOrder =
-    inFlightCOP1ProgramOrder();
-  for (std::size_t orderIndex = programOrder.size();
-       orderIndex != 0;
-       --orderIndex)
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
   {
-    const InFlightCOP1Operation &operation =
-      inFlightCOP1Operations[programOrder[orderIndex - 1]];
-    if (operation.programOrder >= consumerOrder)
+    if (!operation.active ||
+        operation.programOrder >= consumerOrder ||
+        (producer != nullptr &&
+         operation.programOrder < producer->programOrder))
     {
       continue;
     }
@@ -9963,7 +9961,6 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
     if (writesResource)
     {
       producer = &operation;
-      break;
     }
   }
   if (producer == nullptr)

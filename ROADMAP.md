@@ -4559,19 +4559,32 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Evaluate inlining/LTO separately from source changes when remaining
       profiles justify it, in assertion-enabled builds with unchanged
       floating-point semantics; defer PGO until the training corpus is stable.
-- [ ] Agree and validate representative retail IPO comparisons before adopting
+- [x] Agree and validate representative retail IPO comparisons before adopting
       the optional build configuration, with repeated unsampled timings,
       own-build checkpoint provenance and required trace/canonical agreement.
 
+### Measured COP1 Producer Lookup
+
+- [x] Replace repeated sorted producer lookup with a bounded owner-local
+      selection, preserving consumer-order cutoffs and resource/forwarding/fault
+      contracts; retain authored reference coverage and independent review.
+- [ ] Accept only measured late-workload gains beyond variability without
+      material early/authored-control regression, using matched builds and
+      required prefix/full-canonical comparisons after the implementation commit.
+
 ### Derived Decode Caching
 
-- [ ] Cache pure EE, IOP or VU decoding in profile-selected order, preserving
-      architectural fetch, cache, translation, issue and exception behavior.
-- [ ] Bound host-only cache storage and define reset/load lifetime; validate
-      changed instruction words and macro/micro mode distinctions without
-      adding derived cache contents to canonical guest state.
+- [x] Reprofile after accepted build optimizations; select one decoder only
+      with measured headroom, an owner-local boundary and explicit acceptance,
+      or defer caching if remaining costs do not justify it.
+- [ ] Establish selected-decoder reference coverage for changed instruction
+      words, relevant execution modes, faults and warmed reset/restore paths.
+- [ ] Cache the selected pure decode with bounded host-only storage and explicit
+      reset/load lifetime; preserve architectural fetch, cache, translation,
+      issue and exceptions, excluding derived contents from canonical state.
 - [ ] Compare cached and reference execution on authored and representative
-      workloads, including self-modifying code and floating-point conformance.
+      workloads, including self-modifying code and floating-point conformance;
+      require gains beyond variability, regression gates and independent review.
 
 ### Deadline-Driven Device Advancement
 
