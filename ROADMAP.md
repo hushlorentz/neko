@@ -4307,6 +4307,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Verify fresh unchanged-input BIOS retirement with full cold/restored
       comparisons and next-origin attribution or bounded observation.
 
+### Post-Upload BIOS Dependency Attribution
+
+- [x] Attribute the next originating dependency after verified PSMT4 uploads
+      with bounded unchanged-input discovery and required replay comparisons,
+      or record an explicit observation limit without claiming shell readiness.
+
+### GS Sprite Source-Alpha Test Dependency
+
+- [x] Add the approved runtime-only GS drawing snapshot and strict legacy-
+      compatible inspector support, with authored regressions and independent
+      review before the user-owned commit checkpoint.
+- [ ] Establish the originating sprite's TEST configuration and manual-defined
+      alpha comparison/failure-write contract through existing GS fragment
+      owners; settle diagnostics and active-policy scope before implementation.
+
 ### Additional CD/DVD Command and Configuration Scope
 
 - [ ] Expand command dependencies required by the selected shell profile into
@@ -4520,8 +4535,8 @@ Order work within each block by representative profiles; begin later blocks
 only when their prerequisites and measured remaining costs justify them.
 The first performance gate is at most 10 minutes of native execution per billion
 master cycles on representative workloads on the reference host, with 5 minutes
-as the stretch target. BIOS discovery stays paused pending measured improvement
-and explicit direction to resume; near-real-time remains a longer-term goal.
+as the stretch target. The practical gate is accepted and bounded BIOS discovery
+is authorized to resume; near-real-time remains a longer-term goal.
 
 ### Reproducible Execution Baseline and Profiling
 
@@ -4568,9 +4583,9 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Replace repeated sorted producer lookup with a bounded owner-local
       selection, preserving consumer-order cutoffs and resource/forwarding/fault
       contracts; retain authored reference coverage and independent review.
-- [ ] Accept only measured late-workload gains beyond variability without
-      material early/authored-control regression, using matched builds and
-      required prefix/full-canonical comparisons after the implementation commit.
+- [ ] Revisit standalone lookup gain acceptance when renewed profiling justifies
+      it; require matched-build late gains beyond variability, no material control
+      regression, and required prefix/full-canonical comparisons.
 
 ### Derived Decode Caching
 
@@ -4593,7 +4608,13 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 - [x] Establish reference coverage for the selected owner's no-work and active
       transitions, simultaneous events, MMIO, reset/restore and observations;
       reduce only proven redundant work without changing shared clock order.
-- [ ] Measure the owner-local change against matched reference builds on
+- [x] Screen the owner-local change on the synthetic active-device workload
+      before expanding to regression controls or retail measurements.
+- [x] Screen unchanged synthetic CPU/RAM controls against the matched reference;
+      retain all observations and require the numerical regression caps.
+- [x] Screen early/late retail phases with validated own-build checkpoints,
+      retaining required comparisons and numerical regression controls.
+- [x] Measure the owner-local change against matched reference builds on
       authored and representative workloads; require gains beyond variability,
       trace/canonical agreement and independent timing/persistence review.
 - [ ] Only if remaining profiles justify cross-cycle deadlines, define owner-
@@ -4624,16 +4645,18 @@ and explicit direction to resume; near-real-time remains a longer-term goal.
 
 ### Non-JIT Performance Acceptance
 
-- [ ] Demonstrate at most 600 seconds of native execution per billion master
+- [x] Demonstrate at most 600 seconds of native execution per billion master
       cycles on representative reference-host workloads; target 300 seconds,
       recording configuration, variability and correctness comparisons.
-- [ ] Compare cumulative gains across representative workloads, including the
-      floating-point corpus, with complete optimized/ASan and closure review.
-- [ ] Verify unchanged-input BIOS execution and required cold/restored,
+- [ ] Revisit direct cumulative-gain comparisons with the accepted baseline,
+      including floating-point workloads, when further investigation is justified;
+      retain complete optimized/ASan and closure review.
+- [x] Verify bounded unchanged-input BIOS execution and required cold/restored,
       traced/plain and canonical comparisons; report native execution speed
       separately from checkpoint savings and campaign overhead.
-- [ ] Reassess remaining bottlenecks against the near-real-time objective;
-      document achieved speed and limitations without reopening JIT implicitly.
+- [ ] Reassess remaining bottlenecks against the near-real-time objective when
+      renewed profiles justify further work; document speed and limitations
+      without reopening JIT implicitly.
 
 ### Deferred Validation Optimization
 

@@ -185,11 +185,27 @@ struct StartupRunSummary
 
 enum class StartupExecutionBoundary { CompleteCycle, IncompleteCycle };
 
+struct StartupGSDrawingState
+{
+  GSPrimitiveType primitive = GSPrimitiveType::Point;
+  std::uint8_t context = 0;
+  std::uint64_t prim = 0;
+  std::uint64_t prmodecont = 0;
+  std::uint64_t prmode = 0;
+  std::uint64_t test = 0;
+  std::uint64_t frame = 0;
+  std::uint64_t zbuf = 0;
+  std::uint64_t alpha = 0;
+  std::uint64_t fba = 0;
+  std::uint64_t pabe = 0;
+};
+
 struct StartupRuntimeError
 {
   std::string message;
   StartupSummary startup;
   GSImageTransfer gsTransfer;
+  StartupGSDrawingState gsDrawing;
 };
 
 enum class StartupRunOutcome { Completed, RuntimeError };

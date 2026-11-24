@@ -24,6 +24,8 @@ namespace GSRegisterAddress
   constexpr std::uint8_t TEX1_2 = 0x15;
   constexpr std::uint8_t XYOFFSET_1 = 0x18;
   constexpr std::uint8_t XYOFFSET_2 = 0x19;
+  constexpr std::uint8_t PRMODECONT = 0x1a;
+  constexpr std::uint8_t PRMODE = 0x1b;
   constexpr std::uint8_t TEXA = 0x3b;
   constexpr std::uint8_t SCISSOR_1 = 0x40;
   constexpr std::uint8_t SCISSOR_2 = 0x41;

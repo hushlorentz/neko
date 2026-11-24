@@ -363,6 +363,15 @@ def validate_record(record):
                 for field, bits in widths.items():
                     uint(transfer[field], f"gs_transfer.{field}", bits)
                 require(transfer, "active", bool)
+            if "gs_drawing" in record:
+                drawing = require(record, "gs_drawing", dict)
+                widths = dict(primitive=3, context=1, prim=64, prmodecont=64,
+                              prmode=64, test=64, frame=64, zbuf=64, alpha=64,
+                              fba=64, pabe=64)
+                if drawing.keys() != widths.keys():
+                    raise ValueError("runtime GS drawing state has invalid fields")
+                for field, bits in widths.items():
+                    uint(drawing[field], f"gs_drawing.{field}", bits)
     elif kind == "startup_trace_summary":
         uint(record.get("event_limit"), "event_limit")
         uint(record.get("captured_events"), "captured_events")
@@ -516,6 +525,8 @@ def execution_context(log):
         runtime_error=log.result.get("message"),
         **({"gs_transfer": log.result["gs_transfer"]}
            if "gs_transfer" in log.result else {}),
+        **({"gs_drawing": log.result["gs_drawing"]}
+           if "gs_drawing" in log.result else {}),
     )
 
 

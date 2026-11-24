@@ -396,6 +396,7 @@ class ScoutIntegrationTests(unittest.TestCase):
             self.assertEqual(summary["gs_transfer"]["destination_base_pointer"], 12576)
             self.assertEqual(summary["gs_transfer"]["width"], 64)
             self.assertEqual(summary["gs_transfer"]["height"], 32)
+            self.assertIn("gs_drawing", summary)
             self.assertTrue((directory / "runtime-error-events.json").is_file())
             with self.assertRaises(ValueError):
                 discovery.campaign.finalize(directory, 0)

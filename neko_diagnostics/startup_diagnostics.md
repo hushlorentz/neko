@@ -734,6 +734,17 @@ Runtime reports additionally contain `gs_transfer`, copied from the GS owner
 after unwinding. It identifies attempted parameters on a GS activation error;
 on other errors it is retained GS state, not a claim of causality. Historical
 reports without it remain supported. The inspector validates its field bounds.
+New runtime reports also contain `gs_drawing`: the GS owner's effective
+`primitive` (three-bit type) and zero-based `context`, raw `prim`, `prmodecont`,
+`prmode`, and the selected context's raw `test`, `frame`, `zbuf`, `alpha`, `fba`,
+plus global `pabe`. Raw register values retain all 64 bits. These are retained
+post-unwind settings, not proof that drawing caused every runtime error;
+effective primitive/context describe implemented owner state, not support for
+all raw PRMODE controls. The inspector accepts historical reports without this
+field, validates present payloads strictly, and preserves them in summary,
+event and instruction views and runtime comparisons. Capturing this data adds
+no per-cycle observation, trace events or saved architectural state.
+
 Because a synchronous device exception may occur before the scheduler advances
 its clock, diagnostic replay includes at most one tick beyond the reported
 clock, capped by the original native ceiling. Error identity and full retained

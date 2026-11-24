@@ -852,6 +852,43 @@ class InspectorTests(unittest.TestCase):
                 self.write(self.path, rows)
                 self.invoke("summary", self.path, status=2)
 
+    def test_runtime_drawing_state_survives_summary_and_filtered_views(self):
+        drawing = dict(primitive=6, context=1, prim=0x246, prmodecont=1, prmode=0,
+                       test=0x8000000000035a95, frame=0x10001, zbuf=0x100000002,
+                       alpha=0x8000008000000044, fba=1, pabe=1)
+        rows = records()
+        rows[1] = dict(type="startup_runtime_error", run=None,
+                       execution_boundary="incomplete_cycle", message="authored draw error",
+                       snapshot=rows[1]["snapshot"], gs_drawing=drawing)
+        rows[-1]["execution_boundary"] = "incomplete_cycle"
+        self.write(self.path, rows)
+        for command in ("summary", "events", "instructions"):
+            with self.subTest(command=command):
+                self.assertEqual(self.report(command, self.path)["gs_drawing"], drawing)
+        other = self.path.with_name("other.jsonl")
+        rows[1]["gs_drawing"] = {**drawing, "context": 0}
+        self.write(other, rows)
+        report = self.report("compare", self.path, other, "--mode", "continuation", status=1)
+        self.assertEqual(report["first_difference"], "$.result.gs_drawing.context")
+
+    def test_runtime_drawing_state_rejects_malformed_optional_payloads(self):
+        drawing = dict(primitive=6, context=1, prim=0x246, prmodecont=1, prmode=0,
+                       test=0x35a95, frame=0x10001, zbuf=0x100000002,
+                       alpha=0x44, fba=1, pabe=1)
+        invalid = [None, [], {**drawing, "extra": 0},
+                   {key: value for key, value in drawing.items() if key != "test"}]
+        invalid += [{**drawing, field: value} for field, value in (
+            ("primitive", 8), ("primitive", True), ("context", 2),
+            ("context", -1), ("prim", 1 << 64), ("test", -1), ("frame", "0"))]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                rows = records(False)
+                rows[1] = dict(type="startup_runtime_error", run=None,
+                               execution_boundary="incomplete_cycle", message="authored error",
+                               snapshot=rows[1]["snapshot"], gs_drawing=payload)
+                self.write(self.path, rows)
+                self.invoke("summary", self.path, status=2)
+
     def test_comparison_modes_and_first_difference(self):
         other = self.path.with_name("other.jsonl")
         self.write(other, records(False))

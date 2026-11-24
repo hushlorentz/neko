@@ -63,6 +63,23 @@ namespace
     return value ? "true" : "false";
   }
 
+  StartupGSDrawingState inspectGSDrawing(const GS &gs)
+  {
+    const auto &primitive = gs.primitive();
+    return {
+      primitive.type, primitive.context,
+      gs.registerValue(GSRegisterAddress::PRIM),
+      gs.registerValue(GSRegisterAddress::PRMODECONT),
+      gs.registerValue(GSRegisterAddress::PRMODE),
+      gs.registerValue(primitive.context == 0 ? GSRegisterAddress::TEST_1 : GSRegisterAddress::TEST_2),
+      gs.registerValue(primitive.context == 0 ? GSRegisterAddress::FRAME_1 : GSRegisterAddress::FRAME_2),
+      gs.registerValue(primitive.context == 0 ? GSRegisterAddress::ZBUF_1 : GSRegisterAddress::ZBUF_2),
+      gs.registerValue(primitive.context == 0 ? GSRegisterAddress::ALPHA_1 : GSRegisterAddress::ALPHA_2),
+      gs.registerValue(primitive.context == 0 ? GSRegisterAddress::FBA_1 : GSRegisterAddress::FBA_2),
+      gs.registerValue(GSRegisterAddress::PABE)
+    };
+  }
+
   unsigned iopChannelNumber(IOPDMAChannel channel)
   {
     switch (channel)
@@ -473,7 +490,8 @@ StartupRunEvidence runDualCPUWithStartupEvidence(
   catch (const std::exception &error)
   {
     return {StartupRunOutcome::RuntimeError, {},
-      {error.what(), inspectStartup(system), system.gs().imageTransfer()}};
+      {error.what(), inspectStartup(system), system.gs().imageTransfer(),
+        inspectGSDrawing(system.gs())}};
   }
   return {StartupRunOutcome::Completed, {execution, inspectStartup(system)}, {}};
 }
@@ -516,6 +534,18 @@ void writeStartupRuntimeErrorJsonLine(
     ",\"transferred_pixels\":" << transfer.transferredPixels <<
     ",\"direction\":" << static_cast<unsigned>(transfer.direction) <<
     ",\"active\":" << (transfer.active ? "true" : "false") << '}';
+  const auto &drawing = error.gsDrawing;
+  json << ",\"gs_drawing\":{\"primitive\":" << static_cast<unsigned>(drawing.primitive) <<
+    ",\"context\":" << static_cast<unsigned>(drawing.context) <<
+    ",\"prim\":" << drawing.prim <<
+    ",\"prmodecont\":" << drawing.prmodecont <<
+    ",\"prmode\":" << drawing.prmode <<
+    ",\"test\":" << drawing.test <<
+    ",\"frame\":" << drawing.frame <<
+    ",\"zbuf\":" << drawing.zbuf <<
+    ",\"alpha\":" << drawing.alpha <<
+    ",\"fba\":" << drawing.fba <<
+    ",\"pabe\":" << drawing.pabe << '}';
   json << "}\n";
   emitJson(output, json);
 }

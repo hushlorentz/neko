@@ -660,6 +660,65 @@ TEST_CASE("Startup runtime errors retain the attempted GS transfer parameters",
     std::string::npos);
 }
 
+TEST_CASE("Startup runtime errors retain the selected GS drawing context",
+  "[startup-failure][startup-runtime-gs]")
+{
+  for (const std::uint8_t context : {0, 1})
+  for (const bool traced : {false, true})
+  {
+    CAPTURE(context);
+    CAPTURE(traced);
+    NekoSystem system;
+    system.runDualCPUBIOS(std::vector<std::uint8_t>(BootROMImage::SIZE), 0);
+    auto &gs = system.gs();
+    const std::uint64_t prim = 6 | (context << 9) | (1 << 6);
+    const std::uint64_t test = UINT64_C(0x8000000000035a95);
+    const std::uint64_t frame = UINT64_C(0x8000000000010001);
+    const std::uint64_t zbuf = UINT64_C(0x8000000100000002);
+    const std::uint64_t alpha = UINT64_C(0x8000008000000044);
+    gs.writeRegister(GSRegisterAddress::PRIM, prim);
+    gs.writeRegister(GSRegisterAddress::PRMODECONT, UINT64_C(0x8000000000000001));
+    gs.writeRegister(GSRegisterAddress::PRMODE, UINT64_C(0x8000000000000000));
+    gs.writeRegister(context == 0 ? GSRegisterAddress::TEST_1 : GSRegisterAddress::TEST_2, test);
+    gs.writeRegister(context == 0 ? GSRegisterAddress::FRAME_1 : GSRegisterAddress::FRAME_2, frame);
+    gs.writeRegister(context == 0 ? GSRegisterAddress::ZBUF_1 : GSRegisterAddress::ZBUF_2, zbuf);
+    gs.writeRegister(context == 0 ? GSRegisterAddress::ALPHA_1 : GSRegisterAddress::ALPHA_2, alpha);
+    gs.writeRegister(context == 0 ? GSRegisterAddress::FBA_1 : GSRegisterAddress::FBA_2,
+      UINT64_C(0x8000000000000001));
+    gs.writeRegister(GSRegisterAddress::PABE, UINT64_C(0x8000000000000001));
+    gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+    REQUIRE(system.eeBus().writeQuadword(0x1000,
+      {{0x8001, 0x10000000, GIFRegisterDescriptor::AD, 0}}));
+    REQUIRE(system.eeBus().writeQuadword(0x1010,
+      {{0x00100010, 0, GSRegisterAddress::XYZ2, 0}}));
+    system.eeBus().write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+    system.eeBus().write32(EEMemoryMap::D2_MADR, 0x1000);
+    system.eeBus().write32(EEMemoryMap::D2_QWC, 2);
+    system.eeBus().write32(EEMemoryMap::D2_CHCR, GIFDMACChannelControl::START);
+    if (traced)
+    {
+      system.startTrace();
+    }
+    const auto evidence = runDualCPUWithStartupEvidence(system, 16);
+    REQUIRE(evidence.outcome == StartupRunOutcome::RuntimeError);
+    REQUIRE(evidence.error.message == "GS sprite uses unsupported pixel tests.");
+    gs.writeRegister(GSRegisterAddress::PRIM, 0);
+    gs.writeRegister(context == 0 ? GSRegisterAddress::TEST_1 : GSRegisterAddress::TEST_2, 0);
+    std::ostringstream output;
+    writeStartupRuntimeErrorJsonLine(output, evidence.error);
+    REQUIRE(output.str().find(
+      "\"gs_drawing\":{\"primitive\":6,\"context\":" + std::to_string(context) +
+      ",\"prim\":" + std::to_string(prim) +
+      ",\"prmodecont\":9223372036854775809,\"prmode\":9223372036854775808,"
+      "\"test\":" + std::to_string(test) +
+      ",\"frame\":" + std::to_string(frame) +
+      ",\"zbuf\":" + std::to_string(zbuf) +
+      ",\"alpha\":" + std::to_string(alpha) +
+      ",\"fba\":9223372036854775809,\"pabe\":9223372036854775809}") !=
+      std::string::npos);
+  }
+}
+
 TEST_CASE("Startup failure writers reject invalid boundaries without partial output",
   "[startup-failure]")
 {
