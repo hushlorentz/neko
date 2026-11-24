@@ -187,6 +187,33 @@ namespace
     return ((data >> index) & 1) != 0;
   }
 
+  bool alphaComparisonPasses(
+    std::uint8_t alpha, const GSTest &test)
+  {
+    switch (test.alphaTest)
+    {
+      case 0:
+        return false;
+      case 1:
+        return true;
+      case 2:
+        return alpha < test.alphaReference;
+      case 3:
+        return alpha <= test.alphaReference;
+      case 4:
+        return alpha == test.alphaReference;
+      case 5:
+        return alpha >= test.alphaReference;
+      case 6:
+        return alpha > test.alphaReference;
+      case 7:
+        return alpha != test.alphaReference;
+      default:
+        throw std::runtime_error(
+          "GS alpha comparison is invalid.");
+    }
+  }
+
   struct FixedPoint
   {
     std::int32_t x = 0;
@@ -768,7 +795,8 @@ void GS::validateBasicDrawing(
 
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
-  if (drawingContext.test.alphaTestEnabled)
+  if (drawingContext.test.alphaTestEnabled &&
+      drawingContext.test.alphaFail != 0)
   {
     throw std::runtime_error(
       std::string("GS ") + primitiveName +
@@ -925,6 +953,13 @@ bool GS::writeFragment(
 {
   const GSContext &drawingContext =
     checkedContext(contextIndex);
+  const std::uint8_t sourceAlpha =
+    colorChannel(sourceColor, GS_ALPHA_SHIFT);
+  if (drawingContext.test.alphaTestEnabled &&
+      !alphaComparisonPasses(sourceAlpha, drawingContext.test))
+  {
+    return false;
+  }
   const std::uint32_t destinationColor =
     readPSMCT32(contextIndex, x, y);
   if (drawingContext.test.destinationAlphaTestEnabled)
@@ -976,8 +1011,6 @@ bool GS::writeFragment(
   }
 
   std::uint32_t outputColor = sourceColor;
-  const std::uint8_t sourceAlpha =
-    colorChannel(sourceColor, GS_ALPHA_SHIFT);
   const bool blend =
     primitiveRegister.alphaBlending &&
     (!perPixelAlphaBlending ||
@@ -1444,7 +1477,8 @@ void GS::rasterizeTriangle(
 
   const std::size_t contextIndex = primitiveRegister.context;
   const GSContext &drawingContext = checkedContext(contextIndex);
-  if (drawingContext.test.alphaTestEnabled)
+  if (drawingContext.test.alphaTestEnabled &&
+      drawingContext.test.alphaFail != 0)
   {
     throw std::runtime_error(
       "GS triangle uses unsupported pixel tests.");

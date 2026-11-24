@@ -4318,9 +4318,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add the approved runtime-only GS drawing snapshot and strict legacy-
       compatible inspector support, with authored regressions and independent
       review before the user-owned commit checkpoint.
-- [ ] Establish the originating sprite's TEST configuration and manual-defined
+- [x] Establish the originating sprite's TEST configuration and manual-defined
       alpha comparison/failure-write contract through existing GS fragment
       owners; settle diagnostics and active-policy scope before implementation.
+- [x] Support all eight source-alpha comparisons with KEEP through shared
+      fragment owners, preserving other AFAIL guards, with authored
+      conformance, focused validation and independent review.
+- [ ] Verify former-fault retirement and attribute the next dependency with
+      fresh unchanged-input bounded BIOS discovery and required replay
+      comparisons; do not infer completed boot from origin-only evidence.
 
 ### Additional CD/DVD Command and Configuration Scope
 
