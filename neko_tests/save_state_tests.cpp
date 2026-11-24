@@ -1086,7 +1086,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 135 save-state layout is byte-stable",
+TEST_CASE("Version 136 save-state layout is byte-stable",
   "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model][ba0-write32]")
 {
   NekoSystem system;
@@ -1102,17 +1102,17 @@ TEST_CASE("Version 135 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 135);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 136);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 134;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 135;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040);
   const SaveStateMutation fields(state);
   REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
   REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
@@ -1421,6 +1421,18 @@ TEST_CASE("Version 135 save-state layout is byte-stable",
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
     previousVersion.begin() + core0->containerOffset);
+  const auto *clutEntries = snapshot.find("system.gs.clutEntries[0].value");
+  const auto *clut0 = snapshot.find("system.gs.contexts[0].clut.basePointer");
+  const auto *clut1 = snapshot.find("system.gs.contexts[1].clut.basePointer");
+  REQUIRE(clutEntries != nullptr);
+  REQUIRE(clut0 != nullptr);
+  REQUIRE(clut1 != nullptr);
+  previousVersion.erase(previousVersion.begin() + clutEntries->containerOffset,
+    previousVersion.begin() + clutEntries->containerOffset + 1028);
+  previousVersion.erase(previousVersion.begin() + clut1->containerOffset,
+    previousVersion.begin() + clut1->containerOffset + 6);
+  previousVersion.erase(previousVersion.begin() + clut0->containerOffset,
+    previousVersion.begin() + clut0->containerOffset + 6);
   previousVersion.erase(previousVersion.begin() + vif1Mask->containerOffset,
     previousVersion.begin() + vif1Mask->containerOffset + 3);
   previousVersion.erase(previousVersion.begin() + vif0Mask->containerOffset,
@@ -1437,7 +1449,8 @@ TEST_CASE("Version 135 save-state layout is byte-stable",
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
-      appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32](std::size_t offset)
+      appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32,
+      clutEntries, clut0, clut1](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
@@ -1445,7 +1458,10 @@ TEST_CASE("Version 135 save-state layout is byte-stable",
       (offset >= configSession->containerOffset + 7 ? 7 : 0) -
       (offset >= vif0Mask->containerOffset + 3 ? 3 : 0) -
       (offset >= vif1Mask->containerOffset + 3 ? 3 : 0) -
-      (offset > ba0Device32->containerOffset ? 1 : 0);
+      (offset > ba0Device32->containerOffset ? 1 : 0) -
+      (offset >= clutEntries->containerOffset + 1028 ? 1028 : 0) -
+      (offset >= clut0->containerOffset + 6 ? 6 : 0) -
+      (offset >= clut1->containerOffset + 6 ? 6 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

@@ -4333,9 +4333,12 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add the approved runtime-only whole-draw texture/input/output profile
       with strict legacy-compatible inspector support, authored regressions
       and independent review before the user-owned diagnostic commit.
-- [ ] Establish the originating sprite's exact texture state and manual-defined
+- [x] Establish the originating sprite's exact texture state and manual-defined
       sampling contract through existing GS texture/local-memory owners;
       settle diagnostics and active-policy scope before implementation.
+- [x] Support PSMT4 with PSMCT32/CSM1 CLUT load/retention (CLD 0-5,
+      CSA banks, TEX0/TEX2) through shared GS owners, with authored sampling/
+      persistence conformance, required full gates and independent review.
 - [ ] Verify actual BIOS texture sampling and source-alpha execution after
       the required sampling support, retaining bounded same-build replay
       comparisons and any required full conformance.

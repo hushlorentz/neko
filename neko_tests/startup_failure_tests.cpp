@@ -763,12 +763,15 @@ TEST_CASE("Startup runtime errors retain the selected GS drawing context",
     for (const auto &setting : profile)
     {
       CAPTURE(setting.name);
+      const auto expectedValue = std::string(setting.name) == "tex0"
+        ? (setting.value & ~(UINT64_C(0x3f) << 20)) | (UINT64_C(1) << 20)
+        : setting.value;
       REQUIRE(retainedProfile.find("\"" + std::string(setting.name) + "\":" +
-        std::to_string(setting.value)) != std::string::npos);
+        std::to_string(expectedValue)) != std::string::npos);
     }
     REQUIRE(retainedProfile.find(
       "\"decoded_texture\":{\"base_pointer\":4660,\"buffer_width\":3,"
-      "\"pixel_storage_mode\":20,\"width_exponent\":5,\"height_exponent\":6,"
+      "\"pixel_storage_mode\":1,\"width_exponent\":5,\"height_exponent\":6,"
       "\"rgba\":true,\"function\":2,\"maximum_mip_level\":5,"
       "\"magnification_linear\":true,\"minification_filter\":3}") != std::string::npos);
     REQUIRE(retainedProfile.find(

@@ -456,6 +456,12 @@ void GS::writeRegister(
     case GSRegisterAddress::TEX0_2:
       decodeTexture(1, data);
       break;
+    case GSRegisterAddress::TEX2_1:
+      decodeTextureSubset(0, data);
+      break;
+    case GSRegisterAddress::TEX2_2:
+      decodeTextureSubset(1, data);
+      break;
     case GSRegisterAddress::CLAMP_1:
       decodeTextureClamp(0, data);
       break;
@@ -1773,6 +1779,76 @@ void GS::decodeTexture(std::size_t index, std::uint64_t data)
   texture.function =
     (data >> GS_TEXTURE_FUNCTION_SHIFT) &
     GS_TEXTURE_FUNCTION_MASK;
+  GSClutSelection &clut = mutableContext(index).clut;
+  clut.basePointer = (data >> 37) & 0x3fff;
+  clut.pixelStorageMode = (data >> 51) & 0x0f;
+  clut.storageMode2 = bit(data, 55);
+  clut.offset = (data >> 56) & 0x1f;
+  clut.loadControl = (data >> 61) & 0x07;
+  loadClut(checkedContext(index));
+}
+
+void GS::decodeTextureSubset(std::size_t index, std::uint64_t data)
+{
+  constexpr std::uint64_t subsetMask = UINT64_C(0xffffffe003f00000);
+  const auto address = index == 0 ?
+    GSRegisterAddress::TEX0_1 : GSRegisterAddress::TEX0_2;
+  registers[address] = (registers[address] & ~subsetMask) | (data & subsetMask);
+  decodeTexture(index, registers[address]);
+}
+
+void GS::validateClutSelection(const GSClutSelection &clut) const
+{
+  if (clut.pixelStorageMode != GSPixelStorageMode::PSMCT32 ||
+      clut.storageMode2)
+  {
+    throw std::runtime_error(
+      "GS indexed textures require a PSMCT32 CSM1 CLUT.");
+  }
+  if (clut.offset > 15)
+  {
+    throw std::runtime_error(
+      "GS PSMCT32 CLUT entry offset must be from 0 to 15.");
+  }
+}
+
+void GS::loadClut(const GSContext &context)
+{
+  const auto psm = context.texture.pixelStorageMode;
+  if (psm != GSPixelStorageMode::PSMT4 && psm != 0x13 &&
+      psm != 0x1b && psm != 0x24 && psm != 0x2c)
+  {
+    return;
+  }
+  const GSClutSelection &clut = context.clut;
+  if (clut.loadControl == 0)
+  {
+    return;
+  }
+  if (clut.loadControl > 5)
+  {
+    throw std::runtime_error("GS CLUT load control 6 and 7 are not implemented.");
+  }
+  const std::size_t slot = clut.loadControl & 1;
+  if (clut.loadControl >= 4 &&
+      clutBasePointers[slot] == clut.basePointer)
+  {
+    return;
+  }
+  if (psm != GSPixelStorageMode::PSMT4)
+  {
+    throw std::runtime_error("GS CLUT loading requires PSMT4.");
+  }
+  validateClutSelection(clut);
+  for (std::size_t entry = 0; entry < 16; ++entry)
+  {
+    clutEntries[clut.offset * 16 + entry] = localMemory[psmct32WordAddress(
+      clut.basePointer, 1, entry % 8, entry / 8)];
+  }
+  if (clut.loadControl >= 2)
+  {
+    clutBasePointers[slot] = clut.basePointer;
+  }
 }
 
 void GS::decodeTextureSampling(
@@ -1917,10 +1993,20 @@ const GSContext &GS::checkedTextureContext(
       "GS texture sampling requires a valid buffer width.");
   }
   if (texture.pixelStorageMode != GSPixelStorageMode::PSMCT32 &&
-      texture.pixelStorageMode != GSPixelStorageMode::PSMCT24)
+      texture.pixelStorageMode != GSPixelStorageMode::PSMCT24 &&
+      texture.pixelStorageMode != GSPixelStorageMode::PSMT4)
   {
     throw std::runtime_error(
-      "GS texture sampling requires PSMCT32 or PSMCT24.");
+      "GS texture sampling requires PSMCT32, PSMCT24 or PSMT4.");
+  }
+  if (texture.pixelStorageMode == GSPixelStorageMode::PSMT4)
+  {
+    if (texture.bufferWidth > 32 || texture.bufferWidth % 2 != 0)
+    {
+      throw std::runtime_error(
+        "GS PSMT4 sampling requires an even buffer width from 2 to 32.");
+    }
+    validateClutSelection(samplingContext.clut);
   }
   if (texture.widthExponent > GS_TEXTURE_MAXIMUM_EXPONENT ||
       texture.heightExponent > GS_TEXTURE_MAXIMUM_EXPONENT)
@@ -2010,6 +2096,16 @@ std::uint32_t GS::readTextureTexel(
     samplingContext.textureClamp.vertical,
     samplingContext.textureClamp.minimumV,
     samplingContext.textureClamp.maximumV);
+  if (texture.pixelStorageMode == GSPixelStorageMode::PSMT4)
+  {
+    const auto address = psmt4NibbleAddress(
+      texture.basePointer, texture.bufferWidth,
+      static_cast<std::uint16_t>(u), static_cast<std::uint16_t>(v));
+    const auto index =
+      (localMemory[address / 8] >> ((address % 8) * GS_NIBBLE_BITS)) &
+      GS_NIBBLE_MASK;
+    return clutEntries[samplingContext.clut.offset * 16 + index];
+  }
   const std::uint32_t texel = localMemory[psmct32WordAddress(
     texture.basePointer,
     texture.bufferWidth,

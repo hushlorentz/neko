@@ -208,6 +208,15 @@ struct GSTextureClamp
   std::uint16_t maximumV = 0;
 };
 
+struct GSClutSelection
+{
+  std::uint16_t basePointer = 0;
+  std::uint8_t pixelStorageMode = 0;
+  bool storageMode2 = false;
+  std::uint8_t offset = 0;
+  std::uint8_t loadControl = 0;
+};
+
 struct GSContext
 {
   GSFrame frame;
@@ -219,6 +228,7 @@ struct GSContext
   GSDepthBuffer depthBuffer;
   GSTexture texture;
   GSTextureClamp textureClamp;
+  GSClutSelection clut;
 };
 
 struct GSImageTransfer
@@ -394,6 +404,9 @@ class GS : public GIFRegisterWriteHandler
       std::size_t index,
       std::uint64_t data);
     void decodeTexture(std::size_t index, std::uint64_t data);
+    void decodeTextureSubset(std::size_t index, std::uint64_t data);
+    void loadClut(const GSContext &context);
+    void validateClutSelection(const GSClutSelection &clut) const;
     void decodeTextureSampling(
       std::size_t index,
       std::uint64_t data);
@@ -495,6 +508,8 @@ class GS : public GIFRegisterWriteHandler
     std::uint64_t renderedTriangles = 0;
     std::uint64_t writtenPixels = 0;
     std::array<GSContext, CONTEXT_COUNT> contexts = {};
+    std::array<std::uint32_t, 256> clutEntries = {};
+    std::array<std::uint16_t, 2> clutBasePointers = {};
     GSImageTransfer transfer;
     bool reverseHostInterface = false;
     bool perPixelAlphaBlending = false;

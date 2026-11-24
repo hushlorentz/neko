@@ -539,6 +539,14 @@ namespace
       auto field = writer->scope("textureClamp");
       writeGSTextureClamp(writer, context.textureClamp);
     }
+    {
+      auto field = writer->scope("clut");
+      writer->writeFieldU16("basePointer", context.clut.basePointer);
+      writer->writeFieldU8("pixelStorageMode", context.clut.pixelStorageMode);
+      writer->writeFieldBool("storageMode2", context.clut.storageMode2);
+      writer->writeFieldU8("offset", context.clut.offset);
+      writer->writeFieldU8("loadControl", context.clut.loadControl);
+    }
   }
 
   GSContext readGSContext(SaveStateReader *reader)
@@ -577,6 +585,19 @@ namespace
     {
       auto field = reader->scope("textureClamp");
       context.textureClamp = readGSTextureClamp(reader);
+    }
+    {
+      auto field = reader->scope("clut");
+      context.clut.basePointer = reader->readFieldU16("basePointer");
+      context.clut.pixelStorageMode = reader->readFieldU8("pixelStorageMode");
+      context.clut.storageMode2 = reader->readFieldBool("storageMode2");
+      context.clut.offset = reader->readFieldU8("offset");
+      context.clut.loadControl = reader->readFieldU8("loadControl");
+      reader->requireField(
+        context.clut.basePointer <= 0x3fff &&
+        context.clut.pixelStorageMode <= 0x0f &&
+        context.clut.offset <= 31 && context.clut.loadControl <= 7,
+        "GS CLUT selection is invalid");
     }
     return context;
   }
@@ -995,6 +1016,22 @@ void NekoSaveStateCodec::writeGS(
   writer->writeFieldBool(
     "perPixelAlphaBlending",
     gs.perPixelAlphaBlending);
+  {
+    auto field = writer->scope("clutEntries");
+    for (std::size_t index = 0; index < gs.clutEntries.size(); ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("value", gs.clutEntries[index]);
+    }
+  }
+  {
+    auto field = writer->scope("clutBasePointers");
+    for (std::size_t index = 0; index < gs.clutBasePointers.size(); ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU16("value", gs.clutBasePointers[index]);
+    }
+  }
   writer->writeFieldSize("localMemorySize", gs.localMemory.size());
   writer->writeFieldRange(
     "localMemory",
@@ -1112,6 +1149,24 @@ void NekoSaveStateCodec::readGS(
     reader->readFieldBool("reverseHostInterface");
   gs->perPixelAlphaBlending =
     reader->readFieldBool("perPixelAlphaBlending");
+  {
+    auto field = reader->scope("clutEntries");
+    for (std::size_t index = 0; index < gs->clutEntries.size(); ++index)
+    {
+      auto element = reader->element(index);
+      gs->clutEntries[index] = reader->readFieldU32("value");
+    }
+  }
+  {
+    auto field = reader->scope("clutBasePointers");
+    for (std::size_t index = 0; index < gs->clutBasePointers.size(); ++index)
+    {
+      auto element = reader->element(index);
+      gs->clutBasePointers[index] = reader->readFieldU16("value");
+      require(gs->clutBasePointers[index] <= 0x3fff,
+        "GS remembered CLUT base pointer is invalid");
+    }
+  }
   const std::uint32_t localMemorySize =
     reader->readFieldU32("localMemorySize");
   require(
@@ -1160,6 +1215,8 @@ void NekoSaveStateCodec::commitGS(
     source->renderedTriangles;
   destination->writtenPixels = source->writtenPixels;
   destination->contexts = source->contexts;
+  destination->clutEntries = source->clutEntries;
+  destination->clutBasePointers = source->clutBasePointers;
   destination->transfer = source->transfer;
   destination->reverseHostInterface =
     source->reverseHostInterface;

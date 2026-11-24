@@ -754,7 +754,9 @@ pixel-storage mode, dimension exponents, RGBA selection, texture function,
 maximum mip level and magnification/minification controls. `decoded_clamp`
 copies its horizontal/vertical modes and minimum/maximum U/V values.
 Raw programming is deliberately separate from decoded owner state: recording
-TEX2 or CLUT controls does not imply their behavior is implemented.
+CLUT controls does not prove a supported or completed palette load.
+`tex0` is the effective TEX0 register image, including PSM and CLUT fields
+updated by TEX2 writes; `tex2` retains the last TEX2 write separately.
 These are retained current inputs/settings, not an assembled vertex history,
 palette-buffer contents, or proof of a CLUT load. Historical drawing snapshots
 without `profile` remain valid; a present profile must have the complete strict

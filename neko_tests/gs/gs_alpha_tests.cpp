@@ -273,9 +273,9 @@ TEST_CASE("GS source-alpha KEEP retains unsupported drawing boundaries",
   {
     gs.writeRegister(GSRegisterAddress::PRIM, UINT64_C(0x110));
     gs.writeRegister(GSRegisterAddress::TEX0_1,
-      (UINT64_C(1) << 14) | (UINT64_C(0x14) << 20));
+      (UINT64_C(1) << 14) | (UINT64_C(0x13) << 20));
     REQUIRE_THROWS_WITH(drawPoint(&gs, 1, 2, 3, 0),
-      "GS texture sampling requires PSMCT32 or PSMCT24.");
+      "GS texture sampling requires PSMCT32, PSMCT24 or PSMT4.");
   }
   SECTION("Unsupported drawing attributes remain rejected")
   {
