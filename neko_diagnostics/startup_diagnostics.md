@@ -745,6 +745,21 @@ field, validates present payloads strictly, and preserves them in summary,
 event and instruction views and runtime comparisons. Capturing this data adds
 no per-cycle observation, trace events or saved architectural state.
 
+New drawing snapshots additionally contain an optional `profile` object.
+It preserves the selected context's raw `tex0`, `tex1`, `tex2`, `clamp`,
+`miptbp1`, `miptbp2`, `xyoffset`, `scissor`, and global `texa`, `texclut`,
+`colclamp`, `rgbaq`, `st`, `uv`, all as unsigned 64-bit values.
+`decoded_texture` copies the implemented owner's base pointer, buffer width,
+pixel-storage mode, dimension exponents, RGBA selection, texture function,
+maximum mip level and magnification/minification controls. `decoded_clamp`
+copies its horizontal/vertical modes and minimum/maximum U/V values.
+Raw programming is deliberately separate from decoded owner state: recording
+TEX2 or CLUT controls does not imply their behavior is implemented.
+These are retained current inputs/settings, not an assembled vertex history,
+palette-buffer contents, or proof of a CLUT load. Historical drawing snapshots
+without `profile` remain valid; a present profile must have the complete strict
+shape and field bounds. Views and comparisons preserve the entire object.
+
 Because a synchronous device exception may occur before the scheduler advances
 its clock, diagnostic replay includes at most one tick beyond the reported
 clock, capped by the original native ceiling. Error identity and full retained

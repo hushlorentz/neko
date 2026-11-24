@@ -310,6 +310,34 @@ def validate_event(record):
         uint(value, "cdvd.result", 8)
 
 
+def validate_gs_drawing_profile(profile):
+    registers = {
+        "tex0", "tex1", "tex2", "clamp", "texa", "texclut", "miptbp1", "miptbp2",
+        "colclamp", "rgbaq", "st", "uv", "xyoffset", "scissor",
+    }
+    if profile.keys() != registers | {"decoded_texture", "decoded_clamp"}:
+        raise ValueError("runtime GS drawing profile has invalid fields")
+    for field in registers:
+        uint(profile[field], f"gs_drawing.profile.{field}")
+    texture = require(profile, "decoded_texture", dict)
+    widths = dict(base_pointer=14, buffer_width=6, pixel_storage_mode=6,
+                  width_exponent=4, height_exponent=4, function=2,
+                  maximum_mip_level=3, minification_filter=3)
+    if texture.keys() != widths.keys() | {"rgba", "magnification_linear"}:
+        raise ValueError("runtime GS decoded texture has invalid fields")
+    for field, bits in widths.items():
+        uint(texture[field], f"gs_drawing.profile.decoded_texture.{field}", bits)
+    require(texture, "rgba", bool)
+    require(texture, "magnification_linear", bool)
+    clamp = require(profile, "decoded_clamp", dict)
+    widths = dict(horizontal=2, vertical=2, minimum_u=10, maximum_u=10,
+                  minimum_v=10, maximum_v=10)
+    if clamp.keys() != widths.keys():
+        raise ValueError("runtime GS decoded clamp has invalid fields")
+    for field, bits in widths.items():
+        uint(clamp[field], f"gs_drawing.profile.decoded_clamp.{field}", bits)
+
+
 def validate_record(record):
     kind = require(record, "type", str)
     if kind not in RECORD_TYPES:
@@ -368,10 +396,12 @@ def validate_record(record):
                 widths = dict(primitive=3, context=1, prim=64, prmodecont=64,
                               prmode=64, test=64, frame=64, zbuf=64, alpha=64,
                               fba=64, pabe=64)
-                if drawing.keys() != widths.keys():
+                if drawing.keys() - {"profile"} != widths.keys():
                     raise ValueError("runtime GS drawing state has invalid fields")
                 for field, bits in widths.items():
                     uint(drawing[field], f"gs_drawing.{field}", bits)
+                if "profile" in drawing:
+                    validate_gs_drawing_profile(require(drawing, "profile", dict))
     elif kind == "startup_trace_summary":
         uint(record.get("event_limit"), "event_limit")
         uint(record.get("captured_events"), "captured_events")

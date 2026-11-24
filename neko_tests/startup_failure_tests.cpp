@@ -686,6 +686,43 @@ TEST_CASE("Startup runtime errors retain the selected GS drawing context",
     gs.writeRegister(context == 0 ? GSRegisterAddress::FBA_1 : GSRegisterAddress::FBA_2,
       UINT64_C(0x8000000000000001));
     gs.writeRegister(GSRegisterAddress::PABE, UINT64_C(0x8000000000000001));
+    struct ProfileRegister
+    {
+      const char *name;
+      std::uint8_t address;
+      std::uint64_t value;
+    };
+    const ProfileRegister profile[] = {
+      {"tex0", context == 0 ? GSRegisterAddress::TEX0_1 : GSRegisterAddress::TEX0_2,
+        UINT64_C(0x8000000000001234) | (UINT64_C(3) << 14) |
+        (UINT64_C(20) << 20) | (UINT64_C(5) << 26) |
+        (UINT64_C(6) << 30) | (UINT64_C(1) << 34) | (UINT64_C(2) << 35)},
+      {"tex1", context == 0 ? GSRegisterAddress::TEX1_1 : GSRegisterAddress::TEX1_2,
+        UINT64_C(0x80000000000000f4)},
+      {"tex2", context == 0 ? GSRegisterAddress::TEX2_1 : GSRegisterAddress::TEX2_2,
+        UINT64_C(0x8000000000100000)},
+      {"clamp", context == 0 ? GSRegisterAddress::CLAMP_1 : GSRegisterAddress::CLAMP_2,
+        UINT64_C(0x800000000000000e) | (UINT64_C(1) << 4) |
+        (UINT64_C(100) << 14) | (UINT64_C(3) << 24) | (UINT64_C(200) << 34)},
+      {"texa", GSRegisterAddress::TEXA, UINT64_C(0x8000008000000080)},
+      {"texclut", GSRegisterAddress::TEXCLUT, UINT64_C(0x8000000000000041)},
+      {"miptbp1", context == 0 ? GSRegisterAddress::MIPTBP1_1 : GSRegisterAddress::MIPTBP1_2,
+        UINT64_C(0x8000000000000042)},
+      {"miptbp2", context == 0 ? GSRegisterAddress::MIPTBP2_1 : GSRegisterAddress::MIPTBP2_2,
+        UINT64_C(0x8000000000000043)},
+      {"colclamp", GSRegisterAddress::COLCLAMP, UINT64_C(0x8000000000000001)},
+      {"rgbaq", GSRegisterAddress::RGBAQ, UINT64_C(0x8000000080402010)},
+      {"st", GSRegisterAddress::ST, UINT64_C(0x800000003f800000)},
+      {"uv", GSRegisterAddress::UV, UINT64_C(0x8000000000200010)},
+      {"xyoffset", context == 0 ? GSRegisterAddress::XYOFFSET_1 : GSRegisterAddress::XYOFFSET_2,
+        UINT64_C(0x8000000100000002)},
+      {"scissor", context == 0 ? GSRegisterAddress::SCISSOR_1 : GSRegisterAddress::SCISSOR_2,
+        UINT64_C(0x8000000100020003)}
+    };
+    for (const auto &setting : profile)
+    {
+      gs.writeRegister(setting.address, setting.value);
+    }
     gs.writeRegister(GSRegisterAddress::XYZ2, 0);
     REQUIRE(system.eeBus().writeQuadword(0x1000,
       {{0x8001, 0x10000000, GIFRegisterDescriptor::AD, 0}}));
@@ -704,6 +741,10 @@ TEST_CASE("Startup runtime errors retain the selected GS drawing context",
     REQUIRE(evidence.error.message == "GS sprite uses unsupported pixel tests.");
     gs.writeRegister(GSRegisterAddress::PRIM, 0);
     gs.writeRegister(context == 0 ? GSRegisterAddress::TEST_1 : GSRegisterAddress::TEST_2, 0);
+    for (const auto &setting : profile)
+    {
+      gs.writeRegister(setting.address, 0);
+    }
     std::ostringstream output;
     writeStartupRuntimeErrorJsonLine(output, evidence.error);
     REQUIRE(output.str().find(
@@ -714,8 +755,25 @@ TEST_CASE("Startup runtime errors retain the selected GS drawing context",
       ",\"frame\":" + std::to_string(frame) +
       ",\"zbuf\":" + std::to_string(zbuf) +
       ",\"alpha\":" + std::to_string(alpha) +
-      ",\"fba\":9223372036854775809,\"pabe\":9223372036854775809}") !=
+      ",\"fba\":9223372036854775809,\"pabe\":9223372036854775809") !=
       std::string::npos);
+    const auto profileStart = output.str().find("\"profile\":{");
+    REQUIRE(profileStart != std::string::npos);
+    const auto retainedProfile = output.str().substr(profileStart);
+    for (const auto &setting : profile)
+    {
+      CAPTURE(setting.name);
+      REQUIRE(retainedProfile.find("\"" + std::string(setting.name) + "\":" +
+        std::to_string(setting.value)) != std::string::npos);
+    }
+    REQUIRE(retainedProfile.find(
+      "\"decoded_texture\":{\"base_pointer\":4660,\"buffer_width\":3,"
+      "\"pixel_storage_mode\":20,\"width_exponent\":5,\"height_exponent\":6,"
+      "\"rgba\":true,\"function\":2,\"maximum_mip_level\":5,"
+      "\"magnification_linear\":true,\"minification_filter\":3}") != std::string::npos);
+    REQUIRE(retainedProfile.find(
+      "\"decoded_clamp\":{\"horizontal\":2,\"vertical\":3,\"minimum_u\":1,"
+      "\"maximum_u\":100,\"minimum_v\":3,\"maximum_v\":200}") != std::string::npos);
   }
 }
 

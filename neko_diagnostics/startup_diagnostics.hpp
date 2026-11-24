@@ -185,6 +185,26 @@ struct StartupRunSummary
 
 enum class StartupExecutionBoundary { CompleteCycle, IncompleteCycle };
 
+struct StartupGSDrawingProfile
+{
+  std::uint64_t tex0 = 0;
+  std::uint64_t tex1 = 0;
+  std::uint64_t tex2 = 0;
+  std::uint64_t clamp = 0;
+  std::uint64_t texa = 0;
+  std::uint64_t texclut = 0;
+  std::uint64_t miptbp1 = 0;
+  std::uint64_t miptbp2 = 0;
+  std::uint64_t colclamp = 0;
+  std::uint64_t rgbaq = 0;
+  std::uint64_t st = 0;
+  std::uint64_t uv = 0;
+  std::uint64_t xyoffset = 0;
+  std::uint64_t scissor = 0;
+  GSTexture decodedTexture;
+  GSTextureClamp decodedClamp;
+};
+
 struct StartupGSDrawingState
 {
   GSPrimitiveType primitive = GSPrimitiveType::Point;
@@ -198,6 +218,7 @@ struct StartupGSDrawingState
   std::uint64_t alpha = 0;
   std::uint64_t fba = 0;
   std::uint64_t pabe = 0;
+  StartupGSDrawingProfile profile;
 };
 
 struct StartupRuntimeError

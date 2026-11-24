@@ -12,6 +12,23 @@ import unittest
 SCRIPT = Path(__file__).with_name("inspect_startup.py")
 
 
+def drawing_profile():
+    return dict(
+        tex0=0x8000000000001234, tex1=0x80000000000000f4,
+        tex2=0x8000000000100000, clamp=0x800000000000000e,
+        texa=0x8000008000000080, texclut=0x8000000000000041,
+        miptbp1=0x8000000000000042, miptbp2=0x8000000000000043,
+        colclamp=0x8000000000000001, rgbaq=0x8000000080402010,
+        st=0x800000003f800000, uv=0x8000000000200010,
+        xyoffset=0x8000000100000002, scissor=0x8000000100020003,
+        decoded_texture=dict(
+            base_pointer=4660, buffer_width=3, pixel_storage_mode=20,
+            width_exponent=5, height_exponent=6, rgba=True, function=2,
+            maximum_mip_level=5, magnification_linear=True, minification_filter=3),
+        decoded_clamp=dict(horizontal=2, vertical=3, minimum_u=1, maximum_u=100,
+                           minimum_v=3, maximum_v=200))
+
+
 def event(cycle, cpu, kind, values):
     return dict(type="trace_event", master_cycle=cycle, subsystem=cpu,
                 event_type=kind, values=values)
@@ -886,6 +903,76 @@ class InspectorTests(unittest.TestCase):
                 rows[1] = dict(type="startup_runtime_error", run=None,
                                execution_boundary="incomplete_cycle", message="authored error",
                                snapshot=rows[1]["snapshot"], gs_drawing=payload)
+                self.write(self.path, rows)
+                self.invoke("summary", self.path, status=2)
+
+    def test_runtime_drawing_profile_survives_views_and_comparisons(self):
+        drawing = dict(primitive=6, context=1, prim=0x246, prmodecont=1, prmode=0,
+                       test=0x35a95, frame=0x10001, zbuf=0x100000002,
+                       alpha=0x44, fba=1, pabe=1, profile=drawing_profile())
+        rows = records()
+        rows[1] = dict(type="startup_runtime_error", run=None,
+                       execution_boundary="incomplete_cycle", message="authored draw error",
+                       snapshot=rows[1]["snapshot"], gs_drawing=drawing)
+        rows[-1]["execution_boundary"] = "incomplete_cycle"
+        self.write(self.path, rows)
+        for command in ("summary", "events", "instructions"):
+            with self.subTest(command=command):
+                self.assertEqual(self.report(command, self.path)["gs_drawing"], drawing)
+        other = self.path.with_name("other.jsonl")
+        for group, field in ((None, "tex0"),
+                             ("decoded_texture", "pixel_storage_mode"),
+                             ("decoded_clamp", "maximum_u")):
+            with self.subTest(group=group, field=field):
+                profile = drawing_profile()
+                target = profile if group is None else profile[group]
+                target[field] += 1
+                rows[1]["gs_drawing"] = {**drawing, "profile": profile}
+                self.write(other, rows)
+                report = self.report("compare", self.path, other,
+                                     "--mode", "continuation", status=1)
+                suffix = field if group is None else f"{group}.{field}"
+                self.assertEqual(report["first_difference"],
+                                 f"$.result.gs_drawing.profile.{suffix}")
+
+    def test_runtime_drawing_profile_rejects_malformed_optional_payloads(self):
+        profile = drawing_profile()
+        invalid = [None, [], {**profile, "extra": 0},
+                   {key: value for key, value in profile.items() if key != "tex2"}]
+        invalid += [{**profile, field: value} for field, value in (
+            ("tex0", 1 << 64), ("texclut", -1), ("colclamp", True), ("rgbaq", "0"))]
+        for group in ("decoded_texture", "decoded_clamp"):
+            invalid += [{**profile, group: value} for value in (None, [], {})]
+            invalid.append({**profile, group: {**profile[group], "extra": 0}})
+        for group, field, value in (
+                ("decoded_texture", "base_pointer", 1 << 14),
+                ("decoded_texture", "buffer_width", 64),
+                ("decoded_texture", "pixel_storage_mode", 64),
+                ("decoded_texture", "width_exponent", 16),
+                ("decoded_texture", "height_exponent", -1),
+                ("decoded_texture", "function", 4),
+                ("decoded_texture", "maximum_mip_level", 8),
+                ("decoded_texture", "minification_filter", 8),
+                ("decoded_texture", "rgba", 1),
+                ("decoded_texture", "magnification_linear", 0),
+                ("decoded_clamp", "horizontal", 4),
+                ("decoded_clamp", "vertical", True),
+                ("decoded_clamp", "minimum_u", 1024),
+                ("decoded_clamp", "maximum_u", -1),
+                ("decoded_clamp", "minimum_v", "0"),
+                ("decoded_clamp", "maximum_v", 1024)):
+            invalid.append({**profile, group: {**profile[group], field: value}})
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                rows = records(False)
+                rows[1] = dict(
+                    type="startup_runtime_error", run=None,
+                    execution_boundary="incomplete_cycle", message="authored error",
+                    snapshot=rows[1]["snapshot"],
+                    gs_drawing=dict(primitive=6, context=1, prim=0x246, prmodecont=1,
+                                    prmode=0, test=0x35a95, frame=0x10001,
+                                    zbuf=0x100000002, alpha=0x44, fba=1, pabe=1,
+                                    profile=payload))
                 self.write(self.path, rows)
                 self.invoke("summary", self.path, status=2)
 

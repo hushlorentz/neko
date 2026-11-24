@@ -4324,9 +4324,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Support all eight source-alpha comparisons with KEEP through shared
       fragment owners, preserving other AFAIL guards, with authored
       conformance, focused validation and independent review.
-- [ ] Verify former-fault retirement and attribute the next dependency with
-      fresh unchanged-input bounded BIOS discovery and required replay
-      comparisons; do not infer completed boot from origin-only evidence.
+- [x] Attribute alpha-admission guard retirement and the next dependency with
+      bounded unchanged-input discovery and runtime replay comparisons;
+      retain actual source-alpha BIOS execution as a blocked acceptance gate.
+
+### GS Texture Sampling Dependency
+
+- [x] Add the approved runtime-only whole-draw texture/input/output profile
+      with strict legacy-compatible inspector support, authored regressions
+      and independent review before the user-owned diagnostic commit.
+- [ ] Establish the originating sprite's exact texture state and manual-defined
+      sampling contract through existing GS texture/local-memory owners;
+      settle diagnostics and active-policy scope before implementation.
+- [ ] Verify actual BIOS texture sampling and source-alpha execution after
+      the required sampling support, retaining bounded same-build replay
+      comparisons and any required full conformance.
 
 ### Additional CD/DVD Command and Configuration Scope
 

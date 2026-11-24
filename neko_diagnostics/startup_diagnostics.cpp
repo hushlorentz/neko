@@ -63,6 +63,27 @@ namespace
     return value ? "true" : "false";
   }
 
+  StartupGSDrawingProfile inspectGSDrawingProfile(const GS &gs, std::uint8_t context)
+  {
+    return {
+      gs.registerValue(context == 0 ? GSRegisterAddress::TEX0_1 : GSRegisterAddress::TEX0_2),
+      gs.registerValue(context == 0 ? GSRegisterAddress::TEX1_1 : GSRegisterAddress::TEX1_2),
+      gs.registerValue(context == 0 ? GSRegisterAddress::TEX2_1 : GSRegisterAddress::TEX2_2),
+      gs.registerValue(context == 0 ? GSRegisterAddress::CLAMP_1 : GSRegisterAddress::CLAMP_2),
+      gs.registerValue(GSRegisterAddress::TEXA),
+      gs.registerValue(GSRegisterAddress::TEXCLUT),
+      gs.registerValue(context == 0 ? GSRegisterAddress::MIPTBP1_1 : GSRegisterAddress::MIPTBP1_2),
+      gs.registerValue(context == 0 ? GSRegisterAddress::MIPTBP2_1 : GSRegisterAddress::MIPTBP2_2),
+      gs.registerValue(GSRegisterAddress::COLCLAMP),
+      gs.registerValue(GSRegisterAddress::RGBAQ),
+      gs.registerValue(GSRegisterAddress::ST),
+      gs.registerValue(GSRegisterAddress::UV),
+      gs.registerValue(context == 0 ? GSRegisterAddress::XYOFFSET_1 : GSRegisterAddress::XYOFFSET_2),
+      gs.registerValue(context == 0 ? GSRegisterAddress::SCISSOR_1 : GSRegisterAddress::SCISSOR_2),
+      gs.texture(context), gs.context(context).textureClamp
+    };
+  }
+
   StartupGSDrawingState inspectGSDrawing(const GS &gs)
   {
     const auto &primitive = gs.primitive();
@@ -76,8 +97,36 @@ namespace
       gs.registerValue(primitive.context == 0 ? GSRegisterAddress::ZBUF_1 : GSRegisterAddress::ZBUF_2),
       gs.registerValue(primitive.context == 0 ? GSRegisterAddress::ALPHA_1 : GSRegisterAddress::ALPHA_2),
       gs.registerValue(primitive.context == 0 ? GSRegisterAddress::FBA_1 : GSRegisterAddress::FBA_2),
-      gs.registerValue(GSRegisterAddress::PABE)
+      gs.registerValue(GSRegisterAddress::PABE),
+      inspectGSDrawingProfile(gs, primitive.context)
     };
+  }
+
+  void writeGSDrawingProfile(std::ostream &output, const StartupGSDrawingProfile &profile)
+  {
+    output << "{\"tex0\":" << profile.tex0 <<
+      ",\"tex1\":" << profile.tex1 << ",\"tex2\":" << profile.tex2 <<
+      ",\"clamp\":" << profile.clamp << ",\"texa\":" << profile.texa <<
+      ",\"texclut\":" << profile.texclut << ",\"miptbp1\":" << profile.miptbp1 <<
+      ",\"miptbp2\":" << profile.miptbp2 << ",\"colclamp\":" << profile.colclamp <<
+      ",\"rgbaq\":" << profile.rgbaq << ",\"st\":" << profile.st << ",\"uv\":" << profile.uv <<
+      ",\"xyoffset\":" << profile.xyoffset << ",\"scissor\":" << profile.scissor;
+    const auto &texture = profile.decodedTexture;
+    output << ",\"decoded_texture\":{\"base_pointer\":" << texture.basePointer <<
+      ",\"buffer_width\":" << static_cast<unsigned>(texture.bufferWidth) <<
+      ",\"pixel_storage_mode\":" << static_cast<unsigned>(texture.pixelStorageMode) <<
+      ",\"width_exponent\":" << static_cast<unsigned>(texture.widthExponent) <<
+      ",\"height_exponent\":" << static_cast<unsigned>(texture.heightExponent) <<
+      ",\"rgba\":" << jsonBoolean(texture.rgba) <<
+      ",\"function\":" << static_cast<unsigned>(texture.function) <<
+      ",\"maximum_mip_level\":" << static_cast<unsigned>(texture.maximumMipLevel) <<
+      ",\"magnification_linear\":" << jsonBoolean(texture.magnificationLinear) <<
+      ",\"minification_filter\":" << static_cast<unsigned>(texture.minificationFilter) << '}';
+    const auto &clamp = profile.decodedClamp;
+    output << ",\"decoded_clamp\":{\"horizontal\":" << static_cast<unsigned>(clamp.horizontal) <<
+      ",\"vertical\":" << static_cast<unsigned>(clamp.vertical) <<
+      ",\"minimum_u\":" << clamp.minimumU << ",\"maximum_u\":" << clamp.maximumU <<
+      ",\"minimum_v\":" << clamp.minimumV << ",\"maximum_v\":" << clamp.maximumV << "}}";
   }
 
   unsigned iopChannelNumber(IOPDMAChannel channel)
@@ -545,8 +594,9 @@ void writeStartupRuntimeErrorJsonLine(
     ",\"zbuf\":" << drawing.zbuf <<
     ",\"alpha\":" << drawing.alpha <<
     ",\"fba\":" << drawing.fba <<
-    ",\"pabe\":" << drawing.pabe << '}';
-  json << "}\n";
+    ",\"pabe\":" << drawing.pabe << ",\"profile\":";
+  writeGSDrawingProfile(json, drawing.profile);
+  json << "}}\n";
   emitJson(output, json);
 }
 
