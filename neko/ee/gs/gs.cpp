@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "gs.hpp"
 
@@ -777,6 +778,75 @@ void GS::queueCurrentVertex()
 void GS::dispatchPrimitive(
   const PrimitiveAssemblyResult &assembly)
 {
+  if (drawObserver && drawObserver->captureDraw())
+  {
+    observePrimitive(assembly);
+    return;
+  }
+  rasterizePrimitive(assembly);
+}
+
+void GS::setDrawObserver(std::shared_ptr<GSDrawObserver> observer)
+{
+  if (activeDrawObservation != nullptr)
+  {
+    throw std::logic_error("Cannot replace a GS observer during a draw.");
+  }
+  drawObserver = std::move(observer);
+}
+
+void GS::observePrimitive(const PrimitiveAssemblyResult &assembly)
+{
+  GSDrawObservation draw;
+  draw.primitive = primitiveRegister;
+  draw.context = checkedContext(primitiveRegister.context);
+  draw.vertices = assembly.vertices;
+  draw.colors = assembly.colors;
+  draw.textureCoordinates = assembly.textureCoordinates;
+  const auto context = primitiveRegister.context;
+  const std::uint8_t addresses[] = {
+    GSRegisterAddress::PRIM, GSRegisterAddress::PRMODECONT,
+    GSRegisterAddress::PRMODE,
+    static_cast<std::uint8_t>(GSRegisterAddress::FRAME_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::ZBUF_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::TEST_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::ALPHA_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::FBA_1 + context),
+    GSRegisterAddress::PABE,
+    static_cast<std::uint8_t>(GSRegisterAddress::TEX0_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::TEX1_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::TEX2_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::CLAMP_1 + context),
+    GSRegisterAddress::TEXA, GSRegisterAddress::TEXCLUT,
+    static_cast<std::uint8_t>(GSRegisterAddress::MIPTBP1_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::MIPTBP2_1 + context),
+    GSRegisterAddress::COLCLAMP,
+    static_cast<std::uint8_t>(GSRegisterAddress::XYOFFSET_1 + context),
+    static_cast<std::uint8_t>(GSRegisterAddress::SCISSOR_1 + context)
+  };
+  for (std::size_t index = 0; index < draw.registers.size(); ++index)
+  {
+    draw.registers[index] = {addresses[index], registers[addresses[index]]};
+  }
+  struct Publish
+  {
+    GSDrawObservation *&active;
+    std::shared_ptr<GSDrawObserver> observer;
+    GSDrawObservation &draw;
+    ~Publish()
+    {
+      active = nullptr;
+      observer->observe(draw);
+    }
+  } publish{activeDrawObservation, drawObserver, draw};
+  activeDrawObservation = &draw;
+  rasterizePrimitive(assembly);
+  draw.completed = true;
+}
+
+void GS::rasterizePrimitive(
+  const PrimitiveAssemblyResult &assembly)
+{
   switch (assembly.type)
   {
     case GSPrimitiveType::Point:
@@ -903,6 +973,21 @@ std::uint32_t GS::shadeTexturedFragment(
     textureState.magnificationLinear && textureState.minificationFilter == 1 ?
     sampleTextureBilinear(contextIndex, u, v) :
     sampleTextureNearest(contextIndex, u, v);
+  if (activeDrawObservation != nullptr)
+  {
+    auto &draw = *activeDrawObservation;
+    ++draw.texturedFragments;
+    draw.nonblackTexels += (texel & GS_RGB24_MASK) != 0;
+    if (draw.sampleCount < draw.samples.size())
+    {
+      auto &sample = draw.samples[draw.sampleCount];
+      sample.vertexColor = fragmentColor;
+      sample.textureSampled = true;
+      sample.u = u;
+      sample.v = v;
+      sample.texel = texel;
+    }
+  }
   const std::uint8_t textureRed =
     colorChannel(texel, GS_RED_SHIFT);
   const std::uint8_t textureGreen =
@@ -985,15 +1070,48 @@ bool GS::writeFragment(
 {
   const GSContext &drawingContext =
     checkedContext(contextIndex);
+  GSFragmentObservation *sample = nullptr;
+  if (activeDrawObservation != nullptr)
+  {
+    auto &draw = *activeDrawObservation;
+    ++draw.fragments;
+    draw.nonblackSources += (sourceColor & GS_RGB24_MASK) != 0;
+    if (draw.sampleCount < draw.samples.size())
+    {
+      sample = &draw.samples[draw.sampleCount++];
+      sample->x = x;
+      sample->y = y;
+      sample->sourceColor = sourceColor;
+      sample->sourceDepth = sourceDepth;
+      if (!sample->textureSampled)
+      {
+        sample->vertexColor = sourceColor;
+      }
+    }
+  }
   const std::uint8_t sourceAlpha =
     colorChannel(sourceColor, GS_ALPHA_SHIFT);
   if (drawingContext.test.alphaTestEnabled &&
       !alphaComparisonPasses(sourceAlpha, drawingContext.test))
   {
+    if (activeDrawObservation != nullptr)
+    {
+      ++activeDrawObservation->alphaRejected;
+    }
+    if (sample != nullptr)
+    {
+      sample->outcome = GSFragmentOutcome::AlphaRejected;
+    }
     return false;
   }
   const std::uint32_t destinationColor =
     readPSMCT32(contextIndex, x, y);
+  if (sample != nullptr)
+  {
+    sample->destinationAvailable = true;
+    sample->destinationColor = destinationColor;
+    sample->framebufferWordAddress = psmct32WordAddress(contextIndex, x, y);
+  }
   if (drawingContext.test.destinationAlphaTestEnabled)
   {
     const bool destinationAlphaBit =
@@ -1001,6 +1119,14 @@ bool GS::writeFragment(
     if (destinationAlphaBit !=
         drawingContext.test.destinationAlphaMode)
     {
+      if (activeDrawObservation != nullptr)
+      {
+        ++activeDrawObservation->destinationAlphaRejected;
+      }
+      if (sample != nullptr)
+      {
+        sample->outcome = GSFragmentOutcome::DestinationAlphaRejected;
+      }
       return false;
     }
   }
@@ -1021,6 +1147,11 @@ bool GS::writeFragment(
     }
     const std::uint32_t destinationDepth =
       localMemory[depthAddress] & depthMask;
+    if (sample != nullptr)
+    {
+      sample->depthAvailable = true;
+      sample->destinationDepth = destinationDepth;
+    }
     bool passes = false;
     switch (drawingContext.test.depthTest)
     {
@@ -1038,6 +1169,14 @@ bool GS::writeFragment(
     }
     if (!passes)
     {
+      if (activeDrawObservation != nullptr)
+      {
+        ++activeDrawObservation->depthRejected;
+      }
+      if (sample != nullptr)
+      {
+        sample->outcome = GSFragmentOutcome::DepthRejected;
+      }
       return false;
     }
   }
@@ -1047,6 +1186,10 @@ bool GS::writeFragment(
     primitiveRegister.alphaBlending &&
     (!perPixelAlphaBlending ||
      (sourceAlpha & 0x80) != 0);
+  if (sample != nullptr)
+  {
+    sample->blended = blend;
+  }
   if (blend)
   {
     const GSAlpha &alpha = drawingContext.alpha;
@@ -1122,6 +1265,19 @@ bool GS::writeFragment(
       (sourceDepth & depthMask);
   }
   ++writtenPixels;
+  if (activeDrawObservation != nullptr)
+  {
+    const auto stored = readPSMCT32(contextIndex, x, y);
+    ++activeDrawObservation->written;
+    activeDrawObservation->nonblackWrites += (stored & GS_RGB24_MASK) != 0;
+    if (sample != nullptr)
+    {
+      sample->outcome = GSFragmentOutcome::Written;
+      sample->storedColorAvailable = true;
+      sample->outputColor = outputColor;
+      sample->storedColor = stored;
+    }
+  }
   return true;
 }
 

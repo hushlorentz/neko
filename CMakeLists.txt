@@ -220,6 +220,7 @@ add_library(neko_diagnostics
     neko_diagnostics/gif_diagnostics.cpp
     neko_diagnostics/save_state_diagnostics.cpp
     neko_diagnostics/startup_diagnostics.cpp
+    neko_diagnostics/gs_draw_diagnostics.cpp
     neko_diagnostics/startup_failure.cpp
     neko_diagnostics/vpu_program_runner.cpp
 )

@@ -97,7 +97,63 @@ def capture_records():
     ]
 
 
+def gs_draw_capture():
+    return dict(type="startup_gs_draw_capture", draw_limit=2, observed_draws=1,
+                truncated=False, draws=[
+        dict(scheduler_cycle=41, completed=True,
+             primitive=dict(type=0, context=0, gouraud=False, textured=True,
+                            fogging=False, blending=False, antialiasing=False,
+                            fixed_uv=True, fixed_fragment=False),
+             registers=[dict(address=index, value=(1 << 63) + index) for index in range(20)],
+             vertices=[dict(x=16, y=32, z=1, rgba=0x606060, q=0x3f800000,
+                            s=0, t=0, u=0, v=0)],
+             counts=dict(fragments=1, textured=1, nonblack_texels=0, nonblack_sources=0,
+                         alpha_rejected=0, destination_alpha_rejected=0, depth_rejected=0,
+                         written=1, nonblack_writes=0),
+             samples=[dict(x=1, y=2, vertex_color=0x606060, texture_sampled=True,
+                           u=-16, v=32, texel=0, source_color=0, source_depth=1,
+                           destination_color=0, destination_depth=None, blended=False,
+                           output_color=0, stored_color=0, framebuffer_word_address=8,
+                           outcome="written")])])
+
+
 class InspectorTests(unittest.TestCase):
+    def test_gs_draw_capture_is_strict_bounded_and_only_part_of_trace_comparisons(self):
+        rows = records() + [gs_draw_capture()]
+        self.write(self.path, rows)
+        report = self.report("draws", self.path, "--from-cycle", "40", "--to-cycle", "42")
+        self.assertTrue(report["available"])
+        self.assertEqual(report["draws"], rows[-1]["draws"])
+        self.assertEqual(report["draws"][0]["registers"][0]["value"], 1 << 63)
+        self.assertEqual(self.report("draws", self.path, "--limit", "0")["draws"], [])
+        self.assertEqual(self.report("summary", self.path)["gs_draw_capture"]["observed_draws"], 1)
+        other = self.path.with_name("other.jsonl")
+        self.write(other, records())
+        self.assertTrue(self.report("compare", self.path, other)["equal"])
+        self.assertFalse(self.report("compare", self.path, other, "--mode", "trace", status=1)["equal"])
+        self.assertFalse(self.report("draws", other)["available"])
+        self.assertEqual(self.report("draws", self.path, "--from-cycle", "42")["matched_draws"], 0)
+
+    def test_gs_draw_capture_rejects_inconsistent_and_malformed_evidence(self):
+        for change in ("count", "truncated", "signed", "availability", "position", "duplicate"):
+            with self.subTest(change=change):
+                rows = records() + [gs_draw_capture()]
+                capture = rows[-1]
+                draw = capture["draws"][0]
+                if change == "count":
+                    capture["observed_draws"] = 0
+                elif change == "truncated":
+                    capture["truncated"] = True
+                elif change == "signed":
+                    draw["samples"][0]["u"] = True
+                elif change == "availability":
+                    draw["samples"][0]["stored_color"] = None
+                elif change == "position":
+                    draw["scheduler_cycle"] = 51
+                else:
+                    draw["registers"][1]["address"] = 0
+                self.reject(rows, "GS")
+
     def test_sio2_f3_snapshot_counts_cross_the_dma_word_boundary(self):
         for remaining, logical, padding in ((144, 5, 139), (140, 1, 139), (136, 0, 136)):
             with self.subTest(remaining=remaining):

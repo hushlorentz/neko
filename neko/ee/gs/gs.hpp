@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "gif.hpp"
@@ -231,6 +232,69 @@ struct GSContext
   GSClutSelection clut;
 };
 
+enum class GSFragmentOutcome : std::uint8_t
+{
+  NotReached,
+  AlphaRejected,
+  DestinationAlphaRejected,
+  DepthRejected,
+  Written
+};
+
+struct GSFragmentObservation
+{
+  std::uint16_t x = 0;
+  std::uint16_t y = 0;
+  std::uint32_t vertexColor = 0;
+  bool textureSampled = false;
+  std::int32_t u = 0;
+  std::int32_t v = 0;
+  std::uint32_t texel = 0;
+  std::uint32_t sourceColor = 0;
+  std::uint32_t sourceDepth = 0;
+  bool destinationAvailable = false;
+  std::uint32_t destinationColor = 0;
+  bool depthAvailable = false;
+  std::uint32_t destinationDepth = 0;
+  bool blended = false;
+  bool storedColorAvailable = false;
+  std::uint32_t outputColor = 0;
+  std::uint32_t storedColor = 0;
+  std::size_t framebufferWordAddress = 0;
+  GSFragmentOutcome outcome = GSFragmentOutcome::NotReached;
+};
+
+struct GSDrawObservation
+{
+  static constexpr std::size_t SAMPLE_CAPACITY = 3;
+  GSPrimitive primitive;
+  GSContext context;
+  std::array<GSVertexCoordinate, 3> vertices = {};
+  std::array<GSColor, 3> colors = {};
+  std::array<GSTextureCoordinate, 3> textureCoordinates = {};
+  std::array<GIFRegisterWrite, 20> registers = {};
+  std::array<GSFragmentObservation, SAMPLE_CAPACITY> samples = {};
+  std::size_t sampleCount = 0;
+  std::uint64_t fragments = 0;
+  std::uint64_t texturedFragments = 0;
+  std::uint64_t nonblackTexels = 0;
+  std::uint64_t nonblackSources = 0;
+  std::uint64_t alphaRejected = 0;
+  std::uint64_t destinationAlphaRejected = 0;
+  std::uint64_t depthRejected = 0;
+  std::uint64_t written = 0;
+  std::uint64_t nonblackWrites = 0;
+  bool completed = false;
+};
+
+class GSDrawObserver
+{
+  public:
+    virtual ~GSDrawObserver() = default;
+    virtual bool captureDraw() noexcept = 0;
+    virtual void observe(const GSDrawObservation &draw) noexcept = 0;
+};
+
 struct GSImageTransfer
 {
   std::uint16_t sourceBasePointer = 0;
@@ -352,6 +416,8 @@ class GS : public GIFRegisterWriteHandler
     std::uint64_t spriteCount() const;
     std::uint64_t triangleCount() const;
     std::uint64_t pixelWriteCount() const;
+    // Observers must not mutate or reenter the GS during a draw callback.
+    void setDrawObserver(std::shared_ptr<GSDrawObserver> observer);
 
   private:
     friend class NekoSaveStateCodec;
@@ -447,6 +513,8 @@ class GS : public GIFRegisterWriteHandler
     void queueCurrentVertex();
     void dispatchPrimitive(
       const PrimitiveAssemblyResult &assembly);
+    void observePrimitive(const PrimitiveAssemblyResult &assembly);
+    void rasterizePrimitive(const PrimitiveAssemblyResult &assembly);
     void rasterizePoint(
       const GSVertexCoordinate &vertex,
       const GSColor &color,
@@ -517,6 +585,8 @@ class GS : public GIFRegisterWriteHandler
     bool reverseHostInterface = false;
     bool perPixelAlphaBlending = false;
     std::vector<std::uint32_t> localMemory;
+    std::shared_ptr<GSDrawObserver> drawObserver;
+    GSDrawObservation *activeDrawObservation = nullptr;
 };
 
 #endif

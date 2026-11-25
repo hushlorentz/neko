@@ -19,6 +19,56 @@ from inspect_startup import compare, first_difference, load_log
 @unittest.skipUnless(os.environ.get("NEKO_TEST_BINARY"),
                      "Set NEKO_TEST_BINARY to the existing headless executable")
 class ScoutIntegrationTests(unittest.TestCase):
+    def test_bounded_gs_draw_capture_matches_cold_restore_and_canonical_state(self):
+        words = [0x40087800, 0, 0x3409001f]
+        dispatch = len(words)
+        words.extend((0, 0))
+        packet = [7 | (1 << 15), 1 << 28, 0xe, 0]
+        for address, value in ((0x4c, 1 << 16), (0x40, 7 << 16 | 7 << 48),
+                               (0, 0), (1, 0x80010203), (5, 0), (5, 16), (5, 32)):
+            packet.extend((value & 0xffffffff, value >> 32, address, 0))
+        for index, word in enumerate(packet):
+            benchmark.store(words, 0xa0006000 + index * 4, word)
+        benchmark.store(words, 0xb000e000, 1)
+        loop = len(words)
+        benchmark.wait_dma(words, 0xb000a000)
+        benchmark.store(words, 0xb000a010, 0x6000)
+        benchmark.store(words, 0xb000a020, 8)
+        benchmark.store(words, 0xb000a000, 0x100)
+        benchmark.branch(words, 4, 0, 0, loop)
+        parked = len(words)
+        words.extend((0x1000ffff, 0))
+        words[dispatch] = 0x11090000 | (parked - dispatch - 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bios = root / "draws.bin"
+            bios.write_bytes(benchmark.encode_rom(words))
+            directory = root / "capture"
+            binary = Path(os.environ["NEKO_TEST_BINARY"]).resolve()
+            with redirect_stderr(io.StringIO()), patch.object(discovery, "TRACE_EVENTS", 0):
+                result = discovery.run_batch(directory, bios, master_cycles=1024,
+                                             checkpoint_at=512, executable=binary, gs_draws=2)
+            self.assertTrue(result["comparisons_equal"])
+            self.assertIsNone(result["first_failure"])
+            cold = load_log(discovery.report_path(directory, "cold"))
+            resumed = load_log(discovery.report_path(directory, "resumed"))
+            capture = resumed.gs_draw_capture
+            self.assertTrue(capture["truncated"])
+            self.assertGreater(capture["observed_draws"], 2)
+            self.assertEqual(len(capture["draws"]), 2)
+            self.assertEqual(capture, cold.gs_draw_capture)
+            self.assertGreaterEqual(capture["draws"][0]["scheduler_cycle"], 512)
+            self.assertEqual(capture["draws"][0]["samples"][0]["stored_color"], 0x80010203)
+            self.assertEqual(capture["draws"][0]["counts"]["written"], 1)
+            for name in ("checkpoint", "resumed-plain"):
+                self.assertIsNone(load_log(discovery.report_path(directory, name)).gs_draw_capture)
+            manifest = json.loads((directory / "manifest.json").read_text())
+            self.assertEqual(manifest["gs_draw_limit"], 2)
+            for entry in manifest["commands"]:
+                if len(entry["command"]) > 1 and entry["command"][1] == "bios-startup":
+                    self.assertEqual("--gs-draws" in entry["command"],
+                                     "--trace-events" in entry["command"])
+
     @unittest.skipUnless(os.environ.get("NEKO_REFERENCE_BINARY"),
                          "Requires explicitly supplied frozen reference")
     def test_prebuilt_reference_and_current_keep_checkpoint_and_lifecycle_contracts(self):

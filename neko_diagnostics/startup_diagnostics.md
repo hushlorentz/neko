@@ -195,7 +195,7 @@ the existing EE-only `--bios` frontend is unchanged.
 
 ## Headless discovery command
 
-`neko bios-startup <file> --cycles <count> [--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] [--resume-checkpoint <file>] [--save-checkpoint <file>] [--scout | --stop-on-first-failure]` wraps the
+`neko bios-startup <file> --cycles <count> [--trace-events <count> [--failure-context] [--trace-from-cycle <count>] [--gs-draws <1-4096>]] [--resume-checkpoint <file>] [--save-checkpoint <file>] [--scout | --stop-on-first-failure]` wraps the
 cold-start API without changing its execution policy. The master-cycle ceiling
 is required and accepts an unsigned
 64-bit decimal integer, including zero. The image must be exactly 4 MiB.
@@ -656,6 +656,51 @@ Run the inspector's BIOS-free tests independently of the C++ build:
 python3 -B -m unittest discover -s tools -p 'test_inspect_startup.py' -v
 ```
 
+## Bounded GS draw and fragment observations
+
+For a traced startup, `--gs-draws <1-4096>` optionally appends one
+`startup_gs_draw_capture` record. It retains the first selected number of
+dispatched primitives from the actual trace-start boundary, not from an
+unobserved cold prefix. It is incompatible with scout mode and requires
+`--trace-events`, including a zero event limit. Draw retention is independent
+of trace-prefix saturation: later draws increment `observed_draws` without
+constructing more records, and `truncated` explicitly reports omitted draws.
+
+Each retained draw records effective primitive/context selection, assembled
+vertices/colors and raw Q/ST bits, and twenty selected raw 64-bit registers.
+Whole-draw counts report attempted fragments, texture/source/stored nonblack
+RGB, alpha/DAT/depth rejection and writes. The first three attempted fragments
+retain actual texture/source/destination/depth, blend, unmasked output and
+masked stored color, with physical framebuffer word addresses. These are not
+statistical samples or coverage of every pixel. Writes can leave an existing
+value unchanged. Values not reached are null; a runtime error leaves
+`completed: false`, rather than manufacturing a completed draw or rejection.
+The records observe existing execution decisions, not a parallel renderer,
+hardware oracle, display-state history or proof of correct scanout.
+
+`scheduler_cycle` is the scheduler's position at draw publication. Scheduled
+GS work can occur before the scheduler increments that position; EE-issued
+work can occur afterward. Do not silently interpret this field as the trace
+event convention for a completed master cycle.
+
+Capture storage is reserved before execution. Callbacks must not mutate or
+reenter the GS. Observers and records are host-only: attaching an observer
+does not change canonical state, loading state preserves an attachment, and
+machine reset releases it. Disabled capture does not construct draw records.
+Enabled capture adds fragment-counting and stored-color reads for selected
+draws; keep observation windows and draw limits bounded.
+
+```sh
+./out/check/neko bios-startup "<BIOS>" --cycles <ceiling> --trace-events 16384 --trace-from-cycle <start> --gs-draws 32 > run.jsonl
+python3 -B tools/inspect_startup.py draws run.jsonl --from-cycle <start> --to-cycle <ceiling> --limit 32
+```
+
+The inspector strictly validates optional records and includes compact capture
+metadata in `summary`. Legacy logs without capture retain existing summaries;
+`draws` explicitly reports `available: false`. `compare --mode trace` and
+`--mode continuation-trace` compare draw evidence; run/continuation comparisons
+exclude these observer-only records while retaining complete snapshots.
+
 ## Repeatable discovery batch
 
 From the repository root, run:
@@ -687,6 +732,13 @@ Its optional `--failure-context` flag enables the bounded recorder only on
 the two traced runs; both untraced runs remain genuinely untraced. The
 manifest records this choice and automatic first-failure windows select the
 exporter's indicated event source.
+Conformance-only `--gs-draws <1-4096>` similarly enables bounded draw capture
+on traced runs only. Plain runs and checkpoint creation remain unobserved;
+the manifest records `gs_draw_limit` only when enabled. This option does not
+change full canonical or cold/restored trace comparison requirements.
+The helper also accepts zero to explicitly disable capture (its default);
+the native option requires a positive limit. Scout mode rejects nonzero
+draw limits.
 
 The artifact directory must not already exist, even if empty. Build and
 inspection stdout/stderr, two `traced*.jsonl.gz` reports, two uncompressed

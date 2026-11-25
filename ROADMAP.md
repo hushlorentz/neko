@@ -4350,8 +4350,24 @@ not requirements for exhaustive subsystem coverage.
 - [x] Establish packing, destination-word and resumable-state contracts;
       support PSMCT24 host uploads through existing GS owners, with authored
       conformance, required validation and independent review.
-- [ ] Verify the originating BIOS upload with bounded same-build comparisons
-      and risk-required cold/restored conformance.
+- [x] Verify originating BIOS upload admission and packed-payload progress
+      with bounded same-build comparisons and risk-required cold/restored
+      conformance.
+
+### Post-PSMCT24 BIOS Dependency Attribution
+
+- [x] Attribute the next originating dependency beyond the bounded PSMCT24
+      upload observation with unchanged-input discovery and required replay
+      comparisons, or record an explicit observation limit.
+- [x] Diagnose post-upload guest activity from retained CPU/device state and
+      scanout; use bounded traced comparisons if needed before selecting
+      another dependency or observation window.
+- [x] Add the approved opt-in bounded draw/fragment diagnostic through existing
+      GS owners, with authored cold/restored conformance, strict inspection,
+      required validation and independent review.
+- [ ] Attribute the observed black scanout during recurring graphics activity,
+      distinguishing guest-supplied drawing values from rendering and display
+      behavior with bounded evidence before selecting a hardware repair.
 
 ### Additional CD/DVD Command and Configuration Scope
 

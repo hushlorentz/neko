@@ -39,6 +39,9 @@ def verify_prebuilt_executable(manifest, command):
 def running_capture(directory, manifest, name, command, *, extension="stdout",
                     accepted=(0,), compressed=False, sample_seconds=0):
     command = list(command)
+    if (len(command) > 1 and command[1] == "bios-startup" and
+            "--trace-events" in command and manifest.get("gs_draw_limit", 0)):
+        command += ["--gs-draws", str(manifest["gs_draw_limit"])]
     verify_prebuilt_executable(manifest, command)
     output = directory / f"{name}.{extension}{'.gz' if compressed else ''}"
     errors = directory / f"{name}.stderr"
@@ -303,8 +306,10 @@ def validate_checkpoint(directory, bios, binary, manifest, cycle, ceiling):
 
 def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=False,
               checkpoint=None, checkpoint_at=None, invocation=None, sample_seconds=0,
-              executable=None):
+              executable=None, gs_draws=0):
     master_cycles = uint(master_cycles, "Cycle ceiling")
+    if type(gs_draws) is not int or not 0 <= gs_draws <= 4096:
+        raise ValueError("GS draw limit must be from 0 to 4096")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
     if checkpoint is not None and checkpoint_at is not None:
@@ -335,6 +340,8 @@ def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=F
         manifest["checkpoint_at"] = checkpoint_at
     if failure_context or checkpoint_at is not None:
         manifest["failure_context"] = True
+    if gs_draws:
+        manifest["gs_draw_limit"] = gs_draws
     if selected is not None:
         manifest["prebuilt_executable"] = selected
     write_json(directory / "manifest.json", manifest)
@@ -605,6 +612,9 @@ def main(argv=None):
                         help="Retain a scheduled scout checkpoint at this absolute cycle; repeatable.")
     parser.add_argument("--failure-context", action="store_true",
                         help="Retain bounded first-failure context in traced runs.")
+    parser.add_argument("--gs-draws", type=int, default=0,
+                        help="Conformance only: retain up to 4096 GS draws per traced run; "
+                             "zero disables capture (default).")
     parser.add_argument("--sample-seconds", type=int, default=0,
                         help="macOS only: sample the owned plain1 native PID for 1-60 seconds; "
                              "use a separate profiling batch, not an unprofiled timing control.")
@@ -621,7 +631,8 @@ def main(argv=None):
     try:
         if arguments.mode == "scout":
             if (arguments.checkpoint or arguments.checkpoint_at or arguments.failure_context or
-                    arguments.sample_seconds or arguments.executable is not None):
+                    arguments.sample_seconds or arguments.executable is not None or
+                    arguments.gs_draws):
                 raise ValueError("Scout mode starts cold and manages its own checkpoints and capture")
             report = run_scout_batch(
                 arguments.directory.resolve(), arguments.bios.resolve(),
@@ -644,7 +655,7 @@ def main(argv=None):
                                        if arguments.checkpoint is not None else None),
                            checkpoint_at=arguments.checkpoint_at,
                            invocation=invocation, sample_seconds=arguments.sample_seconds,
-                           executable=arguments.executable)
+                           executable=arguments.executable, gs_draws=arguments.gs_draws)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1
     except (OSError, ValueError) as error:

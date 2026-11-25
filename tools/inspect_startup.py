@@ -28,6 +28,7 @@ RECORD_TYPES = {
     "bios_startup_input", "startup_run_summary", "startup_runtime_error",
     "startup_trace_summary", "trace_event", "startup_first_failure",
     "startup_failure_capture",
+    "startup_gs_draw_capture",
 }
 DMAC_FIELDS = {
     "control", "hold_control", "status", "interleave_size", "interrupt_pending",
@@ -54,6 +55,11 @@ class StartupLog:
     failure_record: Optional[dict]
     events: list
     capture: Optional[dict]
+
+    @property
+    def gs_draw_capture(self):
+        return next((row for row in self.records
+                     if row["type"] == "startup_gs_draw_capture"), None)
 
     @property
     def coverage(self):
@@ -87,6 +93,96 @@ def unique_object(pairs):
 
 def reject_constant(value):
     raise ValueError(f"non-finite JSON number: {value}")
+
+
+def validate_gs_draw_capture(record):
+    if record.keys() != {"type", "draw_limit", "observed_draws", "truncated", "draws"}:
+        raise ValueError("invalid GS draw capture fields")
+    limit = uint(record.get("draw_limit"), "draw_limit")
+    observed = uint(record.get("observed_draws"), "observed_draws")
+    draws = require(record, "draws", list)
+    if not 1 <= limit <= 4096 or len(draws) != min(limit, observed):
+        raise ValueError("GS draw capture disagrees with its bounds")
+    if require(record, "truncated", bool) != (observed > len(draws)):
+        raise ValueError("GS draw capture truncation disagrees")
+    count_fields = {"fragments", "textured", "nonblack_texels", "nonblack_sources",
+                    "alpha_rejected", "destination_alpha_rejected", "depth_rejected",
+                    "written", "nonblack_writes"}
+    for draw in draws:
+        if type(draw) is not dict or draw.keys() != {
+                "scheduler_cycle", "completed", "primitive", "registers",
+                "vertices", "counts", "samples"}:
+            raise ValueError("invalid GS draw fields")
+        uint(draw["scheduler_cycle"], "scheduler_cycle")
+        require(draw, "completed", bool)
+        primitive = require(draw, "primitive", dict)
+        flags = {"gouraud", "textured", "fogging", "blending", "antialiasing",
+                 "fixed_uv", "fixed_fragment"}
+        if primitive.keys() != flags | {"type", "context"}:
+            raise ValueError("invalid GS draw primitive")
+        if uint(primitive["type"], "primitive.type", 3) > 6:
+            raise ValueError("invalid GS primitive type")
+        uint(primitive["context"], "primitive.context", 1)
+        for flag in flags:
+            require(primitive, flag, bool)
+        registers = require(draw, "registers", list)
+        addresses = set()
+        for reg in registers:
+            if type(reg) is not dict or reg.keys() != {"address", "value"}:
+                raise ValueError("invalid GS draw register")
+            addresses.add(uint(reg["address"], "register.address", 8))
+            uint(reg["value"], "register.value")
+        if len(registers) != 20 or len(addresses) != 20:
+            raise ValueError("GS draw requires twenty distinct selected registers")
+        vertices = require(draw, "vertices", list)
+        expected = 1 if primitive["type"] == 0 else 2 if primitive["type"] in (1, 2, 6) else 3
+        if len(vertices) != expected:
+            raise ValueError("GS draw vertex count disagrees")
+        for vertex in vertices:
+            if type(vertex) is not dict or vertex.keys() != {
+                    "x", "y", "z", "rgba", "q", "s", "t", "u", "v"}:
+                raise ValueError("invalid GS draw vertex")
+            for key, value in vertex.items():
+                uint(value, "vertex." + key, 16 if key in ("x", "y", "u", "v") else 32)
+        counts = require(draw, "counts", dict)
+        if counts.keys() != count_fields:
+            raise ValueError("invalid GS draw counts")
+        for key, value in counts.items():
+            uint(value, "counts." + key)
+        retired = sum(counts[key] for key in
+                      ("written", "alpha_rejected", "destination_alpha_rejected", "depth_rejected"))
+        if retired > counts["fragments"] or (draw["completed"] and retired != counts["fragments"]):
+            raise ValueError("GS fragment counts disagree")
+        for part, total in (("nonblack_texels", "textured"), ("nonblack_sources", "fragments"),
+                            ("nonblack_writes", "written")):
+            if counts[part] > counts[total]:
+                raise ValueError("GS nonblack count exceeds its observations")
+        samples = require(draw, "samples", list)
+        if len(samples) != min(3, counts["fragments"]):
+            raise ValueError("GS first-three-fragment sample count disagrees")
+        for sample in samples:
+            if type(sample) is not dict or sample.keys() != {
+                    "x", "y", "vertex_color", "texture_sampled", "u", "v", "texel",
+                    "source_color", "source_depth", "destination_color", "destination_depth",
+                    "blended", "output_color", "stored_color", "framebuffer_word_address", "outcome"}:
+                raise ValueError("invalid GS fragment sample")
+            for key in ("texture_sampled", "blended"):
+                require(sample, key, bool)
+            for key in ("u", "v"):
+                if type(sample[key]) is not int or not -(1 << 31) <= sample[key] < (1 << 31):
+                    raise ValueError("GS texture coordinate must be signed 32-bit")
+            for key in ("x", "y", "vertex_color", "texel", "source_color", "source_depth"):
+                uint(sample[key], "sample." + key, 16 if key in ("x", "y") else 32)
+            for key in ("destination_color", "destination_depth", "output_color",
+                        "stored_color", "framebuffer_word_address"):
+                if sample[key] is not None:
+                    uint(sample[key], "sample." + key, 20 if key == "framebuffer_word_address" else 32)
+            if sample["outcome"] not in ("not_reached", "alpha_rejected",
+                    "destination_alpha_rejected", "depth_rejected", "written"):
+                raise ValueError("invalid GS fragment outcome")
+            if ((sample["outcome"] == "written") != (sample["stored_color"] is not None) or
+                    (sample["stored_color"] is None) != (sample["output_color"] is None)):
+                raise ValueError("GS fragment write availability disagrees")
 
 
 def validate_spu_event(record):
@@ -402,6 +498,8 @@ def validate_record(record):
                     uint(drawing[field], f"gs_drawing.{field}", bits)
                 if "profile" in drawing:
                     validate_gs_drawing_profile(require(drawing, "profile", dict))
+    elif kind == "startup_gs_draw_capture":
+        validate_gs_draw_capture(record)
     elif kind == "startup_trace_summary":
         uint(record.get("event_limit"), "event_limit")
         uint(record.get("captured_events"), "captured_events")
@@ -478,15 +576,24 @@ def load_log(path):
     trace = single.get("startup_trace_summary")
     failure = single.get("startup_first_failure")
     capture = single.get("startup_failure_capture")
+    draws = single.get("startup_gs_draw_capture")
     if records[:2] != [input_record, result]:
         invalid("expected input followed by run result")
     if trace is None:
-        if events or failure is not None or capture is not None:
+        if events or failure is not None or capture is not None or draws is not None:
             invalid("trace records require startup_trace_summary")
     else:
         if failure is None:
             invalid("missing startup_first_failure; file is incomplete")
         suffix = [capture, failure] if capture is not None else [failure]
+        if draws is not None:
+            suffix.append(draws)
+            previous = input_record.get("trace_start_cycle", input_record.get("start_master_cycle", 0))
+            for draw in draws["draws"]:
+                cycle = draw["scheduler_cycle"]
+                if not previous <= cycle <= result["snapshot"]["master_cycle"]:
+                    invalid("GS draw scheduler position outside ordered run bounds")
+                previous = cycle
         if records[2:] != [trace, *events, *suffix]:
             invalid("expected trace summary, ordered events, then startup_first_failure")
         count = trace["captured_events"]
@@ -575,6 +682,8 @@ def summary(log):
             f"{SUBSYSTEMS.get(event['subsystem'], event['subsystem'])}:"
             f"{EVENTS.get(event['event_type'], event['event_type'])}"
             for event in log.events)),
+        **({"gs_draw_capture": {key: value for key, value in log.gs_draw_capture.items()
+                               if key != "draws"}} if log.gs_draw_capture is not None else {}),
         note=EVIDENCE_NOTE,
     )
 
@@ -702,6 +811,8 @@ def continuation_view(log, traced):
         view.update(trace_start_cycle=trace_start, trace=log.trace,
                     events=log.events, capture=log.capture,
                     first_failure=log.failure_record)
+        if log.gs_draw_capture is not None:
+            view["gs_draw_capture"] = log.gs_draw_capture
     return view
 
 
@@ -738,13 +849,17 @@ def event_number(text):
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("summary", "events", "instructions", "compare"):
+    for command in ("summary", "events", "instructions", "draws", "compare"):
         sub = commands.add_parser(command)
         sub.add_argument("file", type=Path)
         if command == "compare":
             sub.add_argument("other", type=Path)
             sub.add_argument("--mode", choices=(
                 "run", "trace", "continuation", "continuation-trace"), default="run")
+        elif command == "draws":
+            sub.add_argument("--from-cycle", type=number, default=0)
+            sub.add_argument("--to-cycle", type=number, default=(1 << 64) - 1)
+            sub.add_argument("--limit", type=number, default=200)
         elif command != "summary":
             sub.add_argument("--source", choices=("prefix", "failure_capture"),
                              default="prefix",
@@ -778,6 +893,18 @@ def main(argv=None):
             report = summary(log)
         elif arguments.command == "compare":
             report = compare(log, load_log(arguments.other), arguments.mode)
+        elif arguments.command == "draws":
+            if arguments.from_cycle > arguments.to_cycle:
+                raise ValueError("draw cycle range is reversed")
+            capture = log.gs_draw_capture
+            selected = ([] if capture is None else [
+                draw for draw in capture["draws"]
+                if arguments.from_cycle <= draw["scheduler_cycle"] <= arguments.to_cycle])
+            report = dict(available=capture is not None,
+                          capture=({key: value for key, value in capture.items() if key != "draws"}
+                                   if capture is not None else None),
+                          draws=selected[:arguments.limit],
+                          matched_draws=len(selected), note=EVIDENCE_NOTE)
         else:
             report = select_events(log, arguments)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))

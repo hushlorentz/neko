@@ -2,6 +2,7 @@
 
 #include "save_state_commands.hpp"
 #include "startup_diagnostics.hpp"
+#include "gs_draw_diagnostics.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -19,7 +20,7 @@ namespace
 {
   const char *USAGE =
     "Usage: neko bios-startup <file> --cycles <count> "
-    "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] "
+    "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>] [--gs-draws <1-4096>]] "
     "[--resume-checkpoint <file>] [--save-checkpoint <file>] "
     "[--progress-file <file> [--progress-every <cycles>]] "
     "[--scout | --stop-on-first-failure]";
@@ -32,6 +33,7 @@ namespace
     bool traced = false;
     bool failureContext = false;
     bool traceStartSpecified = false;
+    std::uint64_t gsDrawLimit = 0;
     bool scout = false;
     bool stopOnFirstFailure = false;
     std::string resumePath;
@@ -110,6 +112,16 @@ namespace
         options.traceStart = parseUnsignedInteger(value,
           "Trace start must be an unsigned 64-bit decimal integer.");
       }
+      else if (name == "--gs-draws" && options.gsDrawLimit == 0)
+      {
+        options.gsDrawLimit = parseUnsignedInteger(value,
+          "GS draw limit must be from 1 to 4096.");
+        if (options.gsDrawLimit == 0 ||
+            options.gsDrawLimit > StartupGSDrawCapture::MAX_DRAWS)
+        {
+          throw std::invalid_argument("GS draw limit must be from 1 to 4096.");
+        }
+      }
       else if (name == "--resume-checkpoint" && options.resumePath.empty())
       {
         options.resumePath = value;
@@ -138,7 +150,8 @@ namespace
         (options.scout && (options.traced || options.failureContext ||
           options.traceStartSpecified || options.stopOnFirstFailure)) ||
         (options.stopOnFirstFailure && !options.traced) ||
-        (!options.traced && (options.failureContext || options.traceStartSpecified)) ||
+        (!options.traced && (options.failureContext || options.traceStartSpecified ||
+          options.gsDrawLimit != 0)) ||
         (options.traceStartSpecified && options.traceStart > options.ceiling))
     {
       throw std::invalid_argument(USAGE);
@@ -288,7 +301,8 @@ namespace
 
   StartupRunEvidence runWithTrace(
     NekoSystem &system, const Options &options,
-    const std::shared_ptr<StartupFailureCapture> &capture, ProgressReport &progress)
+    const std::shared_ptr<StartupFailureCapture> &capture,
+    const std::shared_ptr<StartupGSDrawCapture> &draws, ProgressReport &progress)
   {
     const auto start = system.masterClockScheduler().currentCycle();
     const auto traceStart = std::max(start, options.traceStart);
@@ -304,11 +318,13 @@ namespace
       if (options.traced)
       {
         system.startTrace(options.traceLimit, capture, stopPolicy);
+        system.gs().setDrawObserver(draws);
       }
       return runWithProgress(system, options.ceiling - start, options, progress);
     }
     auto prefix = runWithProgress(system, traceStart - start, options, progress);
     system.startTrace(options.traceLimit, capture, stopPolicy);
+    system.gs().setDrawObserver(draws);
     if (prefix.outcome == StartupRunOutcome::RuntimeError ||
         !prefix.completed.execution.cycleLimitReached)
     {
@@ -380,8 +396,11 @@ int neko_cli::runBIOSStartupCommand(
     }
     const auto capture = options.failureContext ?
       std::make_shared<StartupFailureCapture>() : nullptr;
+    const auto draws = options.gsDrawLimit != 0 ?
+      std::make_shared<StartupGSDrawCapture>(
+        system, static_cast<std::size_t>(options.gsDrawLimit)) : nullptr;
     ProgressReport progress(options, start);
-    const auto evidence = runWithTrace(system, options, capture, progress);
+    const auto evidence = runWithTrace(system, options, capture, draws, progress);
     const auto *runtimeError = evidence.outcome == StartupRunOutcome::RuntimeError ?
       &evidence.error : nullptr;
     if (runtimeError != nullptr)
@@ -433,6 +452,10 @@ int neko_cli::runBIOSStartupCommand(
       writeStartupFirstFailureJsonLine(output, system,
         runtimeError != nullptr ? StartupExecutionBoundary::IncompleteCycle :
           StartupExecutionBoundary::CompleteCycle, capture.get());
+    }
+    if (draws)
+    {
+      writeStartupGSDrawCaptureJsonLine(output, *draws);
     }
     output.flush();
     if (!output)

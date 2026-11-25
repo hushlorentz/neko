@@ -1,6 +1,7 @@
 #include "bios_startup_command.hpp"
 #include "catch.hpp"
 #include "startup_diagnostics.hpp"
+#include "gs_draw_diagnostics.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -100,6 +101,161 @@ TEST_CASE("BIOS startup command reports host stops without claiming BIOS success
     std::string::npos);
   REQUIRE(output.str().find("\"max_master_cycles\":18446744073709551615") !=
     std::string::npos);
+}
+
+TEST_CASE("BIOS startup bounds optional GS draw capture independently of trace saturation",
+  "[bios-startup-command][gs-draw-capture]")
+{
+  const auto image = discoveryROM();
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "8", "--trace-events", "0", "--gs-draws", "2"},
+    [&](const std::string &) { return image; }, output, error) == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find(
+    "{\"type\":\"startup_gs_draw_capture\",\"draw_limit\":2,"
+    "\"observed_draws\":0,\"truncated\":false,\"draws\":[]}") != std::string::npos);
+  for (const auto &limit : {"0", "4097", "-1"})
+  {
+    std::ostringstream rejected;
+    std::ostringstream rejectedError;
+    bool loaded = false;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "8", "--trace-events", "0", "--gs-draws", limit},
+      [&](const std::string &) { loaded = true; return image; },
+      rejected, rejectedError) == 2);
+    REQUIRE_FALSE(loaded);
+    REQUIRE_FALSE(rejectedError.str().empty());
+  }
+}
+
+TEST_CASE("GS draw capture records executed texture blend and masked writes without changing state",
+  "[gs-draw-capture]")
+{
+  NekoSystem observed;
+  NekoSystem plain;
+  auto capture = std::make_shared<StartupGSDrawCapture>(observed, 1);
+  observed.gs().setDrawObserver(capture);
+  for (auto *system : {&observed, &plain})
+  {
+    auto &gs = system->gs();
+    gs.writeRegister(GSRegisterAddress::FRAME_1,
+      UINT64_C(1) | (UINT64_C(1) << 16) | (UINT64_C(0xff00) << 32));
+    gs.writeRegister(GSRegisterAddress::SCISSOR_1, UINT64_C(7) << 16);
+    gs.writeRegister(GSRegisterAddress::TEX0_1,
+      (UINT64_C(1) << 14) | (UINT64_C(1) << 34) | (UINT64_C(1) << 35));
+    gs.writeRegister(GSRegisterAddress::ALPHA_1,
+      UINT64_C(0x64) | (UINT64_C(64) << 32));
+    gs.writeDisplayPSMCT32(0, 1, 0, 0, 0x80406080);
+    for (unsigned x = 0; x < 4; ++x)
+    {
+      gs.writeDisplayPSMCT32(32, 1, x, 0, 0x80020202);
+    }
+    gs.writeRegister(GSRegisterAddress::PRIM, 6 | 16 | 64 | 256);
+    gs.writeRegister(GSRegisterAddress::RGBAQ, 0x80101010);
+    gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+    gs.writeRegister(GSRegisterAddress::XYZ2, UINT64_C(64) | (UINT64_C(16) << 16));
+    gs.writeRegister(GSRegisterAddress::RGBAQ, 0);
+  }
+  REQUIRE(capture->draws().size() == 1);
+  const auto &draw = capture->draws()[0].draw;
+  REQUIRE(draw.completed);
+  REQUIRE(draw.primitive.textureMapping);
+  REQUIRE(draw.primitive.alphaBlending);
+  REQUIRE(draw.context.frame.basePointer == 1);
+  REQUIRE(draw.colors[1].red == 0x10);
+  REQUIRE(draw.fragments == 4);
+  REQUIRE(draw.texturedFragments == 4);
+  REQUIRE(draw.nonblackTexels == 4);
+  REQUIRE(draw.nonblackSources == 4);
+  REQUIRE(draw.written == 4);
+  REQUIRE(draw.sampleCount == 3);
+  REQUIRE(draw.samples[0].textureSampled);
+  REQUIRE(draw.samples[0].vertexColor == 0x80101010);
+  REQUIRE(draw.samples[0].texel == 0x80406080);
+  REQUIRE(draw.samples[0].sourceColor == 0x80406080);
+  REQUIRE(draw.samples[0].destinationColor == 0x80020202);
+  REQUIRE(draw.samples[0].blended);
+  REQUIRE(draw.samples[0].outputColor == 0x80213141);
+  REQUIRE(draw.samples[0].storedColor == 0x80210241);
+  REQUIRE(draw.samples[0].outcome == GSFragmentOutcome::Written);
+  REQUIRE(observed.saveState() == plain.saveState());
+}
+
+TEST_CASE("GS draw capture retains rejections partial errors and bounded saturation",
+  "[gs-draw-capture]")
+{
+  NekoSystem system;
+  auto capture = std::make_shared<StartupGSDrawCapture>(system, 4);
+  auto &gs = system.gs();
+  gs.setDrawObserver(capture);
+  gs.writeRegister(GSRegisterAddress::FRAME_1, UINT64_C(1) << 16);
+  gs.writeRegister(GSRegisterAddress::ZBUF_1, 2);
+  gs.writeRegister(GSRegisterAddress::RGBAQ, 0x80010203);
+  gs.writeRegister(GSRegisterAddress::TEST_1, 1); // alpha NEVER
+  gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+  gs.writeRegister(GSRegisterAddress::TEST_1, UINT64_C(1) << 14); // destination alpha
+  gs.writePSMCT32(0, 0, 0, 0x80000000);
+  gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+  gs.writeRegister(GSRegisterAddress::TEST_1, UINT64_C(1) << 16); // depth NEVER
+  gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+  gs.writeRegister(GSRegisterAddress::PRIM, 1 << 5); // unsupported fog
+  REQUIRE_THROWS_AS(gs.writeRegister(GSRegisterAddress::XYZ2, 0), std::runtime_error);
+  REQUIRE(capture->draws().size() == 4);
+  const auto &draws = capture->draws();
+  REQUIRE(draws[0].draw.samples[0].outcome == GSFragmentOutcome::AlphaRejected);
+  REQUIRE_FALSE(draws[0].draw.samples[0].destinationAvailable);
+  REQUIRE(draws[1].draw.samples[0].outcome == GSFragmentOutcome::DestinationAlphaRejected);
+  REQUIRE(draws[1].draw.samples[0].destinationAvailable);
+  REQUIRE(draws[2].draw.samples[0].outcome == GSFragmentOutcome::DepthRejected);
+  REQUIRE(draws[2].draw.samples[0].depthAvailable);
+  REQUIRE_FALSE(draws[3].draw.completed);
+  REQUIRE(draws[3].draw.sampleCount == 0);
+  gs.writeRegister(GSRegisterAddress::PRIM, 0);
+  gs.writeRegister(GSRegisterAddress::TEST_1, 0);
+  gs.writeRegister(GSRegisterAddress::XYZ2, 0);
+  REQUIRE(capture->observedDraws() == 5);
+  REQUIRE(capture->draws().size() == 4);
+  REQUIRE(gs.readPSMCT32(0, 0, 0) == 0x80010203);
+  std::ostringstream report;
+  writeStartupGSDrawCaptureJsonLine(report, *capture);
+  REQUIRE(report.str().find("\"truncated\":true") != std::string::npos);
+  REQUIRE(report.str().find("\"destination_color\":null") != std::string::npos);
+  REQUIRE(report.str().find("\"completed\":false") != std::string::npos);
+}
+
+TEST_CASE("GS draw observer survives canonical restore and is released by machine reset",
+  "[gs-draw-capture]")
+{
+  NekoSystem system;
+  system.gs().writeRegister(GSRegisterAddress::FRAME_1, UINT64_C(1) << 16);
+  system.gs().writeRegister(GSRegisterAddress::SCISSOR_1,
+    (UINT64_C(7) << 16) | (UINT64_C(7) << 48));
+  const auto state = system.saveState();
+  auto capture = std::make_shared<StartupGSDrawCapture>(system, 2);
+  system.gs().setDrawObserver(capture);
+  REQUIRE(system.saveState() == state);
+  system.gs().writeRegister(GSRegisterAddress::PRIM, 1);
+  system.gs().writeRegister(GSRegisterAddress::XYZ2, 0);
+  system.gs().writeRegister(GSRegisterAddress::XYZ2, 32);
+  REQUIRE(capture->draws().size() == 1);
+  REQUIRE(capture->draws()[0].draw.primitive.type == GSPrimitiveType::Line);
+  system.loadState(state);
+  system.gs().writeRegister(GSRegisterAddress::PRIM, 3);
+  for (const auto vertex : {UINT64_C(0), UINT64_C(32), UINT64_C(32) << 16})
+  {
+    system.gs().writeRegister(GSRegisterAddress::XYZ2, vertex);
+  }
+  REQUIRE(capture->draws().size() == 2);
+  REQUIRE(capture->draws()[1].draw.primitive.type == GSPrimitiveType::Triangle);
+  REQUIRE(capture->draws()[1].draw.completed);
+  REQUIRE(capture->draws()[1].draw.fragments > 0);
+  std::weak_ptr<StartupGSDrawCapture> lifetime = capture;
+  capture.reset();
+  REQUIRE_FALSE(lifetime.expired());
+  system.reset();
+  REQUIRE(lifetime.expired());
 }
 
 TEST_CASE("BIOS scout stops at the originating fault with compact same-cycle evidence",
