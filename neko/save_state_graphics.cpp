@@ -633,6 +633,8 @@ namespace
     writer->writeFieldU32(
       "transferredPixels",
       transfer.transferredPixels);
+    writer->writeFieldU32("pendingPixel", transfer.pendingPixel);
+    writer->writeFieldU8("pendingPixelBytes", transfer.pendingPixelBytes);
     writer->writeFieldU8(
       "direction",
       static_cast<std::uint8_t>(transfer.direction));
@@ -670,6 +672,8 @@ namespace
     transfer.height = reader->readFieldU16("height");
     transfer.transferredPixels =
       reader->readFieldU32("transferredPixels");
+    transfer.pendingPixel = reader->readFieldU32("pendingPixel");
+    transfer.pendingPixelBytes = reader->readFieldU8("pendingPixelBytes");
     transfer.direction = readEnum<GSImageTransferDirection>(
       reader,
       static_cast<std::uint8_t>(

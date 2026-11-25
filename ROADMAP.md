@@ -4339,9 +4339,19 @@ not requirements for exhaustive subsystem coverage.
 - [x] Support PSMT4 with PSMCT32/CSM1 CLUT load/retention (CLD 0-5,
       CSA banks, TEX0/TEX2) through shared GS owners, with authored sampling/
       persistence conformance, required full gates and independent review.
-- [ ] Verify actual BIOS texture sampling and source-alpha execution after
+- [x] Verify actual BIOS texture sampling and source-alpha execution after
       the required sampling support, retaining bounded same-build replay
       comparisons and any required full conformance.
+
+### GS PSMCT24 Host-to-Local Transfer Dependency
+
+- [x] Attribute the originating PSMCT24 upload admission with bounded
+      discovery and matching runtime replay snapshots.
+- [x] Establish packing, destination-word and resumable-state contracts;
+      support PSMCT24 host uploads through existing GS owners, with authored
+      conformance, required validation and independent review.
+- [ ] Verify the originating BIOS upload with bounded same-build comparisons
+      and risk-required cold/restored conformance.
 
 ### Additional CD/DVD Command and Configuration Scope
 

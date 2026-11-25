@@ -246,6 +246,8 @@ struct GSImageTransfer
   std::uint16_t width = 0;
   std::uint16_t height = 0;
   std::uint32_t transferredPixels = 0;
+  std::uint32_t pendingPixel = 0;
+  std::uint8_t pendingPixelBytes = 0;
   GSImageTransferDirection direction =
     GSImageTransferDirection::Deactivated;
   bool active = false;
@@ -418,6 +420,7 @@ class GS : public GIFRegisterWriteHandler
     void decodeTransferRegion(std::uint64_t data);
     void startImageTransfer(std::uint64_t data);
     void writeTransferData(std::uint64_t data);
+    void writePacked24TransferData(std::uint64_t data);
     void writeTransferPixel(std::uint32_t value);
     std::uint32_t readTransferPixel();
     std::size_t psmct32WordAddress(

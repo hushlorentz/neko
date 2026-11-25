@@ -680,7 +680,7 @@ TEST_CASE("GS active transfer restore rejects impossible requests", "[gs16]")
          InvalidField{"direction", 2},
          InvalidField{"direction", 3},
          InvalidField{"destinationBufferWidth", 0},
-         InvalidField{"destinationPixelStorageMode", 1}})
+         InvalidField{"destinationPixelStorageMode", 0x13}})
   {
     CAPTURE(field.name);
     CAPTURE(field.value);
@@ -708,6 +708,228 @@ TEST_CASE("GS active transfer restore rejects impossible requests", "[gs16]")
     REQUIRE_THROWS_AS(destination.loadState(invalid.bytes()), std::invalid_argument);
     REQUIRE(destination.saveState() == before);
   }
+}
+
+TEST_CASE("GS PSMCT24 restore preserves partial pixels and rejects impossible carry",
+  "[gs24][save-state]")
+{
+  unsigned words = 1;
+  SECTION("two carried bytes") {}
+  SECTION("one carried byte") { words = 2; }
+  NekoSystem source;
+  auto &gs = source.gs();
+  gs.writeRegister(GSRegisterAddress::BITBLTBUF,
+    (UINT64_C(1) << 56) | (UINT64_C(1) << 48));
+  gs.writeRegister(GSRegisterAddress::TRXREG, UINT64_C(8) | (UINT64_C(1) << 32));
+  gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+  gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x0807060504030201));
+  if (words == 2)
+  {
+    gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x100f0e0d0c0b0a09));
+  }
+  const auto saved = source.saveState();
+  NekoSystem restored;
+  restored.gs().writeRegister(GSRegisterAddress::BITBLTBUF,
+    (UINT64_C(1) << 56) | (UINT64_C(1) << 48));
+  restored.gs().writeRegister(GSRegisterAddress::TRXREG, UINT64_C(8) | (UINT64_C(1) << 32));
+  restored.gs().writeRegister(GSRegisterAddress::TRXDIR, 0);
+  restored.gs().writeRegister(GSRegisterAddress::HWREG, UINT64_MAX);
+  REQUIRE_NOTHROW(restored.loadState(saved));
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restored.gs().imageTransfer().pendingPixel == (words == 1 ? 0x0807 : 0x10));
+  REQUIRE(restored.gs().imageTransfer().pendingPixelBytes == (words == 1 ? 2 : 1));
+
+  struct InvalidField
+  {
+    const char *name;
+    std::uint64_t value;
+  };
+  for (const auto field : {
+         InvalidField{"pendingPixelBytes", 3},
+         InvalidField{"pendingPixelBytes", 0},
+         InvalidField{"pendingPixel", 0x10000},
+         InvalidField{"transferredPixels", 1},
+         InvalidField{"active", 0},
+         InvalidField{"destinationPixelStorageMode", 0}})
+  {
+    CAPTURE(field.name);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(std::string("system.gs.transfer.") + field.name, field.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(invalid), std::invalid_argument);
+    REQUIRE(restored.saveState() == saved);
+  }
+  SaveStateMutation invalidPhase(saved);
+  invalidPhase.writeScalar("system.gs.transfer.pendingPixelBytes", words == 1 ? 1 : 2);
+  invalidPhase.writeScalar("system.gs.transfer.pendingPixel", 0);
+  invalidPhase.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(invalidPhase), std::invalid_argument);
+  REQUIRE(restored.saveState() == saved);
+  for (auto *system : {&source, &restored})
+  {
+    if (words == 1)
+    {
+      system->gs().writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x100f0e0d0c0b0a09));
+    }
+    system->gs().writeRegister(GSRegisterAddress::HWREG, UINT64_C(0x1817161514131211));
+    REQUIRE_FALSE(system->gs().imageTransfer().active);
+    REQUIRE(system->gs().imageTransfer().pendingPixel == 0);
+    REQUIRE(system->gs().imageTransfer().pendingPixelBytes == 0);
+    REQUIRE(system->gs().localMemoryWord(4) == 0x090807);
+    REQUIRE(system->gs().localMemoryWord(13) == 0x181716);
+  }
+  REQUIRE(restored.saveState() == source.saveState());
+}
+
+TEST_CASE("GS PSMCT24 authored DMA preserves packed rows across packets and restore",
+  "[gs24][save-state][guest][trace]")
+{
+  std::uint32_t remaining = 84;
+  SECTION("after BITBLTBUF") {}
+  SECTION("after TRXREG") { remaining = 82; }
+  SECTION("one carried byte across IMAGE packets") { remaining = 76; }
+  SECTION("two carried bytes in the second IMAGE packet") { remaining = 74; }
+  constexpr std::uint32_t packetAddress = 0x20000;
+  constexpr std::uint32_t packetQuadwords = 86;
+  const auto prepare = [&](NekoSystem &system)
+  {
+    auto &gs = system.gs();
+    for (std::uint16_t y = 0; y < 64; ++y)
+    {
+      for (std::uint16_t x = 0; x < 192; ++x)
+      {
+        gs.writeDisplayPSMCT32(8960, 3, x, y, 0xa5778899);
+      }
+    }
+    std::vector<GIFQuadword> packet = {
+      gifTag(4, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(0x0103230000000000)),
+      adWrite(GSRegisterAddress::TRXPOS, (UINT64_C(3) << 32) | (UINT64_C(31) << 48)),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(135) | (UINT64_C(3) << 32)),
+      adWrite(GSRegisterAddress::TRXDIR, 0),
+      gifTag(2, false, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, UINT64_C(63) << 56),
+      adWrite(GSRegisterAddress::TRXREG, UINT64_C(1) | (UINT64_C(1) << 32)),
+      gifTag(1, false, GIFDataFormat::Image, 0)
+    };
+    for (unsigned index = 0; index < 76; ++index)
+    {
+      if (index == 1)
+      {
+        packet.push_back(gifTag(75, true, GIFDataFormat::Image, 0));
+      }
+      GIFQuadword payload{};
+      for (unsigned byte = 0; byte < 16; ++byte)
+      {
+        const unsigned offset = index * 16 + byte;
+        const auto value = offset < 1215 ? (offset * 37 + 11) & 0xff : 0xee;
+        payload[byte / 4] |= value << ((byte % 4) * 8);
+      }
+      packet.push_back(payload);
+    }
+    REQUIRE(packet.size() == packetQuadwords);
+    for (std::uint32_t index = 0; index < packet.size(); ++index)
+    {
+      REQUIRE(system.eeBus().writeQuadword(packetAddress + index * 16, packet[index]));
+    }
+    const std::uint32_t program[] = {
+      0xac620000, 0xac640010, 0xac65fff0, 0x1000ffff, 0
+    };
+    for (std::uint32_t index = 0; index < 5; ++index)
+    {
+      system.eeBus().write32(0x10000 + index * 4, program[index]);
+    }
+    system.eeBus().write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+    auto &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(2, {packetAddress, 0});
+    core.setGeneralRegister(3, {0xb000a010, 0});
+    core.setGeneralRegister(4, {packetQuadwords, 0});
+    core.setGeneralRegister(5, {0x101, 0});
+    core.startExecution(0xa0010000);
+    for (unsigned cycle = 0;
+         cycle < 64 && system.gifDMAC().quadwordCount() != remaining; ++cycle)
+    {
+      system.runMasterCycles(1);
+    }
+    REQUIRE(system.gifDMAC().quadwordCount() == remaining);
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    if (remaining <= 76)
+    {
+      REQUIRE(gs.imageTransfer().transferredPixels == (remaining == 76 ? 5 : 10));
+      REQUIRE(gs.imageTransfer().pendingPixelBytes == (remaining == 76 ? 1 : 2));
+      REQUIRE(gs.imageTransfer().width == 135);
+      REQUIRE(gs.registerValue(GSRegisterAddress::BITBLTBUF) == (UINT64_C(63) << 56));
+      REQUIRE(gs.registerValue(GSRegisterAddress::TRXREG) ==
+        (UINT64_C(1) | (UINT64_C(1) << 32)));
+    }
+  };
+  NekoSystem original;
+  NekoSystem originalPlain;
+  prepare(original);
+  prepare(originalPlain);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  NekoSystem restoredPlain;
+  restored.loadState(saved);
+  restoredPlain.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restoredPlain.saveState() == saved);
+  original.startTrace(10000);
+  restored.startTrace(10000);
+  for (auto *system : {&original, &originalPlain, &restored, &restoredPlain})
+  {
+    system->runMasterCycles(128);
+    REQUIRE(system->eeCore().pendingException() == EEException::None);
+    REQUIRE(system->gifDMAC().quadwordCount() == 0);
+    REQUIRE(system->gifDMAC().transferredQuadwordCount() == packetQuadwords);
+    const auto &transfer = system->gs().imageTransfer();
+    REQUIRE_FALSE(transfer.active);
+    REQUIRE(transfer.transferredPixels == 405);
+    REQUIRE(transfer.pendingPixel == 0);
+    REQUIRE(transfer.pendingPixelBytes == 0);
+    // Inverse GSUSER_E p164 word bit planes, independent of the forward mapper.
+    constexpr unsigned xBits[] = {0, 2, 3, 6, 8, 10};
+    constexpr unsigned yBits[] = {1, 4, 5, 7, 9};
+    for (unsigned page = 0; page < 6; ++page)
+    {
+      for (unsigned word = 0; word < 2048; ++word)
+      {
+        unsigned x = (page % 3) * 64;
+        unsigned y = (page / 3) * 32;
+        for (unsigned bit = 0; bit < 6; ++bit)
+        {
+          x |= ((word >> xBits[bit]) & 1) << bit;
+        }
+        for (unsigned bit = 0; bit < 5; ++bit)
+        {
+          y |= ((word >> yBits[bit]) & 1) << bit;
+        }
+        std::uint32_t expected = 0xa5778899;
+        if (x >= 3 && x < 138 && y >= 31 && y < 34)
+        {
+          const unsigned byte = ((y - 31) * 135 + x - 3) * 3;
+          expected = UINT32_C(0xa5000000) |
+            ((byte * 37 + 11) & 0xff) |
+            ((((byte + 1) * 37 + 11) & 0xff) << 8) |
+            ((((byte + 2) * 37 + 11) & 0xff) << 16);
+        }
+        CAPTURE(page);
+        CAPTURE(word);
+        REQUIRE(system->gs().localMemoryWord(8960 * 64 + page * 2048 + word) == expected);
+      }
+    }
+    REQUIRE(system->gs().localMemoryWord(8960 * 64 - 1) == 0);
+    REQUIRE(system->gs().localMemoryWord(8960 * 64 + 6 * 2048) == 0);
+  }
+  REQUIRE_FALSE(original.traceTruncated());
+  REQUIRE_FALSE(restored.traceTruncated());
+  REQUIRE_FALSE(original.trace().empty());
+  REQUIRE(original.traceHash() == restored.traceHash());
+  const auto ending = original.saveState();
+  REQUIRE(restored.saveState() == ending);
+  REQUIRE(restoredPlain.saveState() == ending);
+  REQUIRE(originalPlain.saveState() == ending);
 }
 
 TEST_CASE("GS passive rejected and empty requests restore without reactivation", "[gs16]")
@@ -1086,7 +1308,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 136 save-state layout is byte-stable",
+TEST_CASE("Version 137 save-state layout is byte-stable",
   "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model][ba0-write32]")
 {
   NekoSystem system;
@@ -1102,17 +1324,17 @@ TEST_CASE("Version 136 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 136);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 137);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 135;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 136;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040 + 5);
   const SaveStateMutation fields(state);
   REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
   REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
@@ -1429,6 +1651,10 @@ TEST_CASE("Version 136 save-state layout is byte-stable",
   REQUIRE(clut1 != nullptr);
   previousVersion.erase(previousVersion.begin() + clutEntries->containerOffset,
     previousVersion.begin() + clutEntries->containerOffset + 1028);
+  const auto *pendingPixel = snapshot.find("system.gs.transfer.pendingPixel");
+  REQUIRE(pendingPixel != nullptr);
+  previousVersion.erase(previousVersion.begin() + pendingPixel->containerOffset,
+    previousVersion.begin() + pendingPixel->containerOffset + 5);
   previousVersion.erase(previousVersion.begin() + clut1->containerOffset,
     previousVersion.begin() + clut1->containerOffset + 6);
   previousVersion.erase(previousVersion.begin() + clut0->containerOffset,
@@ -1450,7 +1676,7 @@ TEST_CASE("Version 136 save-state layout is byte-stable",
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
       appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32,
-      clutEntries, clut0, clut1](std::size_t offset)
+      clutEntries, clut0, clut1, pendingPixel](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
@@ -1461,7 +1687,8 @@ TEST_CASE("Version 136 save-state layout is byte-stable",
       (offset > ba0Device32->containerOffset ? 1 : 0) -
       (offset >= clutEntries->containerOffset + 1028 ? 1028 : 0) -
       (offset >= clut0->containerOffset + 6 ? 6 : 0) -
-      (offset >= clut1->containerOffset + 6 ? 6 : 0);
+      (offset >= clut1->containerOffset + 6 ? 6 : 0) -
+      (offset >= pendingPixel->containerOffset + 5 ? 5 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(

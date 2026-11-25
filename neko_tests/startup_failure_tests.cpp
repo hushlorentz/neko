@@ -646,7 +646,7 @@ TEST_CASE("Startup runtime errors retain the attempted GS transfer parameters",
   const auto evidence = runDualCPUWithStartupEvidence(system, 16);
   REQUIRE(evidence.outcome == StartupRunOutcome::RuntimeError);
   REQUIRE(evidence.error.message ==
-    "GS host-to-local transfer requires PSMCT32, PSMCT16 or PSMT4.");
+    "GS host-to-local transfer requires PSMCT32, PSMCT24, PSMCT16 or PSMT4.");
   std::ostringstream output;
   writeStartupRuntimeErrorJsonLine(output, evidence.error);
   REQUIRE(output.str().find(
