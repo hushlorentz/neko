@@ -197,6 +197,136 @@ TEST_CASE("IOP system latches timer requests before same-cycle CPU admission",
   REQUIRE(system.iopCore().retiredInstructions() == 3);
 }
 
+TEST_CASE("IOP V-blank edges latch while masked and halted without level reassertion",
+  "[iop][system][vblank][conformance]")
+{
+  NekoSystem system;
+  system.gsDisplay().configureTiming({3, 11, {3, 5, 1}});
+  auto &interrupts = system.iopInterruptController();
+  interrupts.assertSource(IOPInterruptSource::SBUS);
+  system.runMasterCycles(3);
+  REQUIRE(interrupts.status() == 3);
+  REQUIRE(interrupts.mask() == 0);
+  REQUIRE(interrupts.control() == 0);
+  REQUIRE_FALSE(interrupts.interruptPending());
+  REQUIRE(system.iopCore().elapsedCycles() == 0);
+  REQUIRE_FALSE(system.gsDisplay().takeVerticalBlankStart());
+
+  system.interruptController().acknowledge(
+    EEInterruptSource::mask(EEInterruptSource::VBLANK_START));
+  system.gsDisplay().writePrivilegedRegister(
+    GSDisplayPrivilegedRegister::CSR, GSSystemStatus::VSYNC_INTERRUPT);
+  REQUIRE(interrupts.status() == 3);
+  interrupts.writeMask(1);
+  interrupts.writeControl(1);
+  REQUIRE(interrupts.interruptPending());
+  REQUIRE(interrupts.readControl() == 1);
+  REQUIRE(interrupts.status() == 3);
+  interrupts.writeControl(1);
+  interrupts.writeStatus(~IOPWord(1));
+  system.runMasterCycles(7);
+  REQUIRE(system.gsDisplay().inVerticalBlank());
+  REQUIRE(interrupts.status() == 2);
+  system.clockMasterCycle();
+  REQUIRE(interrupts.status() == 0x802);
+  REQUIRE_FALSE(system.gsDisplay().takeVerticalBlankEnd());
+
+  interrupts.reset();
+  system.runMasterCycles(3);
+  REQUIRE(interrupts.status() == 1);
+  interrupts.reset();
+  system.clockMasterCycle();
+  REQUIRE(interrupts.status() == 0);
+  REQUIRE(system.gsDisplay().inVerticalBlank());
+  system.reset();
+  REQUIRE(interrupts.status() == 0);
+  REQUIRE(system.interruptController().status() == 0);
+  REQUIRE_FALSE(system.gsDisplay().inVerticalBlank());
+  REQUIRE_FALSE(system.gsDisplay().takeVerticalBlankStart());
+  REQUIRE_FALSE(system.gsDisplay().takeVerticalBlankEnd());
+  system.clockMasterCycle();
+  REQUIRE(interrupts.status() == 0);
+}
+
+TEST_CASE("IOP V-blank admission follows the coincident or next phase-zero pulse",
+  "[iop][system][vblank][conformance]")
+{
+  for (bool endEdge : {false, true})
+  {
+    for (std::uint64_t edgeCycle = 17; edgeCycle <= 24; ++edgeCycle)
+    {
+      CAPTURE(endEdge);
+      CAPTURE(edgeCycle);
+      NekoSystem system;
+      system.gsDisplay().configureTiming(
+        {endEdge ? 12 : edgeCycle, endEdge ? edgeCycle : 64, {3, 5, 1}});
+      interruptProgram(&system);
+      auto &interrupts = system.iopInterruptController();
+      const IOPWord cause = endEdge ? 0x800 : 1;
+      interrupts.writeMask(cause);
+      interrupts.writeControl(1);
+      system.runMasterCycles(edgeCycle - 1);
+      const auto pc = system.iopCore().programCounter();
+      const auto retired = system.iopCore().retiredInstructions();
+      const auto admissionCycle = ((edgeCycle - 1 + 7) / 8) * 8 + 1;
+      system.clockMasterCycle();
+      REQUIRE(interrupts.status() == (endEdge ? 0x801 : 1));
+      if (edgeCycle != admissionCycle)
+      {
+        REQUIRE(system.iopCore().exception().kind == IOPException::None);
+        system.runMasterCycles(admissionCycle - edgeCycle - 1);
+        REQUIRE(system.iopCore().programCounter() == pc);
+        system.clockMasterCycle();
+      }
+      REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
+      REQUIRE(system.iopCore().exceptionProgramCounter() == pc);
+      REQUIRE(system.iopCore().retiredInstructions() == retired);
+      REQUIRE(system.iopCore().programCounter() == 0x80000080);
+      REQUIRE(interrupts.status() == (endEdge ? 0x801 : 1));
+    }
+  }
+}
+
+TEST_CASE("IOP V-blank remains pending through every admission gate",
+  "[iop][system][vblank][conformance]")
+{
+  for (unsigned blockedGate = 0; blockedGate < 3; ++blockedGate)
+  {
+    CAPTURE(blockedGate);
+    NekoSystem system;
+    system.gsDisplay().configureTiming({17, 64, {3, 5, 1}});
+    instruction(&system, 0, blockedGate == 2 ? 0x34010400 : 0x34010401);
+    instruction(&system, 4, 0x40816000); // mtc0 r1, Status
+    instruction(&system, 8, 0x34030401); // ori r3, r0, IEc | IM2
+    instruction(&system, 12, 0x40836000); // mtc0 r3, Status
+    instruction(&system, 16, 0x24420001);
+    auto &interrupts = system.iopInterruptController();
+    interrupts.writeMask(blockedGate == 0 ? 0 : 1);
+    interrupts.writeControl(blockedGate == 1 ? 0 : 1);
+    system.iopCore().startExecution(0xa0000000);
+    system.runMasterCycles(17);
+    REQUIRE(interrupts.status() == 1);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().programCounter() == 0xa000000c);
+    interrupts.writeMask(1);
+    interrupts.writeControl(1);
+    system.runMasterCycles(7);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    system.clockMasterCycle();
+    if (blockedGate == 2)
+    {
+      REQUIRE(system.iopCore().exception().kind == IOPException::None);
+      REQUIRE(system.iopCore().programCounter() == 0xa0000010);
+      system.runMasterCycles(8);
+    }
+    REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
+    REQUIRE(system.iopCore().exceptionProgramCounter() ==
+      (blockedGate == 2 ? 0xa0000010 : 0xa000000c));
+    REQUIRE(system.iopCore().generalRegister(2) == 0);
+    REQUIRE(interrupts.status() == 1);
+  }
+}
+
 TEST_CASE("IOP system samples post-display gates without stealing EE vertical edges",
   "[iop][system]")
 {
@@ -221,7 +351,7 @@ TEST_CASE("IOP system samples post-display gates without stealing EE vertical ed
   REQUIRE(system.iopTimers().gateLevels().verticalBlank);
   REQUIRE(system.iopTimers().counter(0).count == 2);
   REQUIRE(system.iopTimers().counter(1).count == 1);
-  REQUIRE(system.iopInterruptController().status() == 0x20);
+  REQUIRE(system.iopInterruptController().status() == 0x21);
   REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
   REQUIRE(system.iopCore().exceptionProgramCounter() == 0xa0000008);
   REQUIRE(system.interruptController().status() ==
@@ -358,7 +488,7 @@ TEST_CASE("IOP system applies every external gate mode before coincident CPU pul
         }
         if (cycle == 17)
         {
-          REQUIRE(system.iopInterruptController().status() == timerCauses[index]);
+          REQUIRE(system.iopInterruptController().status() == (timerCauses[index] | 0x801));
           REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
           REQUIRE(system.iopCore().exceptionProgramCounter() == 0xa0000008);
           REQUIRE(system.iopCore().generalRegister(2) == 0);
@@ -366,7 +496,7 @@ TEST_CASE("IOP system applies every external gate mode before coincident CPU pul
       }
       REQUIRE(system.iopTimers().counter(index).oneShotConsumed);
       REQUIRE_FALSE(system.iopTimers().counter(index).gateWaiting);
-      REQUIRE(system.iopInterruptController().status() == timerCauses[index]);
+      REQUIRE(system.iopInterruptController().status() == (timerCauses[index] | 0x801));
     }
   }
 }
@@ -470,7 +600,7 @@ TEST_CASE("IOP system guest independently acknowledges timer modes and masked IN
   NekoSystem system;
   prepareTimerService(&system);
   system.runMasterCycles(8);
-  REQUIRE(system.iopInterruptController().status() == 0x10010);
+  REQUIRE(system.iopInterruptController().status() == 0x10011);
   REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
   REQUIRE(system.iopCore().exceptionProgramCounter() == 0xa0000020);
   REQUIRE(system.iopTimers().counter(0).pulseReleasePending);
@@ -485,13 +615,13 @@ TEST_CASE("IOP system guest independently acknowledges timer modes and masked IN
   REQUIRE_FALSE(system.iopTimers().counter(0).pulseReleasePending);
   REQUIRE(system.iopTimers().counter(5).mode == 0x890);
   REQUIRE(system.iopTimers().counter(5).oneShotConsumed);
-  REQUIRE(system.iopInterruptController().status() == 0x10010);
+  REQUIRE(system.iopInterruptController().status() == 0x10011);
   system.runMasterCycles(16);
   REQUIRE(system.iopCore().generalRegister(8) == 0xc10);
   REQUIRE(system.iopCore().generalRegister(9) == 0x10);
-  REQUIRE(system.iopInterruptController().status() == 0x10010);
+  REQUIRE(system.iopInterruptController().status() == 0x10011);
   system.runMasterCycles(16);
-  REQUIRE(system.iopInterruptController().status() == 0x10000);
+  REQUIRE(system.iopInterruptController().status() == 0x10801);
   REQUIRE(system.iopTimers().counter(5).mode == 0x890);
   system.runMasterCycles(32);
   REQUIRE(system.iopCore().programCounter() == 0xa0000020);
@@ -507,7 +637,7 @@ TEST_CASE("IOP system guest independently acknowledges timer modes and masked IN
   REQUIRE(system.iopCore().generalRegister(2) == 0);
   system.runMasterCycles(72);
   REQUIRE(system.iopCore().programCounter() == 0xa0000024);
-  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.iopInterruptController().status() == 0x801);
   REQUIRE(system.iopTimers().counter(5).mode == 0x890);
   REQUIRE(system.iopTimers().counter(5).oneShotConsumed);
   system.runMasterCycles(8);
@@ -515,7 +645,7 @@ TEST_CASE("IOP system guest independently acknowledges timer modes and masked IN
   REQUIRE(system.iopCore().elapsedCycles() == 30);
   REQUIRE(system.iopCore().retiredInstructions() == 28);
   system.runMasterCycles(32);
-  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.iopInterruptController().status() == 0x801);
   REQUIRE(system.iopCore().exception().kind == IOPException::None);
   REQUIRE(system.iopCore().generalRegister(2) == 1);
 }
@@ -564,7 +694,7 @@ TEST_CASE("IOP system repeats and restores timer service at event load and branc
     hashes.push_back(reference.iopStateHash());
   }
   REQUIRE(reference.iopCore().generalRegister(2) == 1);
-  REQUIRE(reference.iopInterruptController().status() == 0);
+  REQUIRE(reference.iopInterruptController().status() == 0x801);
   const auto finalState = reference.saveState();
   for (unsigned checkpoint : {64u, 65u, 73u, 81u, 129u, 153u})
   {
@@ -665,7 +795,7 @@ TEST_CASE("IOP system reset discards active timer interrupt and guest continuati
     REQUIRE(idempotent);
     prepareTimerService(&system);
     system.runMasterCycles(8);
-    REQUIRE(system.iopInterruptController().status() == 0x10010);
+    REQUIRE(system.iopInterruptController().status() == 0x10011);
     REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
     REQUIRE(system.iopCore().exceptionProgramCounter() == 0xa0000020);
   }

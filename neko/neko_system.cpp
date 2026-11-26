@@ -1141,12 +1141,14 @@ void NekoSystem::latchComponentInterrupts()
     interruptControllerComponent.setSource(
       EEInterruptSource::VBLANK_START,
       true);
+    iopInterruptControllerComponent.assertSource(IOPInterruptSource::VBlankStart);
   }
   if (gsDisplayComponent.takeVerticalBlankEnd())
   {
     interruptControllerComponent.setSource(
       EEInterruptSource::VBLANK_END,
       true);
+    iopInterruptControllerComponent.assertSource(IOPInterruptSource::VBlankEnd);
   }
 }
 

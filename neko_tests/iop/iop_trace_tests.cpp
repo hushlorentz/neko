@@ -931,14 +931,17 @@ TEST_CASE("IOP trace observes routed gate edges but omits ordinary counter incre
   system.startTrace();
   system.runMasterCycles(3);
   const auto events = iopTrace(system);
-  REQUIRE(events.size() == 3);
+  REQUIRE(events.size() == 4);
   requireIdentity(events[0], Subsystem::IOPTimers, Type::TimerEvent, 2);
   REQUIRE(events[0].value0 == (Timer::GATE_CHANGED | Timer::HBLANK_AFTER));
-  for (std::size_t index = 1; index <= 2; ++index)
+  requireIdentity(events[1], Subsystem::IOPInterruptController,
+    Type::InterruptChanged, 3);
+  REQUIRE(events[1].value0 == 1);
+  for (std::size_t index = 2; index <= 3; ++index)
   {
     requireIdentity(events[index], Subsystem::IOPTimers, Type::TimerEvent, 3);
     REQUIRE(events[index].value0 ==
-      ((index == 1 ? 1u : 3u) | Timer::GATE_CHANGED |
+      ((index == 2 ? 1u : 3u) | Timer::GATE_CHANGED |
         Timer::HBLANK_BEFORE | Timer::HBLANK_AFTER | Timer::VBLANK_AFTER));
   }
 }
@@ -1156,6 +1159,9 @@ TEST_CASE("IOP device observation capacities retain every sample and CPU access"
   timers.writeCount(0, 0);
   interrupts.assertSource(IOPInterruptSource::DMAC);
   interrupts.assertSource(IOPInterruptSource::CDVD);
+  interrupts.assertSource(IOPInterruptSource::VBlankStart);
+  interrupts.assertSource(IOPInterruptSource::VBlankEnd);
+  interrupts.assertSource(IOPInterruptSource::SIO2);
   interrupts.writeMask(0x1c070);
   interrupts.writeControl(1);
   REQUIRE(Access::count(timers) == Access::timerCapacity());
@@ -1163,6 +1169,64 @@ TEST_CASE("IOP device observation capacities retain every sample and CPU access"
   REQUIRE(order.next == Access::timerCapacity() + Access::interruptCapacity());
   REQUIRE_THROWS_AS(timers.readMode(0), std::logic_error);
   REQUIRE_THROWS_AS(interrupts.writeControl(0), std::logic_error);
+}
+
+TEST_CASE("IOP V-blank trace retains combined producers before guest acknowledgement",
+  "[iop][trace][vblank][conformance]")
+{
+  NekoSystem system;
+  system.gsDisplay().configureTiming({17, 18, {1, 2, 1}});
+  prepareAccess(system, 0x1070, 0xac200000); // sw r0, I_STAT(r1)
+  system.gsDisplay().clock();
+  system.gsDisplay().clock();
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    system.iopTimers().writeTarget(index, 0);
+    system.iopTimers().writeMode(index, 0x30);
+    system.iopTimers().writeCount(index, index < 3 ? 0xffff : 0xffffffff);
+  }
+  REQUIRE(system.iopBus().write8(0x1f402004, 0).status ==
+    IOPBusStatus::Completed);
+  auto &sio2 = system.sio2Controller();
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write32(0x1f808250, 0xff020405).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f808254, 0x0005ffff).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f808200, 0x00100472).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1000, 0x00001181).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801540, 0x1000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801544, 0x10024).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801548, 0x01000201).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801570, 8 << 16).status == IOPBusStatus::Completed);
+  for (std::size_t word = 0; word < 36; ++word)
+    REQUIRE(system.iopDMAController().clockSIO2Input(bus, sio2).outcome ==
+      (word == 35 ? IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted));
+  REQUIRE(sio2.startTransfer(0x3bd) == SIO2TransferResult::Pending);
+
+  system.startTrace();
+  system.clockMasterCycle();
+  const auto events = IOPTraceTest::subsystemEvents(
+    system, Subsystem::IOPInterruptController);
+  REQUIRE(events.size() == 11);
+  const std::array<IOPWord, 10> causes = {{
+    1, 0x800, 0x10, 0x20, 0x40, 0x4000, 0x8000, 0x10000, 4, 0x20000
+  }};
+  IOPWord status = 0;
+  for (std::size_t index = 0; index < causes.size(); ++index)
+  {
+    status |= causes[index];
+    requireIdentity(events[index], Subsystem::IOPInterruptController,
+      Type::InterruptChanged, 17);
+    REQUIRE(events[index].value0 == status);
+  }
+  REQUIRE(events.back().value0 == 0);
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.iopCore().programCounter() == 0xa000000c);
+  const auto cpuEvents = IOPTraceTest::subsystemEvents(system, Subsystem::IOP);
+  REQUIRE(cpuEvents.size() == 4);
+  REQUIRE(cpuEvents[0].type == Type::MemoryAccess);
+  REQUIRE(cpuEvents[0].value0 == 0xa0000008);
+  REQUIRE(cpuEvents[2].type == Type::MemoryAccess);
+  REQUIRE(cpuEvents[2].value0 == 0xbf801070);
 }
 
 TEST_CASE("IOP cycle observation scope disarms device journals on execution failure",

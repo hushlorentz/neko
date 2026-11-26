@@ -4394,8 +4394,62 @@ not requirements for exhaustive subsystem coverage.
 - [x] Define field/output geometry through the existing GS display owner and
       correct interlaced FRAME/FIELD source-row selection, with authored
       conformance and preserved non-interlaced, save-state and trace contracts.
-- [ ] Verify language-screen presentation with bounded unchanged-input BIOS
+- [x] Verify language-screen presentation with bounded unchanged-input BIOS
       evidence and required comparisons after the implementation checkpoint.
+
+### Post-Language-Screen Dependency Planning
+
+- [x] Reassess remaining services against the selected shell/input profile;
+      prioritize controller connection/polling attribution and keep unrelated
+      CD/DVD, media, memory-card and module breadth conditional.
+
+### Controller Connection and Polling Attribution
+
+- [x] Attribute the sampled state to its executed EE publisher and
+      port-open/read gates, identifying the guest IOP registration boundary
+      without treating aggregate zero as a direct library state or device reply.
+
+### IOP V-blank Interrupt Delivery
+
+- [x] Establish the IOP start/end interrupt contract and master/IOP-pulse
+      ordering through existing GS/INTC owners; resolve consequential timing
+      policies before implementation.
+- [x] Deliver GS blank edges to IOP INTC with masked latching, acknowledgement,
+      reset and authored continuation/trace conformance, preserving existing
+      EE interrupts and timer behavior.
+- [ ] Verify bounded IOP handler and connection-table progress with required
+      cold/restored BIOS comparisons after the implementation checkpoint;
+      attribute the next dependency without assuming connected input.
+
+### Controller Serial Request and Result Attribution
+
+- [ ] Attribute demonstrated controller requests/results to exact SIO2
+      programming, CPU/DMA transport and IRQ/status boundaries; use retained
+      evidence before selecting any necessary bounded capture.
+
+### SIO2 Controller Contract and Input Planning
+
+- [ ] Select the evidenced port-1 DualShock 2 connection, configuration and
+      polling contract, including absent/error behavior and completion;
+      resolve consequential protocol/timing policies before implementation.
+- [ ] Define deterministic sampling from the existing core input state,
+      button/stick byte mapping and request/reply ownership; separate serial
+      controller state from absent memory cards and host persistence.
+- [ ] Split required transport, protocol and system integration into bounded
+      implementation pieces with reset, save-state, trace and authored
+      conformance acceptance through the existing SIO2/DMA/IRQ owners.
+
+### Controller Integration and Responsiveness
+
+- [ ] Implement the selected controller request families with focused
+      red/green tests and authored conformance; preserve supported absent
+      device profiles and reject unsupported requests without side effects.
+- [ ] Extend only demonstrated SIO2 DMA shapes through existing shared grants
+      with real reply availability, packing, backpressure and masked completion;
+      keep DMA completion distinct from serial completion and peer success.
+- [ ] Verify guest-observed connection, neutral data and deterministic button
+      transitions with required replay comparisons before the shell's
+      change-and-return responsiveness acceptance.
 
 ### Additional CD/DVD Command and Configuration Scope
 
@@ -4419,17 +4473,6 @@ not requirements for exhaustive subsystem coverage.
       emulated deadlines and deterministic restored continuation.
 - [ ] Split the selected seek/read/transfer lifecycle into reviewable blocks
       with authored fixtures before implementing a media boot path.
-
-### SIO2, Input and Memory-Card Scope
-
-- [ ] Expand demonstrated SIO2 register, command, DMA and IRQ dependencies into
-      reviewable blocks; implement controller or memory-card protocols only as
-      required by the selected shell profile and responsiveness demonstration.
-- [ ] Define deterministic controller-input sampling and separate memory-card
-      protocol state from host persistence; select absent-device/error behavior.
-- [ ] With a supported serial result producer, integrate output DMA into shared
-      grants with real FIFO backpressure, packing, progress and masked completion;
-      keep DMA completion distinct from serial completion and peer success.
 
 ### ROM and Module-Loading Scope
 

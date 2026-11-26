@@ -47,6 +47,75 @@ namespace
   }
 }
 
+TEST_CASE("IOP V-blank continuations preserve every pulse phase traced and plain",
+  "[iop][vblank][save-state][conformance]")
+{
+  for (std::uint64_t boundary : {33u, 65u})
+  {
+    for (std::uint64_t phase = 0; phase < 8; ++phase)
+    {
+      CAPTURE(boundary);
+      CAPTURE(phase);
+      NekoSystem original;
+      original.gsDisplay().configureTiming({33, 65, {3, 5, 1}});
+      loadInstruction(&original, 0, 0x34010401);
+      loadInstruction(&original, 4, 0x40816000);
+      original.iopInterruptController().writeMask(0x801);
+      original.iopInterruptController().writeControl(1);
+      original.iopCore().startExecution(0xa0000000);
+      original.runMasterCycles(boundary - 1 + phase);
+      const auto checkpoint = original.saveState();
+      NekoSystem restored;
+      restored.loadState(checkpoint);
+      NekoSystem plain;
+      plain.loadState(checkpoint);
+      original.startTrace();
+      restored.startTrace();
+      original.runMasterCycles(10);
+      restored.runMasterCycles(10);
+      plain.runMasterCycles(10);
+      REQUIRE(original.iopInterruptController().status() ==
+        (boundary == 33 ? 1 : 0x801));
+      IOPTraceTest::requireMachine(restored, original);
+      IOPTraceTest::requireMachine(plain, original);
+      IOPTraceTest::requireEvents(restored.trace(), original.trace());
+      REQUIRE(plain.trace().empty());
+    }
+  }
+}
+
+TEST_CASE("IOP V-blank restore fans pending edges out once before clocking",
+  "[iop][vblank][save-state][conformance]")
+{
+  NekoSystem original;
+  original.gsDisplay().configureTiming({1, 2, {1, 2, 1}});
+  original.gsDisplay().clock();
+  original.gsDisplay().clock();
+  const auto checkpoint = original.saveState();
+  NekoSystem restored;
+  restored.loadState(checkpoint);
+  NekoSystem plain;
+  plain.loadState(checkpoint);
+  for (auto *system : {&original, &restored, &plain})
+  {
+    if (system != &plain)
+      system->startTrace();
+    system->clockMasterCycle();
+    REQUIRE(system->iopInterruptController().status() == 0x801);
+    REQUIRE(system->interruptController().status() ==
+      (EEInterruptSource::mask(EEInterruptSource::VBLANK_START) |
+        EEInterruptSource::mask(EEInterruptSource::VBLANK_END)));
+    REQUIRE_FALSE(system->gsDisplay().takeVerticalBlankStart());
+    REQUIRE_FALSE(system->gsDisplay().takeVerticalBlankEnd());
+    system->iopInterruptController().writeStatus(0);
+    REQUIRE(system->gsDisplay().inVerticalBlank());
+    REQUIRE(system->iopInterruptController().status() == 0);
+  }
+  IOPTraceTest::requireMachine(restored, original);
+  IOPTraceTest::requireMachine(plain, original);
+  IOPTraceTest::requireEvents(restored.trace(), original.trace());
+}
+
 TEST_CASE("SIO2 canonical state replaces all retained control images",
   "[iop][sio2][save-state]")
 {
