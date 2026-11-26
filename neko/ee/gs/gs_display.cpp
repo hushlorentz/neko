@@ -97,7 +97,7 @@ void GSDisplay::clock()
     cycleInFrame = 0;
     verticalBlank = false;
     verticalBlankEnded = true;
-    if ((syncModeRegister & 1) != 0)
+    if ((syncModeRegister & GSDisplaySyncMode::INTERLACE) != 0)
     {
       oddField = !oddField;
     }
@@ -214,7 +214,7 @@ GSPresentation GSDisplay::presentation() const
   const Circuit &dimensions = circuits[dimensionsCircuit];
   GSPresentation result;
   result.width = dimensions.displayWidth;
-  result.height = dimensions.displayHeight;
+  result.height = circuitPresentationHeight(dimensionsCircuit);
   result.rgba.reserve(
     static_cast<std::size_t>(result.width) *
     result.height *
@@ -345,6 +345,13 @@ void GSDisplay::decodeDisplay(
     circuit.verticalMagnification);
 }
 
+std::uint16_t GSDisplay::circuitPresentationHeight(std::size_t index) const
+{
+  const std::uint16_t height = circuits[index].displayHeight;
+  return (syncModeRegister & GSDisplaySyncMode::INTERLACE) != 0 ?
+    height / 2 : height;
+}
+
 std::uint32_t GSDisplay::circuitPixel(
   std::size_t index,
   std::uint16_t x,
@@ -352,15 +359,19 @@ std::uint32_t GSDisplay::circuitPixel(
 {
   const Circuit &circuit = circuits[index];
   if (x >= circuit.displayWidth ||
-      y >= circuit.displayHeight)
+      y >= circuitPresentationHeight(index))
   {
     return static_cast<std::uint32_t>(backgroundColor);
   }
+  const std::uint16_t sourceRow =
+    (syncModeRegister & (GSDisplaySyncMode::INTERLACE | GSDisplaySyncMode::FRAME)) ==
+        GSDisplaySyncMode::INTERLACE ?
+      y * 2 + (oddField ? 1 : 0) : y;
   return gsComponent->readDisplayPSMCT32(
     circuit.basePointer * BLOCKS_PER_FRAMEBUFFER_PAGE,
     circuit.bufferWidth,
     circuit.sourceX + x,
-    circuit.sourceY + y);
+    circuit.sourceY + sourceRow);
 }
 
 bool GSDisplay::circuitEnabled(std::size_t index) const

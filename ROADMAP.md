@@ -4365,9 +4365,37 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add the approved opt-in bounded draw/fragment diagnostic through existing
       GS owners, with authored cold/restored conformance, strict inspection,
       required validation and independent review.
-- [ ] Attribute the observed black scanout during recurring graphics activity,
-      distinguishing guest-supplied drawing values from rendering and display
+- [x] Attribute the observed black scanout during recurring graphics activity,
+      distinguishing captured drawing inputs from rendering and display
       behavior with bounded evidence before selecting a hardware repair.
+- [x] Trace zero assembled sprite alpha to guest production or GIF ingestion,
+      using retained evidence before selecting a repair or another bounded
+      observation window.
+- [x] Attribute the guest alpha initializer's inputs and caller conditions
+      from retained evidence before selecting an emulator repair or further
+      bounded observation.
+- [x] Trace the upstream state fields and scalar that select zero sprite alpha,
+      using earlier retained evidence before choosing a repair or the smallest
+      necessary bounded observation.
+- [x] Attribute guest transition-script progression and idle-counter/scalar-
+      update scheduling before interpreting persistent zero alpha or selecting
+      an emulator repair.
+- [x] Observe completion of the repeated guest timer and subsequent transition/
+      service conditions, retaining any scalar/visibility change or next origin
+      with bounded unchanged-input evidence.
+- [x] Attribute the language-selection service/input gate using retained
+      evidence and bounded executed request/result traces before distinguishing
+      an expected user wait from an unsupported dependency.
+- [x] Attribute the repeated vertical layout in saved language-screen scanout
+      before selecting a rendering or presentation repair.
+
+### Interlaced GS Scanout Geometry
+
+- [x] Define field/output geometry through the existing GS display owner and
+      correct interlaced FRAME/FIELD source-row selection, with authored
+      conformance and preserved non-interlaced, save-state and trace contracts.
+- [ ] Verify language-screen presentation with bounded unchanged-input BIOS
+      evidence and required comparisons after the implementation checkpoint.
 
 ### Additional CD/DVD Command and Configuration Scope
 

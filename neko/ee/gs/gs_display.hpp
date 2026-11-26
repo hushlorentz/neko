@@ -24,6 +24,12 @@ namespace GSSystemStatus
   constexpr std::uint64_t FIELD = 1u << 13;
 }
 
+namespace GSDisplaySyncMode
+{
+  constexpr std::uint64_t INTERLACE = 1u;
+  constexpr std::uint64_t FRAME = 1u << 1;
+}
+
 namespace GSInterruptMask
 {
   constexpr std::uint64_t SIGNAL = 1u << 8;
@@ -92,6 +98,7 @@ struct GSDisplayTiming
 
 struct GSPresentation
 {
+  // Display magnification is omitted; interlaced output contains one field.
   std::uint16_t width = 0;
   std::uint16_t height = 0;
   std::vector<std::uint8_t> rgba;
@@ -140,6 +147,7 @@ class GSDisplay : public ClockedComponent
     void decodeFrame(std::size_t index, std::uint64_t value);
     void advanceHorizontalPhase();
     void decodeDisplay(std::size_t index, std::uint64_t value);
+    std::uint16_t circuitPresentationHeight(std::size_t index) const;
     std::uint32_t circuitPixel(
       std::size_t index,
       std::uint16_t x,

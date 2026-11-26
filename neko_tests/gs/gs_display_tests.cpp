@@ -171,6 +171,216 @@ TEST_CASE("GS display page selection agrees cold restored and traced",
   }
 }
 
+TEST_CASE("GS interlaced FRAME presentation reads only the current field",
+          "[gs][display][interlace]")
+{
+  for (const bool secondCircuit : {false, true})
+  {
+    for (const bool modeFirst : {false, true})
+    {
+      for (const std::uint8_t magnification : {1, 2})
+      {
+        GS gs;
+        GSDisplay display(&gs);
+        display.configureTiming({1, 2, {1, 2, 1}});
+        for (std::uint16_t row = 0; row < 6; ++row)
+        {
+          gs.writeDisplayPSMCT32(32, 2, 63, 31 + row, 0xff000010 + row);
+          gs.writeDisplayPSMCT32(32, 2, 64, 31 + row, 0xff000020 + row);
+        }
+        if (modeFirst)
+        {
+          display.writePrivilegedRegister(GSDisplayPrivilegedRegister::SMODE2, 3);
+        }
+        display.writePrivilegedRegister(secondCircuit ?
+          GSDisplayPrivilegedRegister::DISPFB2 : GSDisplayPrivilegedRegister::DISPFB1,
+          displayFrame(1, 2, 63, 31));
+        display.writePrivilegedRegister(secondCircuit ?
+          GSDisplayPrivilegedRegister::DISPLAY2 : GSDisplayPrivilegedRegister::DISPLAY1,
+          displayArea(8, 6 * magnification) |
+            (UINT64_C(3) << 23) |
+            (static_cast<std::uint64_t>(magnification - 1) << 27));
+        if (!modeFirst)
+        {
+          display.writePrivilegedRegister(GSDisplayPrivilegedRegister::SMODE2, 3);
+        }
+        display.writePrivilegedRegister(GSDisplayPrivilegedRegister::PMODE,
+          secondCircuit ? GSDisplayMode::ENABLE_CIRCUIT_2 :
+            GSDisplayMode::ENABLE_CIRCUIT_1);
+
+        const auto expected = std::vector<std::uint8_t>{
+          0x10, 0, 0, 0xff, 0x20, 0, 0, 0xff,
+          0x11, 0, 0, 0xff, 0x21, 0, 0, 0xff,
+          0x12, 0, 0, 0xff, 0x22, 0, 0, 0xff};
+        const auto field = display.presentation();
+        REQUIRE(field.width == 2);
+        REQUIRE(field.height == 3);
+        REQUIRE(field.rgba == expected);
+        display.clock();
+        display.clock();
+        REQUIRE((display.readPrivilegedRegister(GSDisplayPrivilegedRegister::CSR) &
+          GSSystemStatus::FIELD) != 0);
+        REQUIRE(display.presentation().rgba == expected);
+      }
+    }
+  }
+}
+
+TEST_CASE("GS interlaced FIELD presentation selects source rows by field parity",
+          "[gs][display][interlace]")
+{
+  for (const bool secondCircuit : {false, true})
+  {
+    for (const std::uint8_t magnification : {1, 2})
+    {
+      GS gs;
+      GSDisplay display(&gs);
+      display.configureTiming({1, 2, {1, 2, 1}});
+      for (std::uint16_t row = 0; row < 6; ++row)
+      {
+        gs.writeDisplayPSMCT32(32, 1, 0, 31 + row, 0xff000010 + row);
+      }
+      display.writePrivilegedRegister(secondCircuit ?
+        GSDisplayPrivilegedRegister::DISPFB2 : GSDisplayPrivilegedRegister::DISPFB1,
+        displayFrame(1, 1, 0, 31));
+      display.writePrivilegedRegister(secondCircuit ?
+        GSDisplayPrivilegedRegister::DISPLAY2 : GSDisplayPrivilegedRegister::DISPLAY1,
+        displayArea(1, 6 * magnification) |
+          (static_cast<std::uint64_t>(magnification - 1) << 27));
+      display.writePrivilegedRegister(GSDisplayPrivilegedRegister::PMODE,
+        secondCircuit ? GSDisplayMode::ENABLE_CIRCUIT_2 :
+          GSDisplayMode::ENABLE_CIRCUIT_1);
+      display.writePrivilegedRegister(GSDisplayPrivilegedRegister::SMODE2, 1);
+
+      const auto even = display.presentation();
+      REQUIRE(even.width == 1);
+      REQUIRE(even.height == 3);
+      REQUIRE(even.rgba == std::vector<std::uint8_t>{
+        0x10, 0, 0, 0xff, 0x12, 0, 0, 0xff, 0x14, 0, 0, 0xff});
+      display.clock();
+      display.clock();
+      REQUIRE((display.readPrivilegedRegister(GSDisplayPrivilegedRegister::CSR) &
+        GSSystemStatus::FIELD) != 0);
+      REQUIRE(display.presentation().rgba == std::vector<std::uint8_t>{
+        0x11, 0, 0, 0xff, 0x13, 0, 0, 0xff, 0x15, 0, 0, 0xff});
+
+      for (const std::uint64_t nonInterlacedMode : {0, 2})
+      {
+        display.writePrivilegedRegister(
+          GSDisplayPrivilegedRegister::SMODE2, nonInterlacedMode);
+        REQUIRE(display.presentation().height == 6);
+        REQUIRE(display.presentation().rgba == std::vector<std::uint8_t>{
+          0x10, 0, 0, 0xff, 0x11, 0, 0, 0xff, 0x12, 0, 0, 0xff,
+          0x13, 0, 0, 0xff, 0x14, 0, 0, 0xff, 0x15, 0, 0, 0xff});
+      }
+      display.writePrivilegedRegister(GSDisplayPrivilegedRegister::SMODE2, 3);
+      REQUIRE(display.presentation().height == 3);
+      REQUIRE(display.presentation().rgba == std::vector<std::uint8_t>{
+        0x10, 0, 0, 0xff, 0x11, 0, 0, 0xff, 0x12, 0, 0, 0xff});
+    }
+  }
+}
+
+TEST_CASE("GS interlaced merge clips each circuit to its field height",
+          "[gs][display][interlace]")
+{
+  GS gs;
+  GSDisplay display(&gs);
+  gs.writeDisplayPSMCT32(0, 1, 0, 0, 0x00000000);
+  gs.writeDisplayPSMCT32(0, 1, 0, 1, 0x00000000);
+  gs.writeDisplayPSMCT32(32, 1, 0, 0, 0xff000011);
+  gs.writeDisplayPSMCT32(32, 1, 0, 1, 0xff000022);
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::DISPFB1, displayFrame(0, 1));
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::DISPFB2, displayFrame(1, 1));
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::DISPLAY1, displayArea(1, 4));
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::DISPLAY2, displayArea(1, 2));
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::SMODE2, 3);
+  display.writePrivilegedRegister(GSDisplayPrivilegedRegister::PMODE,
+    GSDisplayMode::ENABLE_CIRCUIT_1 | GSDisplayMode::ENABLE_CIRCUIT_2);
+
+  const auto field = display.presentation();
+  REQUIRE(field.width == 1);
+  REQUIRE(field.height == 2);
+  REQUIRE(field.rgba == std::vector<std::uint8_t>{
+    0x11, 0, 0, 0, 0, 0, 0, 0});
+}
+
+TEST_CASE("GS interlaced fields agree cold restored and traced",
+          "[gs][display][interlace][conformance]")
+{
+  for (const std::uint64_t mode : {1, 3})
+  {
+    const auto prepare = [mode](NekoSystem &system)
+    {
+      system.gsDisplay().configureTiming({1, 2, {1, 2, 1}});
+      for (std::uint16_t row = 0; row < 5; ++row)
+      {
+        system.gs().writeDisplayPSMCT32(0, 1, 0, row, 0xff000000 + row * 0x11);
+      }
+      system.eeBus().write64(EEMemoryMap::GS_DISPFB2, displayFrame(0, 1, 0, 1));
+      system.eeBus().write64(EEMemoryMap::GS_DISPLAY2, displayArea(1, 4));
+      system.eeBus().write64(EEMemoryMap::GS_PMODE, GSDisplayMode::ENABLE_CIRCUIT_2);
+      system.eeBus().write64(EEMemoryMap::GS_SMODE2, mode);
+      system.runMasterCycles(2);
+    };
+    const GSPresentation expectedOdd{1, 2, mode == 1 ?
+      std::vector<std::uint8_t>{0x22, 0, 0, 0xff, 0x44, 0, 0, 0xff} :
+      std::vector<std::uint8_t>{0x11, 0, 0, 0xff, 0x22, 0, 0, 0xff}};
+    const GSPresentation expectedEven{1, 2, mode == 1 ?
+      std::vector<std::uint8_t>{0x11, 0, 0, 0xff, 0x33, 0, 0, 0xff} :
+      expectedOdd.rgba};
+    NekoSystem origin;
+    prepare(origin);
+    const auto checkpoint = origin.saveState();
+    origin.startTrace();
+    origin.runMasterCycles(2);
+    const auto expectedState = origin.saveState();
+    std::uint64_t presentationBoundaries = 0;
+    for (const auto &event : origin.trace())
+    {
+      if (event.type == NekoTraceEventType::PresentationBoundary)
+      {
+        ++presentationBoundaries;
+        REQUIRE(event.value1 == nekoFrameHash(expectedOdd));
+      }
+    }
+    REQUIRE(presentationBoundaries == 1);
+
+    for (const bool restored : {false, true})
+    {
+      for (const bool traced : {false, true})
+      {
+        NekoSystem system;
+        if (restored)
+        {
+          system.loadState(checkpoint);
+        }
+        else
+        {
+          prepare(system);
+        }
+        REQUIRE(system.videoOutput().width == expectedOdd.width);
+        REQUIRE(system.videoOutput().height == expectedOdd.height);
+        REQUIRE(system.videoOutput().rgba == expectedOdd.rgba);
+        REQUIRE(system.saveState() == checkpoint);
+        if (traced)
+        {
+          system.startTrace();
+        }
+        system.runMasterCycles(2);
+        REQUIRE(system.videoOutput().height == expectedEven.height);
+        REQUIRE(system.videoOutput().rgba == expectedEven.rgba);
+        REQUIRE(system.saveState() == expectedState);
+        if (traced)
+        {
+          REQUIRE(system.trace().size() == origin.trace().size());
+          REQUIRE(system.traceHash() == origin.traceHash());
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("GS Vertical Blank Timing Tests")
 {
   NekoSystem system;
