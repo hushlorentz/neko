@@ -276,6 +276,8 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldU8("dmaResultPhase",
       static_cast<std::uint8_t>(system.sio2ControllerComponent.resultPhase));
     writer->writeFieldU8("dmaResultCursor", system.sio2ControllerComponent.resultCursor);
+    writer->writeFieldBool("controllerConfigured",
+      system.sio2ControllerComponent.controllerConfigured);
   }
   {
     auto scope = writer->scope("spu2");
@@ -734,7 +736,7 @@ void NekoSaveStateCodec::readIOP(
       auto &reply = sio2.cpuResult;
       const auto profile = reader->readFieldU8("profile");
       reader->requireField(
-        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::DigitalPoll),
+        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::ConfigurationEntry),
         "SIO2 CPU result profile is invalid");
       reply.profile = static_cast<SIO2Controller::CPUProfile>(profile);
       reply.endpoint = reader->readFieldU8("endpoint");
@@ -765,6 +767,7 @@ void NekoSaveStateCodec::readIOP(
       "SIO2 DMA result phase is invalid");
     sio2.resultPhase = static_cast<SIO2DMAResultPhase>(resultPhase);
     sio2.resultCursor = reader->readFieldU8("dmaResultCursor");
+    sio2.controllerConfigured = reader->readFieldBool("controllerConfigured");
     reader->requireField(sio2.hasValidTransferState(),
       "SIO2 transfer state is outside the bounded supported profiles");
   }

@@ -97,7 +97,8 @@ class SIO2Controller final
       CardRead,
       MultitapSupport12,
       MultitapSupport13,
-      DigitalPoll
+      DigitalPoll,
+      ConfigurationEntry
     };
     struct CPUResult
     {
@@ -111,9 +112,13 @@ class SIO2Controller final
     bool hasCPUCardReadProgramming() const noexcept;
     bool hasCPUMultitapSupportProgramming() const noexcept;
     bool hasDigitalPollProgramming() const noexcept;
+    bool hasConfigurationEntryProgramming() const noexcept;
     bool hasMatchingCompletedCPUProgramming() const noexcept;
     static std::array<std::uint8_t, 5> digitalPollReply(
       const NekoInputState &input) noexcept;
+    static std::array<std::uint8_t, 5> configurationEntryReply() noexcept;
+    CPUResult classifyControllerTransfer(std::uint32_t controlValue,
+      const NekoInputState *input) const noexcept;
     bool hasPairedCPUProgramming(std::uint32_t firstDescriptor,
       std::uint32_t firstPortControl, std::uint32_t secondPortControl) const noexcept;
     SIO2TransferResult startCPUTransfer(std::uint32_t controlValue) noexcept;
@@ -140,6 +145,7 @@ class SIO2Controller final
     SIO2IngressPhase ingressPhase = SIO2IngressPhase::Empty;
     bool transferCompleted = false;
     CPUResult cpuResult{};
+    bool controllerConfigured = false;
     bool interruptCause = false;
     SIO2DMAResultPhase resultPhase = SIO2DMAResultPhase::Empty;
     std::uint8_t resultCursor = 0;

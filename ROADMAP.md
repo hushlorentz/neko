@@ -4469,13 +4469,28 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected zero-parameter SCMD `0x1E` compatibility reply
       through the existing CD/DVD owner, with red/green and authored guest,
       rejection, reset/restore and trace conformance.
-- [ ] Verify reply delivery and drain with fresh cold/restored BIOS comparisons
+- [x] Verify reply delivery and drain with fresh cold/restored BIOS comparisons
       after the implementation checkpoint; attribute the next dependency
       without inferring remote input or readiness from the opaque packet.
 
+### Controller Configuration Entry Contract
+
+- [x] Research the demonstrated five-byte controller command `0x43` request
+      through the existing SIO2 owner; select its bounded request/reply and
+      configuration-state contract before planning implementation.
+
+### SIO2 Controller Configuration Entry
+
+- [x] Implement the selected exact five-byte configuration entry through
+      existing SIO2 admission/result/IRQ owners, with independent persistent
+      endpoint state, red/green and authored guest/reset/restore conformance.
+- [ ] Verify entry reply delivery and state retention with fresh cold/restored
+      BIOS comparisons after the implementation checkpoint; attribute the next
+      dependency without assuming analog mode or guest connection.
+
 ### Evidence-Driven Controller Dependencies
 
-- [ ] Attribute and contract any demonstrated later controller commands,
+- [ ] Attribute and contract additional demonstrated controller commands,
       expanding them into bounded implementation items before adding
       configuration, analog, pressure, rumble or model-query behavior.
 - [ ] Extend only demonstrated controller DMA shapes through existing grants

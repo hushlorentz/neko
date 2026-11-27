@@ -74,25 +74,7 @@ namespace
     write(system, 0x16, 8);
   }
 
-  class Observer final : public NekoTraceObserver
-  {
-    public:
-      void observe(const NekoTraceEvent &event) noexcept override
-      {
-        if (count < events.size())
-        {
-          events[count++] = event;
-        }
-        else
-        {
-          overflow = true;
-        }
-      }
-
-      std::array<NekoTraceEvent, 4096> events = {};
-      std::size_t count = 0;
-      bool overflow = false;
-  };
+  using Observer = IOPTraceTest::Observer;
 
   template<typename Program>
   void installProgram(NekoSystem &system, IOPAddress address,

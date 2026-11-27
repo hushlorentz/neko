@@ -1,6 +1,7 @@
 #ifndef IOP_TRACE_TEST_UTILS_HPP
 #define IOP_TRACE_TEST_UTILS_HPP
 
+#include <array>
 #include <vector>
 
 #include "catch.hpp"
@@ -9,6 +10,22 @@
 namespace IOPTraceTest
 {
   using Events = std::vector<NekoTraceEvent>;
+
+  class Observer final : public NekoTraceObserver
+  {
+    public:
+      void observe(const NekoTraceEvent &event) noexcept override
+      {
+        if (count < events.size())
+          events[count++] = event;
+        else
+          overflow = true;
+      }
+
+      std::array<NekoTraceEvent, 4096> events{};
+      std::size_t count = 0;
+      bool overflow = false;
+  };
 
   inline void requireEvents(const Events &actual, const Events &expected)
   {

@@ -1,6 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -168,6 +169,21 @@ namespace
     REQUIRE(system.iopBus().read32(0x1f80826c).value == status);
     REQUIRE(system.iopBus().read32(0x1f808270).value == 0xf);
     REQUIRE(system.iopBus().read32(0x1f808274).value == 0);
+  }
+
+  void stageConfigurationEntry(NekoSystem &system, IOPWord descriptor = 0x00140540,
+    std::array<std::uint8_t, 5> packet = {{1, 0x43, 0, 1, 0}},
+    std::size_t bytes = 5)
+  {
+    auto &bus = system.iopBus();
+    const auto port = descriptor & 3;
+    REQUIRE(bus.write32(portControlBase + port * 8, 0xffc00505).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(portControlBase + port * 8 + 4, 0x00020014).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(descriptorBase, descriptor).status == IOPBusStatus::Completed);
+    for (std::size_t index = 0; index < bytes; ++index)
+      REQUIRE(bus.write8(transmitAddress, packet[index]).status == IOPBusStatus::Completed);
   }
 
   void requireRejectedCPUStart(NekoSystem &system, IOPWord control = 0x3bd)
@@ -1307,6 +1323,353 @@ TEST_CASE("SIO2 digital canonical validation rejects malformed retained results 
     REQUIRE(destination.iopBus().write32(controlAddress, 0x3bd).status ==
       IOPBusStatus::Completed);
     requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0xf7, 0xff}});
+  }
+}
+
+TEST_CASE("SIO2 configuration entry returns the old digital header and enters configuration",
+  "[iop][sio2][sio2-config-entry]")
+{
+  NekoSystem system;
+  system.setInput({0xffff, 0, 1, 0xfe, 0xff});
+  stageConfigurationEntry(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0, 0}});
+  REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+  const auto completed = system.iopStateHash();
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopStateHash() == completed);
+  stageDigitalPoll(system);
+  requireRejectedCPUStart(system);
+}
+
+TEST_CASE("SIO2 configuration entry is input-independent and leaves absent ports unconfigured",
+  "[iop][sio2][sio2-config-entry]")
+{
+  NekoSystem system;
+  stageConfigurationEntry(system, 0x00140541);
+  REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+    SIO2TransferResult::CompletedWithInterrupt);
+  requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+  stageDigitalPoll(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+  stageConfigurationEntry(system);
+  REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+    SIO2TransferResult::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0, 0}});
+  stageConfigurationEntry(system);
+  requireRejectedCPUStart(system);
+}
+
+TEST_CASE("SIO2 configuration entry rejects unsupported and overlapping requests atomically",
+  "[iop][sio2][sio2-config-entry]")
+{
+  for (unsigned variant = 0; variant < 16; ++variant)
+  {
+    CAPTURE(variant);
+    NekoSystem system;
+    if (variant == 0)
+    {
+      system.setInput({NekoButton::CROSS});
+      stageDigitalPoll(system);
+      REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+        IOPBusStatus::Completed);
+    }
+    auto packet = std::array<std::uint8_t, 5>{{1, 0x43, 0, 1, 0}};
+    if (variant >= 1 && variant <= 5) packet[variant - 1] ^= 1;
+    stageConfigurationEntry(system, variant == 6 ? 0x00140542 :
+      variant == 7 ? 0x00140543 : variant == 8 ? 0x00180540 : 0x00140540,
+      packet, variant == 9 ? 4 : 5);
+    auto &bus = system.iopBus();
+    if (variant == 10)
+      REQUIRE(bus.write8(transmitAddress, 0).status == IOPBusStatus::Completed);
+    if (variant == 11)
+      REQUIRE(bus.write32(descriptorBase + 60, 1).status == IOPBusStatus::Completed);
+    if (variant == 12)
+      REQUIRE(bus.write32(portControlBase, 0).status == IOPBusStatus::Completed);
+    if (variant == 13)
+      REQUIRE(bus.write32(portControlBase + 4, 0x2000a).status == IOPBusStatus::Completed);
+    const auto before = system.iopInterruptController().status();
+    if (variant == 14)
+    {
+      const auto staged = system.iopStateHash();
+      bus.attachInterruptController(nullptr);
+      REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+      bus.attachInterruptController(&system.iopInterruptController());
+      REQUIRE(system.iopStateHash() == staged);
+      REQUIRE(system.sio2Controller().transmitInputSize() == 5);
+      REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+      requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0, 0}});
+    }
+    else
+    {
+      requireRejectedCPUStart(system, variant == 15 ? 0x3bf : 0x3bd);
+      REQUIRE(system.iopInterruptController().status() == before);
+    }
+    if (variant == 0)
+      requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xbf}});
+  }
+}
+
+TEST_CASE("SIO2 configuration entry preserves cause ownership reset scopes and completed identity",
+  "[iop][sio2][sio2-config-entry]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  stageDigitalPoll(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+  system.iopInterruptController().writeStatus(~sio2IRQ);
+  stageConfigurationEntry(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(bus.read32(interruptAddress).value == 1);
+  REQUIRE(bus.write32(interruptAddress, 0).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(interruptAddress).value == 1);
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  system.setInput({NekoButton::CROSS});
+  bus.reset();
+  system.iopCore().reset();
+  REQUIRE(bus.write32(controlAddress, 0xc).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(controlAddress, 0x3bc).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0, 0}});
+  stageConfigurationEntry(system, 0x00140541);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+  REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+  const auto before = system.iopStateHash();
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopStateHash() == before);
+  REQUIRE(bus.write32(descriptorBase, 0x00140540).status == IOPBusStatus::Completed);
+  requireRejectedCPUStart(system);
+  stageDigitalPoll(system);
+  requireRejectedCPUStart(system);
+  system.sio2Controller().reset();
+  stageDigitalPoll(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xbf}});
+  stageConfigurationEntry(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  system.reset();
+  stageDigitalPoll(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+}
+
+TEST_CASE("SIO2 configuration admission excludes partial CPU stores and DMA ingress",
+  "[iop][sio2][sio2-config-entry]")
+{
+  SECTION("Only complete CPU word stores start the entry")
+  {
+    NekoSystem system;
+    stageConfigurationEntry(system);
+    auto &bus = system.iopBus();
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.write8(controlAddress, 0xbd).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask < 15; ++mask)
+      REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, mask).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, 15).status == IOPBusStatus::Completed);
+    requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0, 0}});
+  }
+  SECTION("DMA ingress cannot enter the controller profile")
+  {
+    for (const auto words : {35u, 36u})
+    {
+      CAPTURE(words);
+      NekoSystem system;
+      stageCardProbe(system, 0x00100472, 0x1181, words);
+      const auto before = system.iopStateHash();
+      REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+        SIO2TransferResult::Unsupported);
+      REQUIRE(system.iopStateHash() == before);
+    }
+  }
+}
+
+TEST_CASE("SIO2 configuration persists independently of retained replies and card DMA",
+  "[iop][sio2][sio2-config-entry][save-state]")
+{
+  NekoSystem source;
+  stageConfigurationEntry(source);
+  REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().read8(receiveAddress).value == 0xff);
+  source.setInput({NekoButton::CROSS});
+  REQUIRE(source.iopBus().write32(descriptorBase, 0).status == IOPBusStatus::Completed);
+  const auto state = source.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+  for (const auto byte : {0x41, 0x5a, 0, 0})
+    REQUIRE(restored.iopBus().read8(receiveAddress).value == byte);
+  stageCPUCardRead(restored);
+  REQUIRE(restored.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  for (unsigned index = 0; index < 3; ++index)
+    REQUIRE(restored.iopBus().read8(receiveAddress).value == 0xff);
+  stageCardProbe(restored);
+  REQUIRE(restored.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  NekoSystem pending;
+  pending.loadState(restored.saveState());
+  REQUIRE(pending.sio2Controller().dmaResultPhase() == SIO2DMAResultPhase::Pending);
+  pending.runMasterCycles(1);
+  REQUIRE(pending.sio2Controller().dmaResultSize() == 144);
+  REQUIRE(pending.iopBus().write32(0x1f801550, 0x2000).status == IOPBusStatus::Completed);
+  REQUIRE(pending.iopBus().write32(0x1f801554, 0x10024).status == IOPBusStatus::Completed);
+  REQUIRE(pending.iopBus().write32(0x1f801558, 0x41000200).status == IOPBusStatus::Completed);
+  REQUIRE(pending.iopBus().write32(0x1f801570, 8 << 20).status == IOPBusStatus::Completed);
+  for (unsigned word = 0; word < 36; ++word)
+    REQUIRE(pending.iopDMAController().clockSIO2Output(
+      pending.iopBus(), pending.sio2Controller()).outcome ==
+        (word == 35 ? IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted));
+  stageDigitalPoll(pending);
+  requireRejectedCPUStart(pending);
+}
+
+TEST_CASE("SIO2 configuration codec rejects malformed entry and adopts state transactionally",
+  "[iop][sio2][sio2-config-entry][save-state]")
+{
+  NekoSystem source;
+  stageConfigurationEntry(source);
+  REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  const auto state = source.saveState();
+  NekoSystem destination;
+  destination.setInput({NekoButton::CROSS});
+  const auto before = destination.saveState();
+  for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
+    {"controllerConfigured", 2}, {"controllerConfigured", 0},
+    {"cpuResult.profile", 255}, {"cpuResult.endpoint", 2},
+    {"cpuResult.length", 6}, {"cpuResult.cursor", 6},
+    {"cpuResult.bytes[0].value", 0}, {"cpuResult.bytes[1].value", 0xf3},
+    {"cpuResult.bytes[2].value", 0}, {"cpuResult.bytes[3].value", 0xff},
+    {"cpuResult.bytes[4].value", 1}, {"cpuResult.bytes[5].value", 1},
+    {"cpuResult.status[0].value", 0x2d100}})
+  {
+    CAPTURE(mutation.first);
+    SaveStateMutation invalid(state);
+    invalid.writeScalar("system.iop.sio2." + mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+  }
+  REQUIRE(destination.saveState() == before);
+  stageDigitalPoll(destination);
+  REQUIRE(destination.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0xff, 0xbf}});
+  SaveStateMutation historicalReply(destination.saveState());
+  historicalReply.writeScalar("system.iop.sio2.controllerConfigured", 1);
+  historicalReply.refreshChecksum();
+  destination.loadState(historicalReply);
+  REQUIRE(destination.iopBus().read32(0x1f80826c).value == 0x1100);
+  stageDigitalPoll(destination);
+  requireRejectedCPUStart(destination);
+  {
+    NekoSystem temporary;
+    temporary.loadState(state);
+    destination.loadState(temporary.saveState());
+  }
+  requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0, 0}});
+  stageConfigurationEntry(destination);
+  requireRejectedCPUStart(destination);
+}
+
+TEST_CASE("SIO2 configuration guest restores entry and drain in every observer mode",
+  "[iop][sio2][sio2-config-entry][trace][save-state]")
+{
+  for (const IOPWord upper : {0x1f80u, 0x9f80u, 0xbf80u})
+  {
+    CAPTURE(upper);
+    const std::array<IOPWord, 38> program{{
+      0x3c010000 | upper, 0x34218200,
+      0x3c020014, 0x34420540, 0xac220000,
+      0x3c02ffc0, 0x34420505, 0xac220040,
+      0x3c020002, 0x34420014, 0xac220044,
+      0x24020001, 0xa0220060, 0x24020043, 0xa0220060,
+      0xa0200060, 0x24020001, 0xa0220060, 0xa0200060,
+      0x240203bd, 0x10000002, 0xac220068, 0xffffffff,
+      0x90230064, 0x90240064, 0x90250064, 0x90260064, 0x90270064,
+      0x8c28006c, 0x8c290070, 0x8c2a0074, 0x8c2b0080,
+      0x24020001, 0xac220080, 0x8c2c0080, 0, 0x240d1234, 0
+    }};
+    NekoSystem reference;
+    installProgram(reference, program);
+    const auto initial = reference.saveState();
+    reference.startTrace();
+    reference.runMasterCycles(281);
+    REQUIRE(reference.iopCore().retiredInstructions() == 36);
+    REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(reference.iopCore().exception().kind == IOPException::None);
+    for (unsigned index = 0; index < 5; ++index)
+    {
+      constexpr std::array<IOPWord, 5> expected{{0xff, 0x41, 0x5a, 0, 0}};
+      REQUIRE(reference.iopCore().generalRegister(3 + index) == expected[index]);
+    }
+    REQUIRE(reference.iopCore().generalRegister(8) == 0x1100);
+    REQUIRE(reference.iopCore().generalRegister(9) == 0xf);
+    REQUIRE(reference.iopCore().generalRegister(10) == 0);
+    REQUIRE(reference.iopCore().generalRegister(11) == 1);
+    REQUIRE(reference.iopCore().generalRegister(12) == 0);
+    REQUIRE(reference.iopCore().generalRegister(13) == 0x1234);
+    const auto interrupts = IOPTraceTest::subsystemEvents(
+      reference, NekoTraceSubsystem::IOPInterruptController);
+    REQUIRE(interrupts.size() == 1);
+    REQUIRE(interrupts[0].masterCycle == 169);
+    REQUIRE(interrupts[0].value0 == sio2IRQ);
+    namespace Memory = NekoIOPTraceMemory;
+    IOPTraceTest::requireEvents(controlEvents(reference, (upper << 16) | 0x8268), {{
+      169, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+      (upper << 16) | 0x8268, 0x3bd, 0, nekoPackIOPMemoryTraceMetadata({
+        controlAddress, 4, Memory::AccessKind::DataStore,
+        Memory::Outcome::Completed, upper == 0xbf80 ? Memory::CacheRoute::Uncached :
+          Memory::CacheRoute::Cached, true, 0xf})
+    }});
+    for (const auto cut : {0u, 161u, 169u, 185u, 209u, 265u})
+    {
+      CAPTURE(cut);
+      NekoSystem source;
+      source.loadState(initial);
+      source.runMasterCycles(cut);
+      const auto checkpoint = source.saveState();
+      std::vector<NekoTraceEvent> suffix;
+      for (const auto &event : reference.trace())
+        if (event.masterCycle > cut) suffix.push_back(event);
+      REQUIRE(suffix.size() > 3);
+      for (unsigned mode = 0; mode < 4; ++mode)
+      {
+        CAPTURE(mode);
+        NekoSystem restored;
+        restored.loadState(checkpoint);
+        const auto observer = std::make_shared<IOPTraceTest::Observer>();
+        if (mode == 1) restored.startTrace();
+        if (mode == 2) restored.startTrace(3, observer);
+        if (mode == 3) restored.startTrace(0, observer);
+        restored.runMasterCycles(281 - cut);
+        IOPTraceTest::requireMachine(restored, reference);
+        if (mode == 1)
+          IOPTraceTest::requireEvents(restored.trace(), suffix);
+        if (mode >= 2)
+        {
+          REQUIRE_FALSE(observer->overflow);
+          IOPTraceTest::requireEvents(
+            {observer->events.begin(), observer->events.begin() + observer->count}, suffix);
+          REQUIRE(restored.traceTruncated());
+          REQUIRE(restored.trace().size() == (mode == 2 ? 3 : 0));
+        }
+        stageDigitalPoll(restored);
+        requireRejectedCPUStart(restored);
+      }
+    }
   }
 }
 

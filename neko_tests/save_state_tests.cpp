@@ -1308,8 +1308,8 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 140 save-state layout is byte-stable",
-  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2][vif-err][cdvd-model][ba0-write32]")
+TEST_CASE("Version 141 save-state layout is byte-stable",
+  "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2][vif-err][cdvd-model][ba0-write32][sio2-config-entry]")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -1324,21 +1324,32 @@ TEST_CASE("Version 140 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 140);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 141);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 139;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 140;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040 + 5 + 22);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040 + 5 + 22 + 1);
   const SaveStateMutation fields(state);
   REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
   REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
   const auto snapshot = inspectSaveState(state);
+  const auto *sio2Cursor = snapshot.find("system.iop.sio2.dmaResultCursor");
+  const auto *controllerConfigured = snapshot.find("system.iop.sio2.controllerConfigured");
+  const auto *spuConfiguration = snapshot.find("system.iop.spu2.spdifConfiguration[0].value");
+  REQUIRE(sio2Cursor != nullptr);
+  REQUIRE(controllerConfigured != nullptr);
+  REQUIRE(spuConfiguration != nullptr);
+  REQUIRE(controllerConfigured->kind == SaveStateFieldKind::Boolean);
+  REQUIRE(controllerConfigured->size == 1);
+  REQUIRE(controllerConfigured->containerOffset == sio2Cursor->containerOffset + 1);
+  REQUIRE(controllerConfigured->scalarValue == 0);
+  REQUIRE(spuConfiguration->containerOffset == controllerConfigured->containerOffset + 1);
   const auto *ba0Device32 = snapshot.find("system.eeBus.ba0DeviceRegister32");
   REQUIRE(ba0Device32 != nullptr);
   REQUIRE(ba0Device32->kind == SaveStateFieldKind::U8);
@@ -1647,6 +1658,7 @@ TEST_CASE("Version 140 save-state layout is byte-stable",
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
     previousVersion.begin() + core0->containerOffset);
+  previousVersion.erase(previousVersion.begin() + controllerConfigured->containerOffset);
   previousVersion.erase(previousVersion.begin() + cpuProfile->containerOffset + 1,
     previousVersion.begin() + cpuStatusLast->containerOffset + cpuStatusLast->size);
   const auto *clutEntries = snapshot.find("system.gs.clutEntries[0].value");
@@ -1682,7 +1694,8 @@ TEST_CASE("Version 140 save-state layout is byte-stable",
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
       appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32,
-      clutEntries, clut0, clut1, pendingPixel, cpuStatusLast](std::size_t offset)
+      clutEntries, clut0, clut1, pendingPixel, cpuStatusLast,
+      controllerConfigured](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
@@ -1695,7 +1708,8 @@ TEST_CASE("Version 140 save-state layout is byte-stable",
       (offset >= clut0->containerOffset + 6 ? 6 : 0) -
       (offset >= clut1->containerOffset + 6 ? 6 : 0) -
       (offset >= pendingPixel->containerOffset + 5 ? 5 : 0) -
-      (offset >= cpuStatusLast->containerOffset + cpuStatusLast->size ? 22 : 0);
+      (offset >= cpuStatusLast->containerOffset + cpuStatusLast->size ? 22 : 0) -
+      (offset > controllerConfigured->containerOffset ? 1 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(
@@ -1892,7 +1906,7 @@ TEST_CASE("Version 140 save-state layout is byte-stable",
   REQUIRE(cpuStatus->scalarValue == 0);
   REQUIRE(interruptCause->scalarValue == 0);
   REQUIRE(dmaResultCursor->containerOffset == resultPhase->containerOffset + 1);
-  std::size_t spdifOffset = dmaResultCursor->containerOffset + 1;
+  std::size_t spdifOffset = controllerConfigured->containerOffset + 1;
   for (std::size_t index = 0; index < 5; ++index)
   {
     const auto *configuration = snapshot.find(
