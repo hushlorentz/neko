@@ -364,6 +364,43 @@ TEST_CASE("CDVD wake-up query publishes ten opaque bytes and drains only on the 
   REQUIRE(drain(controller) == oneSecond);
 }
 
+TEST_CASE("CDVD Remote2 read publishes five opaque bytes on the next IOP pulse",
+  "[iop][cdvd-owner][cdvd-remote2]")
+{
+  CDVDController controller;
+  const std::array<std::uint8_t, 16> expected = {{0, 0x14}};
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    REQUIRE_FALSE(masterStep(controller, repeat * 16).completed);
+    const auto ticks = CDVDControllerTestAccess::ticks(controller);
+    accept(controller, 0x16, 0x1e);
+    REQUIRE(CDVDControllerTestAccess::ticks(controller) == ticks);
+    REQUIRE(read(controller, 0x16) == 0x1e);
+    CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+    for (unsigned cycle = 1; cycle < 8; ++cycle)
+    {
+      REQUIRE_FALSE(masterStep(controller, repeat * 16 + cycle).completed);
+      REQUIRE(read(controller, 0x17) == 0xc0);
+      REQUIRE(read(controller, 0x18) == 0);
+      CDVDControllerTestAccess::requireEmptyStorage(controller);
+    }
+    REQUIRE_FALSE(masterStep(controller, repeat * 16 + 8).completed);
+    CDVDControllerTestAccess::requireResult(controller, expected);
+    for (unsigned index = 0; index < 5; ++index)
+    {
+      REQUIRE(read(controller, 0x17) == 0);
+      REQUIRE(read(controller, 0x18) == expected[index]);
+      REQUIRE(read(controller, 0x08) == 0);
+      REQUIRE(read(controller, 0x05) == 0x40);
+    }
+    REQUIRE(read(controller, 0x17) == 0x40);
+    REQUIRE(read(controller, 0x18) == 0);
+    REQUIRE(read(controller, 0x16) == 0x1e);
+    REQUIRE_FALSE(controller.completeSubcommand());
+    CDVDControllerTestAccess::requireEmptyStorage(controller);
+  }
+}
+
 TEST_CASE("CDVD model reads capture either half and drain nine immutable bytes",
   "[iop][cdvd-owner][cdvd-model]")
 {
@@ -861,9 +898,9 @@ TEST_CASE("CDVD OpenConfig rejects every wrong request byte and count atomically
 }
 
 TEST_CASE("CDVD compatibility queries reject staged requests and unsupported neighbors atomically",
-  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up]")
+  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-remote2]")
 {
-  for (const auto query : {0x15u, 0x22u})
+  for (const auto query : {0x15u, 0x1eu, 0x22u})
   {
     CAPTURE(query);
     for (unsigned count = 0; count <= 16; ++count)
@@ -883,7 +920,7 @@ TEST_CASE("CDVD compatibility queries reject staged requests and unsupported nei
         REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
       }
       for (const auto opcode :
-           {0x14, 0x16, 0x17, 0x18, 0x19, 0x20, 0x21, 0x23, 0x24})
+           {0x14, 0x16, 0x17, 0x18, 0x19, 0x1d, 0x1f, 0x20, 0x21, 0x23, 0x24})
       {
         if (opcode == 0x17 && count == 1)
         {
@@ -898,13 +935,16 @@ TEST_CASE("CDVD compatibility queries reject staged requests and unsupported nei
 }
 
 TEST_CASE("CDVD compatibility phase rejection and reset never enable media commands",
-  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
+  "[iop][cdvd-owner][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2]")
 {
-  for (const auto query : {0x15u, 0x22u, 0x24u, 0x40u})
+  for (const auto query : {0x15u, 0x1eu, 0x22u, 0x24u, 0x40u})
   {
     CAPTURE(query);
-    const unsigned size = query == 0x22 ? 10 : 1;
-    const std::uint8_t response = query == 0x15 ? 5 : 0;
+    const unsigned size = query == 0x22 ? 10 : (query == 0x1e ? 5 : 1);
+    const std::array<std::uint8_t, 16> response =
+      query == 0x15 ? std::array<std::uint8_t, 16>{{5}} :
+      (query == 0x1e ? std::array<std::uint8_t, 16>{{0, 0x14}} :
+        std::array<std::uint8_t, 16>{});
     for (unsigned stage = 0; stage < size + 3; ++stage)
     {
       CAPTURE(stage);
@@ -929,7 +969,7 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
         }
         for (unsigned consumed = 0; stage >= 2 && consumed < stage - 2; ++consumed)
         {
-          REQUIRE(read(controller, 0x18) == response);
+          REQUIRE(read(controller, 0x18) == response[consumed]);
         }
       }
       const auto before = controller;
@@ -970,7 +1010,7 @@ TEST_CASE("CDVD compatibility phase rejection and reset never enable media comma
       }
       accept(controller, 0x16, static_cast<std::uint8_t>(query));
       REQUIRE(controller.completeSubcommand());
-      REQUIRE(read(controller, 0x18) == response);
+      REQUIRE(read(controller, 0x18) == response[0]);
       REQUIRE(read(controller, 0x17) == (size == 1 ? 0x40 : 0));
     }
   }
@@ -1379,7 +1419,7 @@ TEST_CASE("CDVD owner admits only selected parameterless commands in their avail
         auto probe = controller;
         const bool available = offset == 0x04 ? stage != 1 : stage == 0;
         const bool supported = offset == 0x04 ? opcode == 0 :
-          (opcode == 8 || opcode == 0x15 || opcode == 0x22 ||
+          (opcode == 8 || opcode == 0x15 || opcode == 0x1e || opcode == 0x22 ||
             opcode == 0x36 || opcode == 0x43);
         const auto status = probe.writeByte(BASE + offset,
           static_cast<std::uint8_t>(opcode));

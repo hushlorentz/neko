@@ -4454,9 +4454,24 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the exact selected CPU poll and present/absent replies with
       core-input binding and atomic sampling; include red/green, guest,
       reset/adoption, partial-reply restore and trace conformance.
-- [ ] Verify the initial poll and attribute the next dependency with fresh
+- [x] Verify the initial poll and attribute the next dependency with fresh
       cold/restored BIOS comparisons after the implementation checkpoint;
       do not infer guest connection or shell responsiveness from admission.
+
+### Next-Origin CD/DVD Subcommand Contract
+
+- [x] Research the demonstrated zero-parameter SCMD `0x1E` request and select
+      its bounded semantics and request/result/completion contract through
+      the existing CD/DVD owner before planning implementation.
+
+### CD/DVD Remote2 Read Compatibility
+
+- [x] Implement the selected zero-parameter SCMD `0x1E` compatibility reply
+      through the existing CD/DVD owner, with red/green and authored guest,
+      rejection, reset/restore and trace conformance.
+- [ ] Verify reply delivery and drain with fresh cold/restored BIOS comparisons
+      after the implementation checkpoint; attribute the next dependency
+      without inferring remote input or readiness from the opaque packet.
 
 ### Evidence-Driven Controller Dependencies
 

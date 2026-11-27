@@ -109,6 +109,7 @@ class CDVDController final
     static SubcommandResult forbidDVDPResult() noexcept;
     static SubcommandResult bootCertifyResult() noexcept;
     static SubcommandResult wakeUpTimeResult() noexcept;
+    static SubcommandResult remote2ReadResult() noexcept;
     static SubcommandResult remoteBypassResult() noexcept;
     static SubcommandResult openConfigResult() noexcept;
     static SubcommandResult regionResult() noexcept;

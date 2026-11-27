@@ -641,10 +641,10 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 }
 
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2][save-state]")
 {
   for (const auto opcode :
-       {3u, 8u, 0x15u, 0x17u, 0x1au, 0x22u, 0x24u, 0x36u, 0x40u})
+       {3u, 8u, 0x15u, 0x17u, 0x1au, 0x1eu, 0x22u, 0x24u, 0x36u, 0x40u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -673,7 +673,7 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
 }
 
 TEST_CASE("CDVD immutable queries restore pending and every result cursor",
-  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
+  "[iop][cdvd-integration][cdvd-version][cdvd-region][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2][save-state]")
 {
   struct Query
   {
@@ -685,6 +685,7 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
     {3, 4, {{3, 6, 2, 0}}},
     {0x15, 1, {{5}}},
     {0x1a, 1, {{1}}},
+    {0x1e, 5, {{0, 0x14}}},
     {0x22, 10, {}},
     {0x24, 1, {}},
     {0x40, 1, {}},
@@ -751,9 +752,9 @@ TEST_CASE("CDVD immutable queries restore pending and every result cursor",
 }
 
 TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutation",
-  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][save-state]")
+  "[iop][cdvd-integration][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2][save-state]")
 {
-  for (const auto opcode : {0x15u, 0x1au, 0x22u, 0x24u, 0x40u})
+  for (const auto opcode : {0x15u, 0x1au, 0x1eu, 0x22u, 0x24u, 0x40u})
   {
     CAPTURE(opcode);
     NekoSystem source;
@@ -764,7 +765,8 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
     destination.clockMasterCycle();
     REQUIRE(read(destination, 0x18) == 0);
     const auto before = destination.saveState();
-    for (unsigned stage = 0; stage < (opcode == 0x22 ? 3u : 2u); ++stage)
+    const unsigned size = opcode == 0x22 ? 10 : (opcode == 0x1e ? 5 : 1);
+    for (unsigned stage = 0; stage < (size > 1 ? 3u : 2u); ++stage)
     {
       CAPTURE(stage);
       if (stage == 1)
@@ -773,9 +775,9 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
       }
       else if (stage == 2)
       {
-        for (unsigned index = 0; index < 9; ++index)
+        for (unsigned index = 0; index < size - 1; ++index)
         {
-          REQUIRE(read(source, 0x18) == 0);
+          REQUIRE(read(source, 0x18) == (opcode == 0x1e && index == 1 ? 0x14 : 0));
         }
       }
       const auto valid = source.saveState();
@@ -795,7 +797,7 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
       };
       const InvalidField invalid[] = {
         {"lastSubcommand", 0}, {"lastSubcommand", 1}, {"lastSubcommand", 0x1b},
-        {"resultCursor", stage == 0 || opcode != 0x22 ? 1u : 10u},
+        {"resultCursor", stage == 0 ? 1u : size},
         {"resultCursor", 255}, {"subcommandPhase", 3},
         {"subcommandParameterCount", 1}
       };
@@ -827,12 +829,13 @@ TEST_CASE("CDVD malformed compatibility snapshots fail without destination mutat
 }
 
 TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads passive",
-  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass]")
+  "[iop][ee][cdvd-integration][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][cdvd-remote2]")
 {
-  for (const std::uint8_t opcode : {0x15, 0x17, 0x22, 0x24, 0x40})
+  for (const std::uint8_t opcode : {0x15, 0x17, 0x1e, 0x22, 0x24, 0x40})
   {
     CAPTURE(opcode);
-    const unsigned size = opcode == 0x22 ? 10 : (opcode == 0x17 ? 9 : 1);
+    const unsigned size = opcode == 0x22 ? 10 :
+      (opcode == 0x17 ? 9 : (opcode == 0x1e ? 5 : 1));
     NekoSystem system;
     stageQueryParameters(system, opcode);
     for (unsigned stage = 0; stage < size + 3; ++stage)
@@ -877,7 +880,8 @@ TEST_CASE("CDVD compatibility queries keep active routes byte-only and EE reads 
       {
         const std::array<std::uint8_t, 9> model = {{0, 'S', 'C', 'P', 'H', '-', '7', '0', '0'}};
         REQUIRE(read(system, 0x18) ==
-          (opcode == 0x15 ? 5 : (opcode == 0x17 ? model[stage - 2] : 0)));
+          (opcode == 0x15 ? 5 : (opcode == 0x17 ? model[stage - 2] :
+            (opcode == 0x1e && stage == 3 ? 0x14 : 0))));
       }
     }
   }
