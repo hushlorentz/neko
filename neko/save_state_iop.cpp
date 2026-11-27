@@ -44,6 +44,7 @@ void NekoSaveStateCodec::writeIOPState(
       bus.timers != &system.iopTimersComponent ||
       bus.cdvd != &system.cdvdControllerComponent ||
       bus.sio2 != &system.sio2ControllerComponent ||
+      bus.inputState != &system.inputState ||
       bus.spu2 != &system.spu2ControllerComponent ||
       system.eeBusComponent.cdvdController != &system.cdvdControllerComponent ||
       bus.dmaController != &system.iopDMAControllerComponent ||
@@ -733,7 +734,7 @@ void NekoSaveStateCodec::readIOP(
       auto &reply = sio2.cpuResult;
       const auto profile = reader->readFieldU8("profile");
       reader->requireField(
-        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::MultitapSupport13),
+        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::DigitalPoll),
         "SIO2 CPU result profile is invalid");
       reply.profile = static_cast<SIO2Controller::CPUProfile>(profile);
       reply.endpoint = reader->readFieldU8("endpoint");
@@ -765,7 +766,7 @@ void NekoSaveStateCodec::readIOP(
     sio2.resultPhase = static_cast<SIO2DMAResultPhase>(resultPhase);
     sio2.resultCursor = reader->readFieldU8("dmaResultCursor");
     reader->requireField(sio2.hasValidTransferState(),
-      "SIO2 transfer state is outside the bounded absent-device profiles");
+      "SIO2 transfer state is outside the bounded supported profiles");
   }
   {
     auto scope = reader->scope("spu2");
@@ -1471,6 +1472,7 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
   destination->sio2ControllerComponent = source->sio2ControllerComponent;
   destination->iopBusComponent.sio2 = &destination->sio2ControllerComponent;
+  destination->iopBusComponent.inputState = &destination->inputState;
   const bool spuObservationsEnabled = destination->spu2ControllerComponent.observationsEnabled;
   auto *const spuObservationOrder = destination->spu2ControllerComponent.observationOrder;
   std::swap(destination->spu2ControllerComponent, source->spu2ControllerComponent);

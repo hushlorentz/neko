@@ -206,6 +206,11 @@ void IOPBus::attachSIO2(SIO2Controller *controller)
   sio2 = controller;
 }
 
+void IOPBus::attachInput(const NekoInputState *input)
+{
+  inputState = input;
+}
+
 void IOPBus::attachSPU2(SPU2Controller *controller)
 {
   spu2 = controller;
@@ -1414,7 +1419,9 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       {
         return {};
       }
-      const auto transfer = sio2->startTransfer(value);
+      auto transfer = sio2->startTransfer(value);
+      if (transfer == SIO2TransferResult::Unsupported)
+        transfer = sio2->startControllerTransfer(value, inputState);
       if (transfer == SIO2TransferResult::Unsupported)
       {
         return {};

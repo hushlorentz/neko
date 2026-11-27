@@ -20,6 +20,7 @@ class SIO2Controller;
 class SPU2Controller;
 class SIF;
 class SIFSignalReceiver;
+struct NekoInputState;
 
 enum class IOPBusStatus : std::uint8_t
 {
@@ -89,6 +90,8 @@ class IOPBus final
     void attachTimers(IOPTimers *timers);
     void attachCDVD(CDVDController *controller);
     void attachSIO2(SIO2Controller *controller);
+    // The caller keeps the read-only live input storage alive while attached.
+    void attachInput(const NekoInputState *input);
     void attachSPU2(SPU2Controller *controller);
     // The caller keeps the attached DMA owners alive.
     void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
@@ -303,6 +306,7 @@ class IOPBus final
     IOPTimers *timers = nullptr;
     CDVDController *cdvd = nullptr;
     SIO2Controller *sio2 = nullptr;
+    const NekoInputState *inputState = nullptr;
     SPU2Controller *spu2 = nullptr;
     IOPDMAController *dmaController = nullptr;
     IOPSIF1DMAChannel *sif1DMA = nullptr;

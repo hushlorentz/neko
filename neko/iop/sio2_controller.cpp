@@ -1,4 +1,5 @@
 #include "sio2_controller.hpp"
+#include "system_interfaces.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -7,6 +8,8 @@
 namespace
 {
   constexpr std::array<std::uint32_t, 3> absentTransferStatus = {{0x1d100, 0xf, 0}};
+  constexpr std::array<std::uint32_t, 3> presentPadStatus = {{0x1100, 0xf, 0}};
+  constexpr std::array<std::uint32_t, 3> absentPadStatus = {{0x2d100, 0xf, 0}};
 }
 
 constexpr std::size_t SIO2Controller::DMA_PROBE_PADDING_BYTES;
@@ -40,8 +43,7 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
   const bool completedRewrite = value == 0x3bd && control == value &&
     transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
     transmitInputCount == 0 && resultCursor == 0 && !hasUnreadCPUResult() &&
-    (dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
-      hasCPUMultitapSupportProgramming());
+    hasMatchingCompletedCPUProgramming();
   if ((!supportsControl(value) && !completedRewrite) ||
       resultPhase != SIO2DMAResultPhase::Empty)
   {
@@ -61,6 +63,45 @@ SIO2TransferResult SIO2Controller::startTransfer(
   if (controlValue == 0x3bd && ingressPhase == SIO2IngressPhase::DMASealed)
     return startDMACardTransfer();
   return SIO2TransferResult::Unsupported;
+}
+
+SIO2TransferResult SIO2Controller::startControllerTransfer(
+  std::uint32_t controlValue, const NekoInputState *input) noexcept
+{
+  if (controlValue != 0x3bd || resultPhase != SIO2DMAResultPhase::Empty ||
+      ingressPhase != SIO2IngressPhase::CPU || hasUnreadCPUResult() ||
+      !hasDigitalPollProgramming() || transmitInputCount != 5 ||
+      transmitInput[0] != 1 || transmitInput[1] != 0x42 ||
+      transmitInput[2] != 0 || transmitInput[3] != 0 || transmitInput[4] != 0)
+    return SIO2TransferResult::Unsupported;
+  const auto endpoint = static_cast<std::uint8_t>(commandDescriptors[0] & 3);
+  if (endpoint == 0 && input == nullptr)
+    return SIO2TransferResult::Unsupported;
+  CPUResult reply;
+  reply.profile = CPUProfile::DigitalPoll;
+  reply.endpoint = endpoint;
+  reply.length = 5;
+  if (endpoint == 0)
+  {
+    const auto sampledInput = *input;
+    const auto bytes = digitalPollReply(sampledInput);
+    std::copy(bytes.begin(), bytes.end(), reply.bytes.begin());
+    reply.status = presentPadStatus;
+  }
+  else
+  {
+    std::fill_n(reply.bytes.begin(), reply.length, std::uint8_t{0xff});
+    reply.status = absentPadStatus;
+  }
+  return completeCPUTransfer(controlValue, reply);
+}
+
+std::array<std::uint8_t, 5> SIO2Controller::digitalPollReply(
+  const NekoInputState &input) noexcept
+{
+  const auto released = static_cast<std::uint16_t>(input.buttons ^ 0xffff);
+  return {{0xff, 0x41, 0x5a, static_cast<std::uint8_t>(released),
+    static_cast<std::uint8_t>(released >> 8)}};
 }
 
 SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
@@ -154,6 +195,20 @@ bool SIO2Controller::hasCPUCardReadProgramming() const noexcept
 bool SIO2Controller::hasCPUMultitapSupportProgramming() const noexcept
 {
   return hasPairedCPUProgramming(0x00180642, 0xff020505, 0x00030064);
+}
+
+bool SIO2Controller::hasDigitalPollProgramming() const noexcept
+{
+  return hasPairedCPUProgramming(0x00140540, 0xffc00505, 0x0002000a);
+}
+
+bool SIO2Controller::hasMatchingCompletedCPUProgramming() const noexcept
+{
+  if (cpuResult.profile == CPUProfile::DigitalPoll)
+    return hasDigitalPollProgramming() &&
+      cpuResult.endpoint == (commandDescriptors[0] & 3);
+  return dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
+    hasCPUMultitapSupportProgramming();
 }
 
 bool SIO2Controller::hasPairedCPUProgramming(std::uint32_t firstDescriptor,
@@ -314,14 +369,28 @@ bool SIO2Controller::hasValidCPUResult() const noexcept
       if (cpuResult.endpoint != 2 && cpuResult.endpoint != 3) return false;
       expectedLength = CPU_MULTITAP_REPLY_BYTES;
       break;
+    case CPUProfile::DigitalPoll:
+      if (cpuResult.endpoint > 1) return false;
+      expectedLength = 5;
+      break;
     default: return false;
   }
   if (cpuResult.length != expectedLength || cpuResult.cursor > cpuResult.length)
     return false;
+  const bool presentPad = cpuResult.profile == CPUProfile::DigitalPoll &&
+    cpuResult.endpoint == 0;
   for (std::size_t index = 0; index < cpuResult.bytes.size(); ++index)
-    if (cpuResult.bytes[index] != (index < expectedLength ? 0xff : 0))
+  {
+    if (presentPad && (index == 3 || index == 4))
+      continue;
+    const auto expectedByte = presentPad && index == 1 ? 0x41 :
+      presentPad && index == 2 ? 0x5a : index < expectedLength ? 0xff : 0;
+    if (cpuResult.bytes[index] != expectedByte)
       return false;
+  }
   const std::array<std::uint32_t, 3> emptyStatus{};
+  if (cpuResult.profile == CPUProfile::DigitalPoll)
+    return cpuResult.status == (presentPad ? presentPadStatus : absentPadStatus);
   return cpuResult.status == (expectedLength == 0 ? emptyStatus : absentTransferStatus);
 }
 
@@ -367,6 +436,8 @@ bool SIO2Controller::hasValidTransferState() const noexcept
       (control == 0 || supportsControl(control));
   }
   if (cpuResult.profile == CPUProfile::None)
+    return supportsControl(control) || control == 0x3bd;
+  if (cpuResult.profile == CPUProfile::DigitalPoll)
     return supportsControl(control) || control == 0x3bd;
   return supportsControl(control) || control == 0xb1 ||
     (control == 0x3bd &&

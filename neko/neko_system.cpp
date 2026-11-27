@@ -276,6 +276,7 @@ NekoSystem::NekoSystem() :
   iopBusComponent.attachTimers(&iopTimersComponent);
   iopBusComponent.attachCDVD(&cdvdControllerComponent);
   iopBusComponent.attachSIO2(&sio2ControllerComponent);
+  iopBusComponent.attachInput(&inputState);
   iopBusComponent.attachSPU2(&spu2ControllerComponent);
   iopBusComponent.attachDMA(
     &iopDMAControllerComponent, &iopSIF1DMAComponent, &iopSIF0DMAComponent);

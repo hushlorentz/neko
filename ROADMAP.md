@@ -4445,13 +4445,13 @@ not requirements for exhaustive subsystem coverage.
 - [x] Retain bounded CPU reply bytes, cursor, completed status and identity
       through the existing SIO2 codec/hash owner, with authored reset/restore
       and rejection coverage; preserve supported profiles and DMA behavior.
-- [ ] Verify the result-ownership migration with fresh cold/restored BIOS
+- [x] Verify the result-ownership migration with fresh cold/restored BIOS
       comparisons after its implementation checkpoint, preserving the
       attributed controller-origin boundary.
 
 ### Initial Digital Controller Poll
 
-- [ ] Implement the exact selected CPU poll and present/absent replies with
+- [x] Implement the exact selected CPU poll and present/absent replies with
       core-input binding and atomic sampling; include red/green, guest,
       reset/adoption, partial-reply restore and trace conformance.
 - [ ] Verify the initial poll and attribute the next dependency with fresh

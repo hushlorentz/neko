@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+struct NekoInputState;
+
 enum class SIO2AccessStatus : std::uint8_t
 {
   Accepted,
@@ -41,7 +43,7 @@ enum class SIO2DMAResultPhase : std::uint8_t
   Ready
 };
 
-// Provisional programming and bounded absent-infrared/card profiles.
+// Provisional programming and bounded CPU/controller and absent-card profiles.
 class SIO2Controller final
 {
   public:
@@ -56,6 +58,8 @@ class SIO2Controller final
     SIO2AccessStatus writeControl(std::uint32_t value) noexcept;
     // Completion requests an IRQ only when the device cause was clear.
     SIO2TransferResult startTransfer(std::uint32_t controlValue) noexcept;
+    SIO2TransferResult startControllerTransfer(std::uint32_t controlValue,
+      const NekoInputState *input) noexcept;
     SIO2TransferResult completePendingTransfer() noexcept;
     SIO2DMAResultPhase dmaResultPhase() const noexcept;
     std::size_t dmaResultSize() const noexcept;
@@ -92,7 +96,8 @@ class SIO2Controller final
       Infrared,
       CardRead,
       MultitapSupport12,
-      MultitapSupport13
+      MultitapSupport13,
+      DigitalPoll
     };
     struct CPUResult
     {
@@ -105,6 +110,10 @@ class SIO2Controller final
     };
     bool hasCPUCardReadProgramming() const noexcept;
     bool hasCPUMultitapSupportProgramming() const noexcept;
+    bool hasDigitalPollProgramming() const noexcept;
+    bool hasMatchingCompletedCPUProgramming() const noexcept;
+    static std::array<std::uint8_t, 5> digitalPollReply(
+      const NekoInputState &input) noexcept;
     bool hasPairedCPUProgramming(std::uint32_t firstDescriptor,
       std::uint32_t firstPortControl, std::uint32_t secondPortControl) const noexcept;
     SIO2TransferResult startCPUTransfer(std::uint32_t controlValue) noexcept;

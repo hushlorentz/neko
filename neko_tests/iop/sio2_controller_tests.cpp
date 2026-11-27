@@ -141,6 +141,35 @@ namespace
       REQUIRE(bus.write8(transmitAddress, byte).status == IOPBusStatus::Completed);
   }
 
+  void stageDigitalPoll(NekoSystem &system, IOPWord descriptor = 0x00140540,
+    std::array<std::uint8_t, 5> packet = {{1, 0x42, 0, 0, 0}})
+  {
+    auto &bus = system.iopBus();
+    const auto port = descriptor & 3;
+    REQUIRE(bus.write32(portControlBase + port * 8, 0xffc00505).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(portControlBase + port * 8 + 4, 0x0002000a).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(descriptorBase, descriptor).status == IOPBusStatus::Completed);
+    for (auto byte : packet)
+      REQUIRE(bus.write8(transmitAddress, byte).status == IOPBusStatus::Completed);
+  }
+
+  void requireDigitalReply(NekoSystem &system,
+    const std::array<std::uint8_t, 5> &bytes, IOPWord status = 0x1100)
+  {
+    for (auto byte : bytes)
+    {
+      const auto result = system.iopBus().read8(receiveAddress);
+      REQUIRE(result.status == IOPBusStatus::Completed);
+      REQUIRE(result.value == byte);
+    }
+    REQUIRE(system.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopBus().read32(0x1f80826c).value == status);
+    REQUIRE(system.iopBus().read32(0x1f808270).value == 0xf);
+    REQUIRE(system.iopBus().read32(0x1f808274).value == 0);
+  }
+
   void requireRejectedCPUStart(NekoSystem &system, IOPWord control = 0x3bd)
   {
     const auto before = system.iopStateHash();
@@ -770,6 +799,514 @@ TEST_CASE("SIO2 DMA card canonical admission rejects mismatched phases transacti
       REQUIRE(destination.iopStateHash() == hash);
     }
     REQUIRE(destination.saveState() == before);
+  }
+}
+
+TEST_CASE("SIO2 digital poll samples every active-low button and ignores sticks",
+  "[iop][sio2][sio2-digital]")
+{
+  const std::uint16_t buttons[] = {
+    0, NekoButton::SELECT, NekoButton::L3, NekoButton::R3, NekoButton::START,
+    NekoButton::UP, NekoButton::RIGHT, NekoButton::DOWN, NekoButton::LEFT,
+    NekoButton::L2, NekoButton::R2, NekoButton::L1, NekoButton::R1,
+    NekoButton::TRIANGLE, NekoButton::CIRCLE, NekoButton::CROSS, NekoButton::SQUARE,
+    NekoButton::START | NekoButton::CROSS, NekoButton::SELECT | NekoButton::SQUARE,
+    NekoButton::UP | NekoButton::DOWN | NekoButton::LEFT | NekoButton::RIGHT, 0xffff
+  };
+  for (const auto pressed : buttons)
+  {
+    CAPTURE(pressed);
+    NekoSystem system;
+    system.setInput({pressed, 0, 0xff, 1, 0xfe});
+    stageDigitalPoll(system);
+    for (unsigned index = 2; index < 8; ++index)
+      REQUIRE(system.iopBus().write32(portControlBase + index * 4,
+        0xabcdef01).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    const auto released = static_cast<std::uint16_t>(pressed ^ 0xffff);
+    requireDigitalReply(system, {{0xff, 0x41, 0x5a,
+      static_cast<std::uint8_t>(released), static_cast<std::uint8_t>(released >> 8)}});
+    REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+    REQUIRE(system.sio2Controller().readInterruptStatus() == 1);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 0);
+  }
+}
+
+TEST_CASE("SIO2 digital reply is sampled at START and retained across input and programming",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  stageDigitalPoll(system);
+  system.setInput({NekoButton::START | NekoButton::CROSS});
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read8(receiveAddress).value == 0xff);
+  system.setInput({NekoButton::SELECT | NekoButton::SQUARE});
+  REQUIRE(bus.write32(descriptorBase, 0).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(portControlBase, 0).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(controlAddress, 0xc).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(controlAddress, 0x3bc).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  system.iopInterruptController().writeStatus(~sio2IRQ);
+  for (const auto expected : {0x41, 0x5a, 0xf7, 0xbf})
+    REQUIRE(bus.read8(receiveAddress).value == expected);
+  REQUIRE(bus.read32(0x1f80826c).value == 0x1100);
+  stageDigitalPoll(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xfe, 0x7f}});
+  const auto before = system.iopStateHash();
+  system.setInput({0xffff});
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(system.iopStateHash() == before);
+  REQUIRE(bus.read8(receiveAddress).status == IOPBusStatus::Unmapped);
+}
+
+TEST_CASE("SIO2 digital absent port completes without a present-pad result",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  system.setInput({0xffff});
+  stageDigitalPoll(system, 0x00140541);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+  REQUIRE(system.sio2Controller().readInterruptStatus() == 1);
+}
+
+TEST_CASE("SIO2 digital admission rejects malformed and overlapping requests atomically",
+  "[iop][sio2][sio2-digital]")
+{
+  for (unsigned variant = 0; variant < 14; ++variant)
+  {
+    CAPTURE(variant);
+    NekoSystem system;
+    stageDigitalPoll(system);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    if (variant != 0)
+      requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+    auto packet = std::array<std::uint8_t, 5>{{1, 0x42, 0, 0, 0}};
+    if (variant >= 1 && variant <= 5) packet[variant - 1] = 0x43;
+    stageDigitalPoll(system, variant == 6 ? 0x00140542 :
+      variant == 7 ? 0x00140543 : variant == 8 ? 0x00180540 : 0x00140540, packet);
+    auto &bus = system.iopBus();
+    if (variant == 9)
+      REQUIRE(bus.write32(descriptorBase + 60, 1).status == IOPBusStatus::Completed);
+    if (variant == 10)
+      REQUIRE(bus.write32(portControlBase, 0).status == IOPBusStatus::Completed);
+    if (variant == 11)
+      REQUIRE(bus.write32(portControlBase + 4, 0x2000b).status == IOPBusStatus::Completed);
+    if (variant == 12)
+      REQUIRE(bus.write8(transmitAddress, 0).status == IOPBusStatus::Completed);
+    requireRejectedCPUStart(system, variant == 13 ? 0x3bf : 0x3bd);
+    REQUIRE(bus.read32(0x1f80826c).value == 0x1100);
+  }
+}
+
+TEST_CASE("SIO2 digital drained rewrite requires matching completed endpoint",
+  "[iop][sio2][sio2-digital]")
+{
+  for (const auto descriptor : {0x00140540u, 0x00140541u})
+  {
+    CAPTURE(descriptor);
+    NekoSystem system;
+    stageDigitalPoll(system, descriptor);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    if (descriptor == 0x00140540)
+      requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+    else
+      requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+    REQUIRE(system.iopBus().write32(interruptAddress, 1).status ==
+      IOPBusStatus::Completed);
+    system.iopInterruptController().writeStatus(~sio2IRQ);
+    const auto before = system.iopStateHash();
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() == before);
+    const auto other = descriptor ^ 1;
+    REQUIRE(system.iopBus().write32(portControlBase + (other & 3) * 8,
+      0xffc00505).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(portControlBase + (other & 3) * 8 + 4,
+      0x2000a).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(descriptorBase, other).status ==
+      IOPBusStatus::Completed);
+    requireRejectedCPUStart(system);
+  }
+}
+
+TEST_CASE("SIO2 digital input binding rejects missing present input but not absent or legacy polls",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  stageDigitalPoll(system);
+  const auto staged = system.iopStateHash();
+  system.iopBus().attachInput(nullptr);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+  system.iopBus().attachInput(&system.input());
+  REQUIRE(system.iopStateHash() == staged);
+  system.iopBus().attachInput(nullptr);
+  REQUIRE(system.sio2Controller().readTransferStatus(0).status ==
+    SIO2AccessStatus::Unsupported);
+  stageDigitalPoll(system, 0x00140541);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+  stageCPUCardRead(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  for (unsigned index = 0; index < 3; ++index)
+    REQUIRE(system.iopBus().read8(receiveAddress).value == 0xff);
+  REQUIRE(system.iopBus().read32(0x1f80826c).value == 0x1d100);
+  stageDigitalPoll(system);
+  system.iopBus().attachInput(&system.input());
+  const auto before = system.iopStateHash();
+  system.iopBus().attachInterruptController(nullptr);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+  system.iopBus().attachInterruptController(&system.iopInterruptController());
+  REQUIRE(system.iopStateHash() == before);
+}
+
+TEST_CASE("SIO2 digital persistence rejects foreign live input wiring",
+  "[iop][sio2][sio2-digital][save-state]")
+{
+  NekoSystem system;
+  NekoInputState foreign{NekoButton::CROSS};
+  system.iopBus().attachInput(&foreign);
+  REQUIRE_THROWS_AS(system.saveState(), std::logic_error);
+  system.iopBus().attachInput(nullptr);
+  REQUIRE_THROWS_AS(system.iopStateHash(), std::logic_error);
+  system.iopBus().attachInput(&system.input());
+  REQUIRE_NOTHROW(system.saveState());
+}
+
+TEST_CASE("SIO2 digital owner borrows input only for a fully admitted request",
+  "[iop][sio2][sio2-digital]")
+{
+  SIO2Controller controller;
+  REQUIRE(controller.writeCommandDescriptor(0, 0x00140540) == SIO2AccessStatus::Accepted);
+  REQUIRE(controller.writePortControl(0, 0xffc00505) == SIO2AccessStatus::Accepted);
+  REQUIRE(controller.writePortControl(1, 0x2000a) == SIO2AccessStatus::Accepted);
+  for (const auto byte : {1, 0x42, 0, 0})
+    REQUIRE(controller.writeTransmitByte(byte) == SIO2AccessStatus::Accepted);
+  REQUIRE(controller.startControllerTransfer(0x3bd, nullptr) ==
+    SIO2TransferResult::Unsupported);
+  REQUIRE(controller.transmitInputSize() == 4);
+  REQUIRE(controller.writeTransmitByte(0) == SIO2AccessStatus::Accepted);
+  {
+    const NekoInputState input{NekoButton::SELECT | NekoButton::SQUARE};
+    REQUIRE(controller.startTransfer(0x3bd) == SIO2TransferResult::Unsupported);
+    REQUIRE(controller.startControllerTransfer(0x3bd, &input) ==
+      SIO2TransferResult::CompletedWithInterrupt);
+  }
+  for (const auto byte : {0xff, 0x41, 0x5a, 0xfe, 0x7f})
+  {
+    const auto result = controller.readReceiveByte();
+    REQUIRE(result.status == SIO2AccessStatus::Accepted);
+    REQUIRE(result.value == byte);
+  }
+  REQUIRE(controller.readReceiveByte().status == SIO2AccessStatus::Unsupported);
+}
+
+TEST_CASE("SIO2 digital bus rejects partial and wrong-purpose starts without consuming input",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  stageDigitalPoll(system);
+  const auto before = system.iopStateHash();
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write8(controlAddress, 0xbd).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write16(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+  REQUIRE_THROWS_AS(bus.writeMasked32(controlAddress, 0x3bd, 0), std::invalid_argument);
+  for (std::uint8_t mask = 1; mask < 15; ++mask)
+    REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, mask).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.readInstruction32(controlAddress).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.readDMAC32(controlAddress).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeDMAC32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == before);
+  system.setInput({NekoButton::CROSS});
+  REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, 15).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xbf}});
+}
+
+TEST_CASE("SIO2 digital completion respects masked latching and independent interrupt acknowledgements",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write32(IOPBus::INTC_CTRL, 1).status == IOPBusStatus::Completed);
+  stageDigitalPoll(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+  REQUIRE_FALSE(bus.interruptControllerPending());
+  REQUIRE(bus.write32(IOPBus::INTC_MASK, sio2IRQ).status == IOPBusStatus::Completed);
+  REQUIRE(bus.interruptControllerPending());
+  REQUIRE(bus.write32(IOPBus::INTC_STAT, ~sio2IRQ).status == IOPBusStatus::Completed);
+  REQUIRE_FALSE(bus.interruptControllerPending());
+  REQUIRE(bus.write32(interruptAddress, 0).status == IOPBusStatus::Completed);
+  REQUIRE(system.sio2Controller().readInterruptStatus() == 1);
+  stageDigitalPoll(system);
+  system.setInput({NekoButton::START});
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xf7, 0xff}});
+  REQUIRE_FALSE(bus.interruptControllerPending());
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  stageDigitalPoll(system, 0x00140541);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0xff, 0xff, 0xff, 0xff}}, 0x2d100);
+  REQUIRE(bus.interruptControllerPending());
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  REQUIRE(bus.interruptControllerPending());
+}
+
+TEST_CASE("SIO2 digital replies exclude DMA and reject replacement of legacy unread results",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  SECTION("Unread legacy result")
+  {
+    stageInfraredTransfer(system);
+    REQUIRE(system.iopBus().write32(controlAddress, 0xb1).status ==
+      IOPBusStatus::Completed);
+    stageDigitalPoll(system);
+    requireRejectedCPUStart(system);
+    for (unsigned index = 0; index < 7; ++index)
+      REQUIRE(system.iopBus().read8(receiveAddress).value == 0xff);
+    REQUIRE(system.iopBus().read32(0x1f80826c).value == 0x1d100);
+  }
+  SECTION("Pad result cannot masquerade as a legacy rewrite")
+  {
+    stageDigitalPoll(system);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+    REQUIRE(system.iopBus().write32(descriptorBase, 0x000c0342).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(portControlBase + 16, 0xffc00505).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(portControlBase + 20, 0x000201f4).status ==
+      IOPBusStatus::Completed);
+    requireRejectedCPUStart(system);
+  }
+  SECTION("Card DMA clears retained pad status and has no CPU reply")
+  {
+    stageDigitalPoll(system);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+    stageCardProbe(system);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read32(0x1f80826c).status == IOPBusStatus::Unmapped);
+    requireRejectedCPUStart(system);
+    system.runMasterCycles(1);
+    REQUIRE(system.sio2Controller().dmaResultSize() == 144);
+    REQUIRE(system.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopBus().read32(0x1f80826c).value == 0x1d100);
+  }
+}
+
+TEST_CASE("SIO2 digital reset preserves the appropriate input owner and restores wiring",
+  "[iop][sio2][sio2-digital]")
+{
+  NekoSystem system;
+  system.setInput({NekoButton::START | NekoButton::CROSS});
+  stageDigitalPoll(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  system.iopBus().reset();
+  system.iopCore().reset();
+  REQUIRE(system.input().buttons == (NekoButton::START | NekoButton::CROSS));
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xf7, 0xbf}});
+  system.sio2Controller().reset();
+  REQUIRE(system.sio2Controller().readInterruptStatus() == 0);
+  REQUIRE(system.iopBus().read32(0x1f80826c).status == IOPBusStatus::Unmapped);
+  stageDigitalPoll(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xf7, 0xbf}});
+  system.reset();
+  REQUIRE(system.input().buttons == 0);
+  REQUIRE(system.input().leftStickX == 0x80);
+  REQUIRE(system.input().rightStickY == 0x80);
+  REQUIRE(system.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+  stageDigitalPoll(system);
+  REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+}
+
+TEST_CASE("SIO2 digital guest programs and drains the complete poll with exact completion timing",
+  "[iop][sio2][sio2-digital][trace][save-state]")
+{
+  for (const auto checkpoint : {0u, 145u, 161u, 193u, 249u})
+  {
+    CAPTURE(checkpoint);
+    NekoSystem original;
+    original.setInput({NekoButton::START | NekoButton::CROSS});
+    installProgram(original, std::array<IOPWord, 35>{{
+      0x3c01bf80, 0x34218200,
+      0x3c020014, 0x34420540, 0xac220000,
+      0x3c02ffc0, 0x34420505, 0xac220040,
+      0x3c020002, 0x3442000a, 0xac220044,
+      0x24020001, 0xa0220060, 0x24020042, 0xa0220060,
+      0xa0200060, 0xa0200060, 0xa0200060,
+      0x240203bd, 0xac220068,
+      0x90230064, 0x90240064, 0x90250064, 0x90260064, 0x90270064,
+      0x8c28006c, 0x8c290070, 0x8c2a0074, 0x8c2b0080,
+      0x24020001, 0xac220080, 0x8c2c0080, 0, 0x240d1234, 0
+    }});
+    original.runMasterCycles(checkpoint);
+    if (checkpoint >= 161)
+      original.setInput({NekoButton::SELECT | NekoButton::SQUARE});
+    const auto state = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(state);
+    plain.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    original.startTrace();
+    restored.startTrace();
+    for (auto *system : {&original, &restored, &plain})
+    {
+      system->runMasterCycles(265 - checkpoint);
+      REQUIRE(system->iopCore().retiredInstructions() == 34);
+      REQUIRE(system->iopCore().exception().kind == IOPException::None);
+      for (std::size_t index = 0; index < 5; ++index)
+      {
+        constexpr std::array<IOPWord, 5> expected{{0xff, 0x41, 0x5a, 0xf7, 0xbf}};
+        REQUIRE(system->iopCore().generalRegister(3 + index) == expected[index]);
+      }
+      REQUIRE(system->iopCore().generalRegister(8) == 0x1100);
+      REQUIRE(system->iopCore().generalRegister(9) == 0xf);
+      REQUIRE(system->iopCore().generalRegister(10) == 0);
+      REQUIRE(system->iopCore().generalRegister(11) == 1);
+      REQUIRE(system->iopCore().generalRegister(12) == 0);
+      REQUIRE(system->iopCore().generalRegister(13) == 0x1234);
+      REQUIRE(system->iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+      REQUIRE(system->iopInterruptController().status() == sio2IRQ);
+    }
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    const auto irqs = IOPTraceTest::subsystemEvents(
+      original, NekoTraceSubsystem::IOPInterruptController);
+    REQUIRE(irqs.size() == (checkpoint < 153 ? 1 : 0));
+    if (!irqs.empty())
+    {
+      REQUIRE(irqs[0].masterCycle == 153);
+      REQUIRE(irqs[0].value0 == sio2IRQ);
+    }
+    if (checkpoint < 153)
+    {
+      namespace Memory = NekoIOPTraceMemory;
+      IOPTraceTest::requireEvents(controlEvents(original, 0xbf808268), {{
+        153, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        0xbf808268, 0x3bd, 0, nekoPackIOPMemoryTraceMetadata({
+          controlAddress, 4, Memory::AccessKind::DataStore,
+          Memory::Outcome::Completed, Memory::CacheRoute::Uncached, true, 0xf})
+      }});
+    }
+  }
+}
+
+TEST_CASE("SIO2 digital partial reply restores old input while the next poll uses destination input",
+  "[iop][sio2][sio2-digital][save-state]")
+{
+  std::vector<std::uint8_t> state;
+  {
+    NekoSystem source;
+    source.setInput({NekoButton::START | NekoButton::CROSS});
+    stageDigitalPoll(source);
+    REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(source.iopBus().read8(receiveAddress).value == 0xff);
+    source.setInput({NekoButton::SELECT | NekoButton::SQUARE});
+    REQUIRE(source.iopBus().write32(descriptorBase, 0).status == IOPBusStatus::Completed);
+    state = source.saveState();
+  }
+  NekoSystem destination;
+  destination.setInput({0xffff});
+  destination.loadState(state);
+  REQUIRE(destination.saveState() == state);
+  for (const auto byte : {0x41, 0x5a, 0xf7, 0xbf})
+    REQUIRE(destination.iopBus().read8(receiveAddress).value == byte);
+  REQUIRE(destination.iopBus().read32(0x1f80826c).value == 0x1100);
+  stageDigitalPoll(destination);
+  REQUIRE(destination.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0xfe, 0x7f}});
+  destination.setInput({NekoButton::START});
+  stageDigitalPoll(destination);
+  REQUIRE(destination.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0xf7, 0xff}});
+}
+
+TEST_CASE("SIO2 digital absent partial reply and staged polls restore independently of live input",
+  "[iop][sio2][sio2-digital][save-state]")
+{
+  NekoSystem source;
+  stageDigitalPoll(source, 0x00140541);
+  REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().read8(receiveAddress).value == 0xff);
+  stageDigitalPoll(source);
+  source.setInput({NekoButton::CROSS});
+  NekoSystem restored;
+  restored.loadState(source.saveState());
+  for (unsigned index = 1; index < 5; ++index)
+    REQUIRE(restored.iopBus().read8(receiveAddress).value == 0xff);
+  REQUIRE(restored.iopBus().read32(0x1f80826c).value == 0x2d100);
+  restored.setInput({NekoButton::START});
+  REQUIRE(restored.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  requireDigitalReply(restored, {{0xff, 0x41, 0x5a, 0xf7, 0xff}});
+  const auto drained = restored.saveState();
+  NekoSystem final;
+  final.loadState(drained);
+  REQUIRE(final.saveState() == drained);
+  REQUIRE(final.iopBus().write32(controlAddress, 0x3bd).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(final.saveState() == drained);
+}
+
+TEST_CASE("SIO2 digital canonical validation rejects malformed retained results without rebinding",
+  "[iop][sio2][sio2-digital][save-state]")
+{
+  for (const auto descriptor : {0x00140540u, 0x00140541u})
+  {
+    CAPTURE(descriptor);
+    NekoSystem source;
+    stageDigitalPoll(source, descriptor);
+    REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    const auto state = source.saveState();
+    NekoSystem destination;
+    destination.setInput({NekoButton::START});
+    const auto before = destination.saveState();
+    const auto hash = destination.iopStateHash();
+    for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
+      {"profile", 255}, {"profile", 0}, {"profile", 2}, {"endpoint", 2},
+      {"endpoint", (descriptor & 1) ^ 1}, {"length", 4}, {"length", 6}, {"cursor", 6},
+      {"bytes[0].value", 0}, {"bytes[1].value", 0}, {"bytes[2].value", 0},
+      {"bytes[5].value", 0xff}, {"bytes[6].value", 1},
+      {"status[0].value", 0x1d100}, {"status[1].value", 0}, {"status[2].value", 1}})
+    {
+      CAPTURE(mutation.first);
+      SaveStateMutation invalid(state);
+      invalid.writeScalar("system.iop.sio2.cpuResult." + mutation.first, mutation.second);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+      REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+      REQUIRE(destination.iopStateHash() == hash);
+    }
+    REQUIRE(destination.saveState() == before);
+    stageDigitalPoll(destination);
+    REQUIRE(destination.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    requireDigitalReply(destination, {{0xff, 0x41, 0x5a, 0xf7, 0xff}});
   }
 }
 
