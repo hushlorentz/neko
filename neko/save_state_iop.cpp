@@ -246,8 +246,30 @@ void NekoSaveStateCodec::writeIOPState(
     }
     writer->writeFieldBool("transferCompleted",
       system.sio2ControllerComponent.transferCompleted);
-    writer->writeFieldU8("receiveRemaining",
-      system.sio2ControllerComponent.receiveRemaining);
+    {
+      auto scope = writer->scope("cpuResult");
+      const auto &reply = system.sio2ControllerComponent.cpuResult;
+      writer->writeFieldU8("profile", static_cast<std::uint8_t>(reply.profile));
+      writer->writeFieldU8("endpoint", reply.endpoint);
+      writer->writeFieldU8("length", reply.length);
+      writer->writeFieldU8("cursor", reply.cursor);
+      {
+        auto bytes = writer->scope("bytes");
+        for (std::size_t index = 0; index < reply.bytes.size(); ++index)
+        {
+          auto byte = writer->element(index);
+          writer->writeFieldU8("value", reply.bytes[index]);
+        }
+      }
+      {
+        auto status = writer->scope("status");
+        for (std::size_t index = 0; index < reply.status.size(); ++index)
+        {
+          auto word = writer->element(index);
+          writer->writeFieldU32("value", reply.status[index]);
+        }
+      }
+    }
     writer->writeFieldBool("interruptCause",
       system.sio2ControllerComponent.interruptCause);
     writer->writeFieldU8("dmaResultPhase",
@@ -706,7 +728,36 @@ void NekoSaveStateCodec::readIOP(
       }
     }
     sio2.transferCompleted = reader->readFieldBool("transferCompleted");
-    sio2.receiveRemaining = reader->readFieldU8("receiveRemaining");
+    {
+      auto scope = reader->scope("cpuResult");
+      auto &reply = sio2.cpuResult;
+      const auto profile = reader->readFieldU8("profile");
+      reader->requireField(
+        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::MultitapSupport13),
+        "SIO2 CPU result profile is invalid");
+      reply.profile = static_cast<SIO2Controller::CPUProfile>(profile);
+      reply.endpoint = reader->readFieldU8("endpoint");
+      reply.length = reader->readFieldU8("length");
+      reply.cursor = reader->readFieldU8("cursor");
+      {
+        auto bytes = reader->scope("bytes");
+        for (std::size_t index = 0; index < reply.bytes.size(); ++index)
+        {
+          auto byte = reader->element(index);
+          reply.bytes[index] = reader->readFieldU8("value");
+        }
+      }
+      {
+        auto status = reader->scope("status");
+        for (std::size_t index = 0; index < reply.status.size(); ++index)
+        {
+          auto word = reader->element(index);
+          reply.status[index] = reader->readFieldU32("value");
+        }
+      }
+      reader->requireField(sio2.hasValidCPUResult(),
+        "SIO2 CPU result bytes, status or cursor do not match its completed profile");
+    }
     sio2.interruptCause = reader->readFieldBool("interruptCause");
     const auto resultPhase = reader->readFieldU8("dmaResultPhase");
     reader->requireField(resultPhase <= static_cast<std::uint8_t>(SIO2DMAResultPhase::Ready),

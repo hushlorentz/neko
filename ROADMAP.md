@@ -4417,36 +4417,58 @@ not requirements for exhaustive subsystem coverage.
 - [x] Deliver GS blank edges to IOP INTC with masked latching, acknowledgement,
       reset and authored continuation/trace conformance, preserving existing
       EE interrupts and timer behavior.
-- [ ] Verify bounded IOP handler and connection-table progress with required
+- [x] Verify bounded IOP handler and connection-table progress with required
       cold/restored BIOS comparisons after the implementation checkpoint;
       attribute the next dependency without assuming connected input.
 
 ### Controller Serial Request and Result Attribution
 
-- [ ] Attribute demonstrated controller requests/results to exact SIO2
+- [x] Attribute demonstrated controller requests/results to exact SIO2
       programming, CPU/DMA transport and IRQ/status boundaries; use retained
       evidence before selecting any necessary bounded capture.
 
 ### SIO2 Controller Contract and Input Planning
 
-- [ ] Select the evidenced port-1 DualShock 2 connection, configuration and
-      polling contract, including absent/error behavior and completion;
-      resolve consequential protocol/timing policies before implementation.
-- [ ] Define deterministic sampling from the existing core input state,
+- [x] Select the evidenced initial port-1 DualShock 2 polling and connection
+      contract, including absent/error behavior and completion; scope
+      configuration families to demonstrated requests and resolve
+      consequential protocol/timing policies before implementation.
+- [x] Define deterministic sampling from the existing core input state,
       button/stick byte mapping and request/reply ownership; separate serial
       controller state from absent memory cards and host persistence.
-- [ ] Split required transport, protocol and system integration into bounded
+- [x] Split required transport, protocol and system integration into bounded
       implementation pieces with reset, save-state, trace and authored
       conformance acceptance through the existing SIO2/DMA/IRQ owners.
 
-### Controller Integration and Responsiveness
+### SIO2 CPU Result Ownership
 
-- [ ] Implement the selected controller request families with focused
-      red/green tests and authored conformance; preserve supported absent
-      device profiles and reject unsupported requests without side effects.
-- [ ] Extend only demonstrated SIO2 DMA shapes through existing shared grants
+- [x] Retain bounded CPU reply bytes, cursor, completed status and identity
+      through the existing SIO2 codec/hash owner, with authored reset/restore
+      and rejection coverage; preserve supported profiles and DMA behavior.
+- [ ] Verify the result-ownership migration with fresh cold/restored BIOS
+      comparisons after its implementation checkpoint, preserving the
+      attributed controller-origin boundary.
+
+### Initial Digital Controller Poll
+
+- [ ] Implement the exact selected CPU poll and present/absent replies with
+      core-input binding and atomic sampling; include red/green, guest,
+      reset/adoption, partial-reply restore and trace conformance.
+- [ ] Verify the initial poll and attribute the next dependency with fresh
+      cold/restored BIOS comparisons after the implementation checkpoint;
+      do not infer guest connection or shell responsiveness from admission.
+
+### Evidence-Driven Controller Dependencies
+
+- [ ] Attribute and contract any demonstrated later controller commands,
+      expanding them into bounded implementation items before adding
+      configuration, analog, pressure, rumble or model-query behavior.
+- [ ] Extend only demonstrated controller DMA shapes through existing grants
       with real reply availability, packing, backpressure and masked completion;
       keep DMA completion distinct from serial completion and peer success.
+
+### Controller Integration and Responsiveness
+
 - [ ] Verify guest-observed connection, neutral data and deterministic button
       transitions with required replay comparisons before the shell's
       change-and-return responsiveness acceptance.

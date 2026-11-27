@@ -1308,7 +1308,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 137 save-state layout is byte-stable",
+TEST_CASE("Version 138 save-state layout is byte-stable",
   "[spu2-pio][spu2-io-mode][spu2-io-status][spu2-voice-volume][spu2-pitch][spu2-adsr][spu2-ssa][spu2-source][spu2-esa][spu2-effect-parameters][spu-normal-raw-tsa][cdvd-boot-certify][cdvd-forbid-dvdp][cdvd-wake-up][cdvd-open-config][cdvd-rc-bypass][vif-err][cdvd-model][ba0-write32]")
 {
   NekoSystem system;
@@ -1324,17 +1324,17 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 137);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 138);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
   auto previousDomain = state;
-  previousDomain[SAVE_STATE_VERSION_OFFSET] = 136;
+  previousDomain[SAVE_STATE_VERSION_OFFSET] = 137;
   REQUIRE_THROWS_AS(inspectSaveState(previousDomain), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousDomain), std::invalid_argument);
   REQUIRE(system.saveState() == state);
   constexpr std::size_t appendedSpuStateSize = 5314;
-  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040 + 5);
+  CHECK(state.size() == VERSION_107_PREPARED_STATE_SIZE + 710 + appendedSpuStateSize + 1040 + 5 + 22);
   const SaveStateMutation fields(state);
   REQUIRE(fields.readByte("system.iop.cdvd.modelProfile") == 1);
   REQUIRE(fields.readByte("system.iop.cdvd.modelRequest") == 0);
@@ -1621,6 +1621,10 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
     REQUIRE(open->scalarValue == 0);
   }
   auto previousVersion = state;
+  const auto *cpuProfile = snapshot.find("system.iop.sio2.cpuResult.profile");
+  const auto *cpuStatusLast = snapshot.find("system.iop.sio2.cpuResult.status[2].value");
+  REQUIRE(cpuProfile != nullptr);
+  REQUIRE(cpuStatusLast != nullptr);
   const auto *configSession = snapshot.find("system.iop.cdvd.configSession");
   REQUIRE(configSession != nullptr);
   previousVersion.erase(previousVersion.begin() + configSession->containerOffset,
@@ -1643,6 +1647,8 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
     previousVersion.begin() + modeOffset + 16);
   previousVersion.erase(previousVersion.begin() + lastMaster->containerOffset + 2,
     previousVersion.begin() + core0->containerOffset);
+  previousVersion.erase(previousVersion.begin() + cpuProfile->containerOffset + 1,
+    previousVersion.begin() + cpuStatusLast->containerOffset + cpuStatusLast->size);
   const auto *clutEntries = snapshot.find("system.gs.clutEntries[0].value");
   const auto *clut0 = snapshot.find("system.gs.contexts[0].clut.basePointer");
   const auto *clut1 = snapshot.find("system.gs.contexts[1].clut.basePointer");
@@ -1676,7 +1682,7 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
   REQUIRE(system.saveState() == state);
   const auto version107Offset = [cursorOffset, core0, voiceStateOffset, configSession,
       appendedSpuStateSize, vif0Mask, vif1Mask, ba0Device32,
-      clutEntries, clut0, clut1, pendingPixel](std::size_t offset)
+      clutEntries, clut0, clut1, pendingPixel, cpuStatusLast](std::size_t offset)
   {
     return offset - (offset >= cursorOffset + 24 ? 24 : 0) -
       (offset >= core0->containerOffset ? 672 : 0) -
@@ -1688,7 +1694,8 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
       (offset >= clutEntries->containerOffset + 1028 ? 1028 : 0) -
       (offset >= clut0->containerOffset + 6 ? 6 : 0) -
       (offset >= clut1->containerOffset + 6 ? 6 : 0) -
-      (offset >= pendingPixel->containerOffset + 5 ? 5 : 0);
+      (offset >= pendingPixel->containerOffset + 5 ? 5 : 0) -
+      (offset >= cpuStatusLast->containerOffset + cpuStatusLast->size ? 22 : 0);
   };
   const auto *dmaResultCursor = snapshot.find("system.iop.sio2.dmaResultCursor");
   const auto *outputProgress = snapshot.find(
@@ -1848,20 +1855,41 @@ TEST_CASE("Version 137 save-state layout is byte-stable",
   REQUIRE(lastTransmit->containerOffset == firstTransmit->containerOffset + 1022);
   REQUIRE(lastTransmit->scalarValue == 0);
   const auto *transferCompleted = snapshot.find("system.iop.sio2.transferCompleted");
-  const auto *receiveRemaining = snapshot.find("system.iop.sio2.receiveRemaining");
+  const auto *cpuEndpoint = snapshot.find("system.iop.sio2.cpuResult.endpoint");
+  const auto *cpuLength = snapshot.find("system.iop.sio2.cpuResult.length");
+  const auto *cpuCursor = snapshot.find("system.iop.sio2.cpuResult.cursor");
+  const auto *cpuFirstByte = snapshot.find("system.iop.sio2.cpuResult.bytes[0].value");
+  const auto *cpuLastByte = snapshot.find("system.iop.sio2.cpuResult.bytes[6].value");
+  const auto *cpuStatus = snapshot.find("system.iop.sio2.cpuResult.status[0].value");
   const auto *interruptCause = snapshot.find("system.iop.sio2.interruptCause");
   REQUIRE(transferCompleted != nullptr);
-  REQUIRE(receiveRemaining != nullptr);
+  REQUIRE(cpuEndpoint != nullptr);
+  REQUIRE(cpuLength != nullptr);
+  REQUIRE(cpuCursor != nullptr);
+  REQUIRE(cpuFirstByte != nullptr);
+  REQUIRE(cpuLastByte != nullptr);
+  REQUIRE(cpuStatus != nullptr);
   REQUIRE(interruptCause != nullptr);
   REQUIRE(transferCompleted->kind == SaveStateFieldKind::Boolean);
   REQUIRE(transferCompleted->containerOffset == lastTransmit->containerOffset + 1);
-  REQUIRE(receiveRemaining->kind == SaveStateFieldKind::U8);
-  REQUIRE(receiveRemaining->containerOffset == transferCompleted->containerOffset + 1);
+  REQUIRE(cpuProfile->kind == SaveStateFieldKind::U8);
+  REQUIRE(cpuProfile->containerOffset == transferCompleted->containerOffset + 1);
+  REQUIRE(cpuEndpoint->containerOffset == cpuProfile->containerOffset + 1);
+  REQUIRE(cpuLength->containerOffset == cpuEndpoint->containerOffset + 1);
+  REQUIRE(cpuCursor->containerOffset == cpuLength->containerOffset + 1);
+  REQUIRE(cpuFirstByte->containerOffset == cpuCursor->containerOffset + 1);
+  REQUIRE(cpuLastByte->containerOffset == cpuFirstByte->containerOffset + 6);
+  REQUIRE(cpuStatus->kind == SaveStateFieldKind::U32);
+  REQUIRE(cpuStatus->containerOffset == cpuLastByte->containerOffset + 1);
+  REQUIRE(cpuStatusLast->containerOffset == cpuStatus->containerOffset + 8);
   REQUIRE(interruptCause->kind == SaveStateFieldKind::Boolean);
-  REQUIRE(interruptCause->containerOffset == receiveRemaining->containerOffset + 1);
+  REQUIRE(interruptCause->containerOffset == cpuStatusLast->containerOffset + 4);
   REQUIRE(resultPhase->containerOffset == interruptCause->containerOffset + 1);
   REQUIRE(transferCompleted->scalarValue == 0);
-  REQUIRE(receiveRemaining->scalarValue == 0);
+  REQUIRE(cpuProfile->scalarValue == 0);
+  REQUIRE(cpuLength->scalarValue == 0);
+  REQUIRE(cpuCursor->scalarValue == 0);
+  REQUIRE(cpuStatus->scalarValue == 0);
   REQUIRE(interruptCause->scalarValue == 0);
   REQUIRE(dmaResultCursor->containerOffset == resultPhase->containerOffset + 1);
   std::size_t spdifOffset = dmaResultCursor->containerOffset + 1;

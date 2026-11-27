@@ -1,7 +1,13 @@
 #include "sio2_controller.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
+
+namespace
+{
+  constexpr std::array<std::uint32_t, 3> absentTransferStatus = {{0x1d100, 0xf, 0}};
+}
 
 constexpr std::size_t SIO2Controller::DMA_PROBE_PADDING_BYTES;
 
@@ -15,7 +21,7 @@ void SIO2Controller::reset()
   commandDescriptors.fill(0);
   clearTransmitInput();
   transferCompleted = false;
-  receiveRemaining = 0;
+  cpuResult = {};
   interruptCause = false;
 }
 
@@ -33,7 +39,7 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 {
   const bool completedRewrite = value == 0x3bd && control == value &&
     transferCompleted && ingressPhase == SIO2IngressPhase::Empty &&
-    transmitInputCount == 0 && resultCursor == 0 && receiveRemaining == 0 &&
+    transmitInputCount == 0 && resultCursor == 0 && !hasUnreadCPUResult() &&
     (dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
       hasCPUMultitapSupportProgramming());
   if ((!supportsControl(value) && !completedRewrite) ||
@@ -60,7 +66,7 @@ SIO2TransferResult SIO2Controller::startTransfer(
 SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
 {
   const auto *profile = dmaCardProfile();
-  if (transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0 ||
+  if (transmitInputCount != DMA_INPUT_BYTES || hasUnreadCPUResult() ||
       profile == nullptr || transmitInput[0] != 0x81 ||
       transmitInput[1] != profile->command)
     return SIO2TransferResult::Unsupported;
@@ -68,6 +74,7 @@ SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
     if (transmitInput[index] != 0)
       return SIO2TransferResult::Unsupported;
   clearTransmitInput();
+  cpuResult = {};
   control = 0x3bd;
   transferCompleted = false;
   resultPhase = SIO2DMAResultPhase::Pending;
@@ -77,21 +84,32 @@ SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
 SIO2TransferResult SIO2Controller::startCPUTransfer(
   std::uint32_t controlValue) noexcept
 {
-  if (receiveRemaining != 0)
+  if (hasUnreadCPUResult())
     return SIO2TransferResult::Unsupported;
-  std::uint8_t replyBytes = 0;
+  const auto reply = classifyCPUTransfer(controlValue);
+  if (reply.profile == CPUProfile::None)
+    return SIO2TransferResult::Unsupported;
+  return completeCPUTransfer(controlValue, reply);
+}
+
+SIO2Controller::CPUResult SIO2Controller::classifyCPUTransfer(
+  std::uint32_t controlValue) const noexcept
+{
+  CPUResult reply;
   if (controlValue == 0xb1 &&
       (commandDescriptors[0] == 0x001c0740 || commandDescriptors[0] == 0x001c0741) &&
       commandDescriptors[1] == 0 && transmitInputCount == 7 &&
       transmitInput[0] == 0x61)
   {
-    replyBytes = 7;
+    reply.profile = CPUProfile::Infrared;
+    reply.length = 7;
   }
   else if (controlValue == 0x3bd && hasCPUCardReadProgramming() &&
       transmitInputCount == CPU_CARD_REPLY_BYTES &&
       transmitInput[0] == 0x81 && transmitInput[1] == 0x52 && transmitInput[2] == 0)
   {
-    replyBytes = CPU_CARD_REPLY_BYTES;
+    reply.profile = CPUProfile::CardRead;
+    reply.length = CPU_CARD_REPLY_BYTES;
   }
   else if (controlValue == 0x3bd && hasCPUMultitapSupportProgramming() &&
       transmitInputCount == CPU_MULTITAP_REPLY_BYTES &&
@@ -100,19 +118,30 @@ SIO2TransferResult SIO2Controller::startCPUTransfer(
   {
     for (std::size_t index = 2; index < CPU_MULTITAP_REPLY_BYTES; ++index)
       if (transmitInput[index] != 0)
-        return SIO2TransferResult::Unsupported;
-    replyBytes = CPU_MULTITAP_REPLY_BYTES;
+        return {};
+    reply.profile = transmitInput[1] == 0x12
+      ? CPUProfile::MultitapSupport12 : CPUProfile::MultitapSupport13;
+    reply.length = CPU_MULTITAP_REPLY_BYTES;
   }
   else
   {
-    return SIO2TransferResult::Unsupported;
+    return {};
   }
+  reply.endpoint = static_cast<std::uint8_t>(commandDescriptors[0] & 3);
+  std::fill_n(reply.bytes.begin(), reply.length, std::uint8_t{0xff});
+  reply.status = absentTransferStatus;
+  return reply;
+}
+
+SIO2TransferResult SIO2Controller::completeCPUTransfer(
+  std::uint32_t controlValue, const CPUResult &reply) noexcept
+{
   const auto result = interruptCause ? SIO2TransferResult::Completed
     : SIO2TransferResult::CompletedWithInterrupt;
   control = controlValue;
   clearTransmitInput();
   transferCompleted = true;
-  receiveRemaining = replyBytes;
+  cpuResult = reply;
   interruptCause = true;
   return result;
 }
@@ -224,17 +253,17 @@ void SIO2Controller::consumeDMAResultWord() noexcept
 
 SIO2ReadResult SIO2Controller::readReceiveByte() noexcept
 {
-  if (receiveRemaining == 0)
+  if (!hasUnreadCPUResult())
   {
     return {};
   }
-  --receiveRemaining;
-  return {SIO2AccessStatus::Accepted, 0xff};
+  return {SIO2AccessStatus::Accepted, cpuResult.bytes[cpuResult.cursor++]};
 }
 
 SIO2ReadResult SIO2Controller::readTransferStatus(std::size_t index) const
 {
-  static constexpr std::array<std::uint32_t, 3> status = {{0x1d100, 0xf, 0}};
+  const auto &status = cpuResult.profile == CPUProfile::None
+    ? absentTransferStatus : cpuResult.status;
   const auto value = status.at(index);
   return transferCompleted ? SIO2ReadResult{SIO2AccessStatus::Accepted, value}
     : SIO2ReadResult{};
@@ -259,8 +288,48 @@ SIO2AccessStatus SIO2Controller::acknowledgeInterrupt(
   return SIO2AccessStatus::Accepted;
 }
 
+bool SIO2Controller::hasUnreadCPUResult() const noexcept
+{
+  return cpuResult.cursor < cpuResult.length;
+}
+
+bool SIO2Controller::hasValidCPUResult() const noexcept
+{
+  std::uint8_t expectedLength = 0;
+  switch (cpuResult.profile)
+  {
+    case CPUProfile::None:
+      if (cpuResult.endpoint != 0) return false;
+      break;
+    case CPUProfile::Infrared:
+      if (cpuResult.endpoint > 1) return false;
+      expectedLength = 7;
+      break;
+    case CPUProfile::CardRead:
+      if (cpuResult.endpoint != 2 && cpuResult.endpoint != 3) return false;
+      expectedLength = CPU_CARD_REPLY_BYTES;
+      break;
+    case CPUProfile::MultitapSupport12:
+    case CPUProfile::MultitapSupport13:
+      if (cpuResult.endpoint != 2 && cpuResult.endpoint != 3) return false;
+      expectedLength = CPU_MULTITAP_REPLY_BYTES;
+      break;
+    default: return false;
+  }
+  if (cpuResult.length != expectedLength || cpuResult.cursor > cpuResult.length)
+    return false;
+  for (std::size_t index = 0; index < cpuResult.bytes.size(); ++index)
+    if (cpuResult.bytes[index] != (index < expectedLength ? 0xff : 0))
+      return false;
+  const std::array<std::uint32_t, 3> emptyStatus{};
+  return cpuResult.status == (expectedLength == 0 ? emptyStatus : absentTransferStatus);
+}
+
 bool SIO2Controller::hasValidTransferState() const noexcept
 {
+  if (!hasValidCPUResult() ||
+      (cpuResult.profile != CPUProfile::None && !transferCompleted))
+    return false;
   if (resultCursor % 4 != 0 || resultCursor >= DMA_INPUT_BYTES ||
       (resultPhase != SIO2DMAResultPhase::Ready && resultCursor != 0))
     return false;
@@ -270,7 +339,8 @@ bool SIO2Controller::hasValidTransferState() const noexcept
     case SIO2DMAResultPhase::Pending:
     case SIO2DMAResultPhase::Ready:
       return ingressPhase == SIO2IngressPhase::Empty && transmitInputCount == 0 &&
-        receiveRemaining == 0 && control == 0x3bd && dmaCardProfile() != nullptr &&
+        cpuResult.profile == CPUProfile::None &&
+        control == 0x3bd && dmaCardProfile() != nullptr &&
         transferCompleted == (resultPhase == SIO2DMAResultPhase::Ready);
     default: return false;
   }
@@ -284,24 +354,23 @@ bool SIO2Controller::hasValidTransferState() const noexcept
       break;
     case SIO2IngressPhase::DMAOpen:
       if (transmitInputCount >= DMA_INPUT_BYTES || transmitInputCount % 4 != 0 ||
-          receiveRemaining != 0) return false;
+          hasUnreadCPUResult()) return false;
       break;
     case SIO2IngressPhase::DMASealed:
-      if (transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0) return false;
+      if (transmitInputCount != DMA_INPUT_BYTES || hasUnreadCPUResult()) return false;
       break;
     default: return false;
   }
-  if (receiveRemaining > 7)
-  {
-    return false;
-  }
   if (!transferCompleted)
   {
-    return receiveRemaining == 0 && !interruptCause &&
+    return !hasUnreadCPUResult() && !interruptCause &&
       (control == 0 || supportsControl(control));
   }
+  if (cpuResult.profile == CPUProfile::None)
+    return supportsControl(control) || control == 0x3bd;
   return supportsControl(control) || control == 0xb1 ||
-    (control == 0x3bd && receiveRemaining <= CPU_MULTITAP_REPLY_BYTES);
+    (control == 0x3bd &&
+      cpuResult.length - cpuResult.cursor <= CPU_MULTITAP_REPLY_BYTES);
 }
 
 std::uint32_t SIO2Controller::readPortControl(std::size_t index) const
@@ -363,7 +432,7 @@ SIO2AccessStatus SIO2Controller::writeTransmitByte(std::uint8_t value) noexcept
 bool SIO2Controller::beginDMAInput() noexcept
 {
   if (resultPhase != SIO2DMAResultPhase::Empty ||
-      ingressPhase != SIO2IngressPhase::Empty || receiveRemaining != 0)
+      ingressPhase != SIO2IngressPhase::Empty || hasUnreadCPUResult())
     return false;
   ingressPhase = SIO2IngressPhase::DMAOpen;
   return true;

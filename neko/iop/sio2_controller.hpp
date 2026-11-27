@@ -86,11 +86,33 @@ class SIO2Controller final
     const DMACardProfile *dmaCardProfile() const noexcept;
     static constexpr std::uint8_t CPU_CARD_REPLY_BYTES = 3;
     static constexpr std::uint8_t CPU_MULTITAP_REPLY_BYTES = 6;
+    enum class CPUProfile : std::uint8_t
+    {
+      None,
+      Infrared,
+      CardRead,
+      MultitapSupport12,
+      MultitapSupport13
+    };
+    struct CPUResult
+    {
+      CPUProfile profile = CPUProfile::None;
+      std::uint8_t endpoint = 0;
+      std::uint8_t length = 0;
+      std::uint8_t cursor = 0;
+      std::array<std::uint8_t, 7> bytes{};
+      std::array<std::uint32_t, 3> status{};
+    };
     bool hasCPUCardReadProgramming() const noexcept;
     bool hasCPUMultitapSupportProgramming() const noexcept;
     bool hasPairedCPUProgramming(std::uint32_t firstDescriptor,
       std::uint32_t firstPortControl, std::uint32_t secondPortControl) const noexcept;
     SIO2TransferResult startCPUTransfer(std::uint32_t controlValue) noexcept;
+    CPUResult classifyCPUTransfer(std::uint32_t controlValue) const noexcept;
+    SIO2TransferResult completeCPUTransfer(
+      std::uint32_t controlValue, const CPUResult &reply) noexcept;
+    bool hasUnreadCPUResult() const noexcept;
+    bool hasValidCPUResult() const noexcept;
     SIO2TransferResult startDMACardTransfer() noexcept;
     bool hasValidTransferState() const noexcept;
     std::uint32_t peekDMAResultWord() const noexcept;
@@ -108,7 +130,7 @@ class SIO2Controller final
     std::uint16_t transmitInputCount = 0;
     SIO2IngressPhase ingressPhase = SIO2IngressPhase::Empty;
     bool transferCompleted = false;
-    std::uint8_t receiveRemaining = 0;
+    CPUResult cpuResult{};
     bool interruptCause = false;
     SIO2DMAResultPhase resultPhase = SIO2DMAResultPhase::Empty;
     std::uint8_t resultCursor = 0;

@@ -405,7 +405,7 @@ TEST_CASE("SIO2 completed infrared state hashes validates and adopts destination
   const auto fields = inspectSaveState(completed);
   for (const auto &expected :
        std::vector<std::pair<std::string, std::uint64_t>>{
-         {"transferCompleted", 1}, {"receiveRemaining", 7}, {"interruptCause", 1}})
+         {"transferCompleted", 1}, {"cpuResult.length", 7}, {"interruptCause", 1}})
   {
     const auto *field = fields.find("system.iop.sio2." + expected.first);
     REQUIRE(field != nullptr);
@@ -418,7 +418,7 @@ TEST_CASE("SIO2 completed infrared state hashes validates and adopts destination
   REQUIRE(destination.iopStateHash() == completedHash);
   for (const auto &mutation :
        std::vector<std::pair<std::string, std::uint64_t>>{
-         {"system.iop.sio2.receiveRemaining", 3},
+         {"system.iop.sio2.cpuResult.cursor", 4},
          {"system.iop.sio2.interruptCause", 0},
          {"system.iop.sio2.control", 0xc}})
   {
@@ -449,8 +449,8 @@ TEST_CASE("SIO2 completed infrared state hashes validates and adopts destination
        std::vector<std::pair<std::string, std::uint64_t>>{
          {"system.iop.sio2.transferCompleted", 0},
          {"system.iop.sio2.transferCompleted", 2},
-         {"system.iop.sio2.receiveRemaining", 8},
-         {"system.iop.sio2.receiveRemaining", 255},
+         {"system.iop.sio2.cpuResult.length", 8},
+         {"system.iop.sio2.cpuResult.length", 255},
          {"system.iop.sio2.interruptCause", 2},
          {"system.iop.sio2.control", 0},
          {"system.iop.sio2.control", 0xb0},
@@ -468,7 +468,7 @@ TEST_CASE("SIO2 completed infrared state hashes validates and adopts destination
   }
   for (const auto &mutation :
        std::vector<std::pair<std::string, std::uint64_t>>{
-         {"system.iop.sio2.receiveRemaining", 1},
+         {"system.iop.sio2.cpuResult.length", 1},
          {"system.iop.sio2.interruptCause", 1},
          {"system.iop.sio2.control", 0xb1}})
   {

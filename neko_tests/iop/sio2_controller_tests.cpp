@@ -750,7 +750,7 @@ TEST_CASE("SIO2 DMA card canonical admission rejects mismatched phases transacti
       {"system.iop.sio2.dmaResultPhase", 3},
       {"system.iop.sio2.control", 0x3bc},
       {"system.iop.sio2.transferCompleted", ready ? 0u : 1u},
-      {"system.iop.sio2.receiveRemaining", 1},
+      {"system.iop.sio2.cpuResult.length", 1},
       {"system.iop.sio2.transmitInput.count", 4},
       {"system.iop.sio2.commandDescriptors[0].value", 0x00100470},
       {"system.iop.sio2.commandDescriptors[1].value", 1},
@@ -1024,8 +1024,8 @@ TEST_CASE("SIO2 CPU52 canonical admission rejects inconsistent receive states at
   stageInfraredTransfer(destination);
   const auto before = destination.iopStateHash();
   for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
-    {"system.iop.sio2.receiveRemaining", 8},
-    {"system.iop.sio2.receiveRemaining", 7},
+    {"system.iop.sio2.cpuResult.length", 8},
+    {"system.iop.sio2.cpuResult.length", 7},
     {"system.iop.sio2.transferCompleted", 0},
     {"system.iop.sio2.dmaResultPhase", 1},
     {"system.iop.sio2.dmaResultPhase", 2},
@@ -1040,6 +1040,132 @@ TEST_CASE("SIO2 CPU52 canonical admission rejects inconsistent receive states at
     REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
     REQUIRE(destination.iopStateHash() == before);
   }
+}
+
+TEST_CASE("SIO2 CPU results restore their identity and cursor after reprogramming",
+  "[iop][sio2][sio2-cpu-result][save-state]")
+{
+  for (const std::uint8_t profile : {1, 2, 3, 4})
+  {
+    CAPTURE(profile);
+    NekoSystem original;
+    if (profile == 1)
+      stageInfraredTransfer(original, 0x001c0741);
+    else if (profile == 2)
+      stageCPUCardRead(original, 0x000c0343);
+    else
+      stageCPUMultitapSupport(original, 0x00180643,
+        {{0x21, static_cast<std::uint8_t>(profile == 3 ? 0x12 : 0x13)}});
+    auto &bus = original.iopBus();
+    REQUIRE(bus.write32(controlAddress, profile == 1 ? 0xb1 : 0x3bd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read8(receiveAddress).value == 0xff);
+    REQUIRE(bus.write32(descriptorBase, 0x12345678).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(portControlBase + 24, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(controlAddress, 0xc).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write8(transmitAddress, 0x61).status == IOPBusStatus::Completed);
+    const auto state = original.saveState();
+    const SaveStateMutation fields(state);
+    const std::size_t length = profile == 1 ? 7 : profile == 2 ? 3 : 6;
+    REQUIRE(fields.readByte("system.iop.sio2.cpuResult.profile") == profile);
+    REQUIRE(fields.readByte("system.iop.sio2.cpuResult.endpoint") == (profile == 1 ? 1 : 3));
+    REQUIRE(fields.readByte("system.iop.sio2.cpuResult.length") == length);
+    REQUIRE(fields.readByte("system.iop.sio2.cpuResult.cursor") == 1);
+    for (std::size_t index = 0; index < 7; ++index)
+      REQUIRE(fields.readByte("system.iop.sio2.cpuResult.bytes[" +
+        std::to_string(index) + "].value") == (index < length ? 0xff : 0));
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    for (auto *system : {&original, &restored})
+    {
+      for (std::size_t index = 1; index < length; ++index)
+        REQUIRE(system->iopBus().read8(receiveAddress).value == 0xff);
+      REQUIRE(system->iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+      REQUIRE(system->iopBus().read32(0x1f80826c).value == 0x1d100);
+      REQUIRE(system->iopBus().read32(0x1f808270).value == 0xf);
+      REQUIRE(system->iopBus().read32(0x1f808274).value == 0);
+      REQUIRE(system->sio2Controller().transmitInputByte(0) == 0x61);
+    }
+    REQUIRE(restored.saveState() == original.saveState());
+    NekoSystem drained;
+    drained.loadState(restored.saveState());
+    REQUIRE(drained.iopBus().read32(0x1f80826c).value == 0x1d100);
+    REQUIRE(drained.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+  }
+}
+
+TEST_CASE("SIO2 CPU result replacement normalizes tails and DMA clears CPU ownership",
+  "[iop][sio2][sio2-cpu-result][save-state]")
+{
+  NekoSystem system;
+  stageInfraredTransfer(system);
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write32(controlAddress, 0xb1).status == IOPBusStatus::Completed);
+  for (std::size_t index = 0; index < 7; ++index)
+    REQUIRE(bus.read8(receiveAddress).value == 0xff);
+  stageCPUCardRead(system);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  const SaveStateMutation replaced(system.saveState());
+  for (std::size_t index = 3; index < 7; ++index)
+    REQUIRE(replaced.readByte("system.iop.sio2.cpuResult.bytes[" +
+      std::to_string(index) + "].value") == 0);
+  for (std::size_t index = 0; index < 3; ++index)
+    REQUIRE(bus.read8(receiveAddress).value == 0xff);
+  stageCardProbe(system);
+  REQUIRE(bus.read32(0x1f80826c).value == 0x1d100);
+  REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1f80826c).status == IOPBusStatus::Unmapped);
+  const auto pending = system.saveState();
+  const SaveStateMutation fields(pending);
+  REQUIRE(fields.readByte("system.iop.sio2.cpuResult.profile") == 0);
+  REQUIRE(fields.readByte("system.iop.sio2.cpuResult.length") == 0);
+  REQUIRE(fields.readByte("system.iop.sio2.cpuResult.cursor") == 0);
+  for (std::size_t index = 0; index < 7; ++index)
+    REQUIRE(fields.readByte("system.iop.sio2.cpuResult.bytes[" +
+      std::to_string(index) + "].value") == 0);
+  NekoSystem restored;
+  restored.loadState(pending);
+  for (auto *machine : {&system, &restored})
+  {
+    machine->runMasterCycles(1);
+    REQUIRE(machine->iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(machine->iopBus().read32(0x1f80826c).value == 0x1d100);
+    REQUIRE(machine->sio2Controller().dmaResultSize() == 144);
+  }
+  REQUIRE(restored.saveState() == system.saveState());
+}
+
+TEST_CASE("SIO2 CPU result payload rejects inconsistent storage transactionally",
+  "[iop][sio2][sio2-cpu-result][save-state]")
+{
+  NekoSystem source;
+  stageCPUCardRead(source);
+  REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().write32(descriptorBase, 0).status == IOPBusStatus::Completed);
+  const auto state = source.saveState();
+  NekoSystem destination;
+  stageInfraredTransfer(destination);
+  const auto before = destination.saveState();
+  const auto hash = destination.iopStateHash();
+  for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
+    {"profile", 255}, {"profile", 0}, {"profile", 1}, {"profile", 3},
+    {"endpoint", 0}, {"endpoint", 4}, {"length", 0}, {"length", 8},
+    {"cursor", 4}, {"bytes[0].value", 0}, {"bytes[3].value", 0xff},
+    {"status[0].value", 0x1100}, {"status[1].value", 0}, {"status[2].value", 1}})
+  {
+    CAPTURE(mutation.first);
+    CAPTURE(mutation.second);
+    SaveStateMutation invalid(state);
+    invalid.writeScalar("system.iop.sio2.cpuResult." + mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.iopStateHash() == hash);
+  }
+  REQUIRE(destination.saveState() == before);
 }
 
 TEST_CASE("SIO2 CPU52 preserves unread replies on passive programming and clears them on reset",
@@ -1416,8 +1542,8 @@ TEST_CASE("SIO2 CPU multitap support queries reject inconsistent canonical recei
     stageInfraredTransfer(destination);
     const auto before = destination.iopStateHash();
     for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
-      {"system.iop.sio2.receiveRemaining", 7},
-      {"system.iop.sio2.receiveRemaining", 8},
+      {"system.iop.sio2.cpuResult.length", 7},
+      {"system.iop.sio2.cpuResult.length", 8},
       {"system.iop.sio2.transferCompleted", 0},
       {"system.iop.sio2.dmaResultPhase", 1},
       {"system.iop.sio2.dmaResultPhase", 2},
