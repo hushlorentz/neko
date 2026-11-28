@@ -4499,9 +4499,24 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected exact `0x45` query through existing SIO2
       admission/result/IRQ owners with nine-byte immutable replies, shared
       persistence and red/green plus authored guest/reset/restore conformance.
-- [ ] Verify model reply delivery with fresh cold/restored BIOS comparisons
+- [x] Verify model reply delivery with fresh cold/restored BIOS comparisons
       after the implementation checkpoint; attribute the next dependency
       without inferring analog, actuator operation or guest readiness.
+
+### Controller Command `0x46` Contract
+
+- [x] Research the demonstrated nine-byte configured-controller `0x46`
+      request through the existing SIO2 owner; select its bounded request/reply
+      and state contract before planning implementation.
+
+### SIO2 Configured Controller Actuator Queries
+
+- [x] Implement the selected exact `0x46` selector-0/1 informational queries
+      through existing SIO2 admission/result/IRQ and shared codec owners,
+      with red/green plus authored guest/reset/restore conformance.
+- [ ] Verify reply delivery and drain with fresh cold/restored BIOS comparisons
+      after the implementation checkpoint; attribute the next dependency
+      without inferring active motors, analog mode or guest readiness.
 
 ### Evidence-Driven Controller Dependencies
 

@@ -93,25 +93,28 @@ SIO2Controller::CPUResult SIO2Controller::classifyControllerTransfer(
         hasConfigurationEntryProgramming())
       reply.profile = CPUProfile::ConfigurationEntry;
   }
-  else if (transmitInputCount == 9 && transmitInput[1] == 0x45 &&
-      hasModelQueryProgramming())
+  else if (transmitInputCount == 9 && hasConfiguredQueryProgramming())
   {
-    for (std::size_t index = 3; index < 9; ++index)
+    for (std::size_t index = 4; index < 9; ++index)
       if (transmitInput[index] != 0x5a)
         return {};
-    reply.profile = CPUProfile::ModelQuery;
+    if (transmitInput[1] == 0x45 && transmitInput[3] == 0x5a)
+      reply.profile = CPUProfile::ModelQuery;
+    else if (transmitInput[1] == 0x46 && transmitInput[3] < 2)
+      reply.profile = transmitInput[3] == 0
+        ? CPUProfile::ActuatorQuery0 : CPUProfile::ActuatorQuery1;
   }
   if (reply.profile == CPUProfile::None)
     return {};
   reply.endpoint = endpoint;
-  reply.length = reply.profile == CPUProfile::ModelQuery ? 9 : 5;
+  reply.length = isConfiguredQueryProfile(reply.profile) ? 9 : 5;
   if (endpoint == 0)
   {
-    if (reply.profile == CPUProfile::ModelQuery)
+    if (isConfiguredQueryProfile(reply.profile))
     {
       if (!controllerConfigured)
         return {};
-      reply.bytes = modelQueryReply();
+      reply.bytes = configuredQueryReply(reply.profile);
     }
     else
     {
@@ -145,9 +148,24 @@ std::array<std::uint8_t, 5> SIO2Controller::configurationEntryReply() noexcept
   return {{0xff, 0x41, 0x5a, 0, 0}};
 }
 
-std::array<std::uint8_t, 9> SIO2Controller::modelQueryReply() noexcept
+bool SIO2Controller::isConfiguredQueryProfile(CPUProfile profile) noexcept
 {
-  return {{0xff, 0xf3, 0x5a, 3, 2, 0, 2, 1, 0}};
+  return profile == CPUProfile::ModelQuery || profile == CPUProfile::ActuatorQuery0 ||
+    profile == CPUProfile::ActuatorQuery1;
+}
+
+std::array<std::uint8_t, 9> SIO2Controller::configuredQueryReply(
+  CPUProfile profile) noexcept
+{
+  constexpr std::array<std::array<std::uint8_t, 9>, 3> replies = {{
+    {{0xff, 0xf3, 0x5a, 3, 2, 0, 2, 1, 0}},
+    {{0xff, 0xf3, 0x5a, 0, 0, 1, 2, 0, 0x0a}},
+    {{0xff, 0xf3, 0x5a, 0, 0, 1, 1, 1, 0x14}}
+  }};
+  const auto index = static_cast<std::size_t>(profile) -
+    static_cast<std::size_t>(CPUProfile::ModelQuery);
+  assert(isConfiguredQueryProfile(profile) && index < replies.size());
+  return replies[index];
 }
 
 SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
@@ -255,7 +273,7 @@ bool SIO2Controller::hasConfigurationEntryProgramming() const noexcept
   return hasPairedCPUProgramming(0x00140540, 0xffc00505, 0x00020014);
 }
 
-bool SIO2Controller::hasModelQueryProgramming() const noexcept
+bool SIO2Controller::hasConfiguredQueryProgramming() const noexcept
 {
   return hasPairedCPUProgramming(0x00240940, 0xffc00505, 0x00020014);
 }
@@ -268,8 +286,8 @@ bool SIO2Controller::hasMatchingCompletedCPUProgramming() const noexcept
   if (cpuResult.profile == CPUProfile::ConfigurationEntry)
     return hasConfigurationEntryProgramming() &&
       cpuResult.endpoint == (commandDescriptors[0] & 3);
-  if (cpuResult.profile == CPUProfile::ModelQuery)
-    return hasModelQueryProgramming() &&
+  if (isConfiguredQueryProfile(cpuResult.profile))
+    return hasConfiguredQueryProgramming() &&
       cpuResult.endpoint == (commandDescriptors[0] & 3);
   return dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
     hasCPUMultitapSupportProgramming();
@@ -439,6 +457,8 @@ bool SIO2Controller::hasValidCPUResult() const noexcept
       expectedLength = 5;
       break;
     case CPUProfile::ModelQuery:
+    case CPUProfile::ActuatorQuery0:
+    case CPUProfile::ActuatorQuery1:
       if (cpuResult.endpoint > 1) return false;
       expectedLength = 9;
       break;
@@ -448,10 +468,11 @@ bool SIO2Controller::hasValidCPUResult() const noexcept
     return false;
   const bool controllerReply = cpuResult.profile == CPUProfile::DigitalPoll ||
     cpuResult.profile == CPUProfile::ConfigurationEntry ||
-    cpuResult.profile == CPUProfile::ModelQuery;
+    isConfiguredQueryProfile(cpuResult.profile);
   const bool presentPad = controllerReply && cpuResult.endpoint == 0;
-  if (presentPad && cpuResult.profile == CPUProfile::ModelQuery)
-    return cpuResult.bytes == modelQueryReply() && cpuResult.status == presentPadStatus;
+  if (presentPad && isConfiguredQueryProfile(cpuResult.profile))
+    return cpuResult.bytes == configuredQueryReply(cpuResult.profile) &&
+      cpuResult.status == presentPadStatus;
   for (std::size_t index = 0; index < cpuResult.bytes.size(); ++index)
   {
     if (presentPad && cpuResult.profile == CPUProfile::DigitalPoll &&
@@ -475,7 +496,7 @@ bool SIO2Controller::hasValidTransferState() const noexcept
   if (!hasValidCPUResult() ||
       (cpuResult.profile != CPUProfile::None && !transferCompleted) ||
       ((cpuResult.profile == CPUProfile::ConfigurationEntry ||
-        cpuResult.profile == CPUProfile::ModelQuery) &&
+        isConfiguredQueryProfile(cpuResult.profile)) &&
         cpuResult.endpoint == 0 && !controllerConfigured))
     return false;
   if (resultCursor % 4 != 0 || resultCursor >= DMA_INPUT_BYTES ||
@@ -518,7 +539,7 @@ bool SIO2Controller::hasValidTransferState() const noexcept
     return supportsControl(control) || control == 0x3bd;
   if (cpuResult.profile == CPUProfile::DigitalPoll ||
       cpuResult.profile == CPUProfile::ConfigurationEntry ||
-      cpuResult.profile == CPUProfile::ModelQuery)
+      isConfiguredQueryProfile(cpuResult.profile))
     return supportsControl(control) || control == 0x3bd;
   return supportsControl(control) || control == 0xb1 ||
     (control == 0x3bd &&

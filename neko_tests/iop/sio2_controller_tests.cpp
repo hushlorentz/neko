@@ -37,6 +37,14 @@ namespace
   constexpr std::array<std::uint8_t, 9> modelQueryReply = {{
     0xff, 0xf3, 0x5a, 3, 2, 0, 2, 1, 0
   }};
+  constexpr std::array<std::array<std::uint8_t, 9>, 2> actuatorQueryPackets = {{
+    {{1, 0x46, 0, 0, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a}},
+    {{1, 0x46, 0, 1, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a}}
+  }};
+  constexpr std::array<std::array<std::uint8_t, 9>, 2> actuatorQueryReplies = {{
+    {{0xff, 0xf3, 0x5a, 0, 0, 1, 2, 0, 0x0a}},
+    {{0xff, 0xf3, 0x5a, 0, 0, 1, 1, 1, 0x14}}
+  }};
   constexpr std::array<std::uint8_t, 7> infraredPacket = {{
     0x61, 0x06, 0x03, 0, 0, 0, 0
   }};
@@ -210,8 +218,8 @@ namespace
     REQUIRE(system.iopInterruptController().status() == irq);
   }
 
-  void stageModelQuery(NekoSystem &system, IOPWord descriptor = 0x00240940,
-    const std::array<std::uint8_t, 9> &packet = modelQueryPacket,
+  void stageConfiguredQuery(NekoSystem &system, IOPWord descriptor,
+    const std::array<std::uint8_t, 9> &packet,
     std::size_t bytes = 9)
   {
     auto &bus = system.iopBus();
@@ -223,6 +231,13 @@ namespace
     REQUIRE(bus.write32(descriptorBase, descriptor).status == IOPBusStatus::Completed);
     for (std::size_t index = 0; index < bytes; ++index)
       REQUIRE(bus.write8(transmitAddress, packet[index]).status == IOPBusStatus::Completed);
+  }
+
+  void stageModelQuery(NekoSystem &system, IOPWord descriptor = 0x00240940,
+    const std::array<std::uint8_t, 9> &packet = modelQueryPacket,
+    std::size_t bytes = 9)
+  {
+    stageConfiguredQuery(system, descriptor, packet, bytes);
   }
 
   void enterControllerConfiguration(NekoSystem &system)
@@ -2102,6 +2117,376 @@ TEST_CASE("SIO2 model query guest preserves entry and every reply cut across obs
             {observer->events.begin(), observer->events.begin() + observer->count}, suffix);
           REQUIRE(restored.traceTruncated());
           REQUIRE(restored.trace().size() == (mode == 2 ? 3 : 0));
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("SIO2 actuator queries return immutable selector-specific metadata",
+  "[iop][sio2][sio2-actuator-query]")
+{
+  NekoSystem system;
+  enterControllerConfiguration(system);
+  for (std::size_t selector = 0; selector < actuatorQueryPackets.size(); ++selector)
+  {
+    CAPTURE(selector);
+    stageConfiguredQuery(system, 0x00240940, actuatorQueryPackets[selector]);
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    system.setInput({0xffff, 0, 1, 0xfe, 0xff});
+    requireControllerReply(system, actuatorQueryReplies[selector]);
+    const auto completed = system.iopStateHash();
+    REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() == completed);
+    stageModelQuery(system);
+    REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+      SIO2TransferResult::Completed);
+    requireControllerReply(system, modelQueryReply);
+  }
+}
+
+TEST_CASE("SIO2 actuator query admission rejects unsupported selectors and programming",
+  "[iop][sio2][sio2-actuator-query]")
+{
+  for (const auto &accepted : actuatorQueryPackets)
+  {
+    for (unsigned variant = 0; variant < 36; ++variant)
+    {
+      CAPTURE(accepted[3]);
+      CAPTURE(variant);
+      NekoSystem system;
+      if (variant != 0)
+        enterControllerConfiguration(system);
+      auto packet = accepted;
+      if (variant >= 1 && variant <= 9)
+        packet[variant - 1] = variant == 4 ? 2 : packet[variant - 1] ^ 1;
+      if (variant == 10)
+        packet[3] = 0xff;
+      stageConfiguredQuery(system, variant == 11 ? 0x00240942 :
+        variant == 12 ? 0x00240943 : variant == 13 ? 0x00280940 : 0x00240940,
+        packet, variant == 14 ? 8 : 9);
+      auto &bus = system.iopBus();
+      if (variant == 15)
+        REQUIRE(bus.write8(transmitAddress, 0x5a).status == IOPBusStatus::Completed);
+      if (variant == 16)
+        REQUIRE(bus.write32(portControlBase, 0xffc00909).status == IOPBusStatus::Completed);
+      if (variant == 17)
+        REQUIRE(bus.write32(portControlBase + 4, 0x2000a).status == IOPBusStatus::Completed);
+      if (variant == 18)
+        REQUIRE(bus.write32(portControlBase + 4, 0x201f4).status == IOPBusStatus::Completed);
+      if (variant == 20)
+      {
+        REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+        stageConfiguredQuery(system, 0x00240940, accepted);
+      }
+      if (variant >= 21)
+        REQUIRE(bus.write32(descriptorBase + (variant - 20) * 4, 1).status ==
+          IOPBusStatus::Completed);
+      requireRejectedCPUStart(system, variant == 19 ? 0x3bf : 0x3bd);
+      if (variant == 20)
+        requireControllerReply(system, actuatorQueryReplies[accepted[3]]);
+    }
+  }
+}
+
+TEST_CASE("SIO2 actuator queries preserve absent configuration IRQ and reset lifetimes",
+  "[iop][sio2][sio2-actuator-query]")
+{
+  for (const auto &packet : actuatorQueryPackets)
+  {
+    CAPTURE(packet[3]);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto absent = actuatorQueryReplies[packet[3]];
+    absent.fill(0xff);
+    stageConfiguredQuery(system, 0x00240941, packet);
+    REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+      SIO2TransferResult::CompletedWithInterrupt);
+    requireControllerReply(system, absent, 0x2d100);
+    stageDigitalPoll(system);
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+    requireDigitalReply(system, {{0xff, 0x41, 0x5a, 0xff, 0xff}});
+    enterControllerConfiguration(system);
+    stageConfiguredQuery(system, 0x00240941, packet);
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+    requireControllerReply(system, absent, 0x2d100);
+    system.iopInterruptController().writeStatus(~sio2IRQ);
+    REQUIRE(bus.write32(interruptAddress, 0).status == IOPBusStatus::Completed);
+    stageConfiguredQuery(system, 0x00240940, packet);
+    const auto before = system.iopStateHash();
+    bus.attachInterruptController(nullptr);
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+    bus.attachInterruptController(&system.iopInterruptController());
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopInterruptController().status() == 0);
+    REQUIRE(bus.read32(interruptAddress).value == 1);
+    REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+    bus.reset();
+    system.iopCore().reset();
+    REQUIRE(bus.write32(controlAddress, 0xc).status == IOPBusStatus::Completed);
+    requireControllerReply(system, actuatorQueryReplies[packet[3]]);
+    stageConfiguredQuery(system, 0x00240940, packet);
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+    requireControllerReply(system, actuatorQueryReplies[packet[3]]);
+    REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+    const auto completed = system.iopStateHash();
+    REQUIRE(bus.write32(controlAddress, 0x3bd).status == IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() == completed);
+    REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+    REQUIRE(bus.write32(descriptorBase, 0x00240941).status == IOPBusStatus::Completed);
+    requireRejectedCPUStart(system);
+    system.sio2Controller().reset();
+    stageConfiguredQuery(system, 0x00240940, packet);
+    requireRejectedCPUStart(system);
+    system.reset();
+    stageConfiguredQuery(system, 0x00240940, packet);
+    requireRejectedCPUStart(system);
+  }
+}
+
+TEST_CASE("SIO2 actuator queries exclude partial stores unread results and DMA ownership",
+  "[iop][sio2][sio2-actuator-query]")
+{
+  for (const auto &packet : actuatorQueryPackets)
+  {
+    CAPTURE(packet[3]);
+    {
+      NekoSystem system;
+      enterControllerConfiguration(system);
+      stageConfiguredQuery(system, 0x00240940, packet);
+      auto &bus = system.iopBus();
+      const auto before = system.iopStateHash();
+      REQUIRE(bus.write8(controlAddress, 0xbd).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+      for (std::uint8_t mask = 1; mask < 15; ++mask)
+        REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, mask).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.writeDMAC32(controlAddress, 0x3bd).status == IOPBusStatus::Unmapped);
+      REQUIRE(system.iopStateHash() == before);
+      REQUIRE(bus.writeMasked32(controlAddress, 0x3bd, 15).status == IOPBusStatus::Completed);
+      requireControllerReply(system, actuatorQueryReplies[packet[3]]);
+    }
+    {
+      NekoSystem system;
+      enterControllerConfiguration(system);
+      stageModelQuery(system);
+      REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+        IOPBusStatus::Completed);
+      stageConfiguredQuery(system, 0x00240940, packet);
+      requireRejectedCPUStart(system);
+      requireControllerReply(system, modelQueryReply);
+      REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+        IOPBusStatus::Completed);
+      requireControllerReply(system, actuatorQueryReplies[packet[3]]);
+    }
+    {
+      for (const auto words : {35u, 36u})
+      {
+        NekoSystem system;
+        enterControllerConfiguration(system);
+        stageCardProbe(system, 0x00100472, 0x1181, words);
+        const auto before = system.iopStateHash();
+        REQUIRE(system.sio2Controller().startControllerTransfer(0x3bd, nullptr) ==
+          SIO2TransferResult::Unsupported);
+        REQUIRE(system.iopStateHash() == before);
+        if (words == 36)
+        {
+          REQUIRE(system.iopBus().write32(controlAddress, 0x3bd).status ==
+            IOPBusStatus::Completed);
+          requireRejectedCPUStart(system);
+          system.runMasterCycles(1);
+          requireRejectedCPUStart(system);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("SIO2 actuator query histories restore every drain and reject malformed selectors",
+  "[iop][sio2][sio2-actuator-query][save-state]")
+{
+  for (const auto &packet : actuatorQueryPackets)
+  {
+    for (const auto endpoint : {0u, 1u})
+    {
+      CAPTURE(packet[3]);
+      CAPTURE(endpoint);
+      NekoSystem source;
+      if (endpoint == 0)
+        enterControllerConfiguration(source);
+      stageConfiguredQuery(source, 0x00240940 + endpoint, packet);
+      REQUIRE(source.iopBus().write32(controlAddress, 0x3bd).status ==
+        IOPBusStatus::Completed);
+      auto expected = actuatorQueryReplies[packet[3]];
+      if (endpoint == 1) expected.fill(0xff);
+      const auto state = source.saveState();
+      for (std::size_t cut = 0; cut <= expected.size(); ++cut)
+      {
+        CAPTURE(cut);
+        NekoSystem draining;
+        draining.loadState(state);
+        for (std::size_t index = 0; index < cut; ++index)
+          REQUIRE(draining.iopBus().read8(receiveAddress).value == expected[index]);
+        REQUIRE(draining.iopBus().write32(descriptorBase, 0).status == IOPBusStatus::Completed);
+        REQUIRE(draining.iopBus().write32(controlAddress, 0xc).status == IOPBusStatus::Completed);
+        const auto checkpoint = draining.saveState();
+        NekoSystem restored;
+        restored.loadState(checkpoint);
+        REQUIRE(restored.saveState() == checkpoint);
+        for (std::size_t index = cut; index < expected.size(); ++index)
+          REQUIRE(restored.iopBus().read8(receiveAddress).value == expected[index]);
+        REQUIRE(restored.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+        stageCPUCardRead(restored);
+        REQUIRE(restored.iopBus().write32(controlAddress, 0x3bd).status ==
+          IOPBusStatus::Completed);
+        requireControllerReply(restored, std::array<std::uint8_t, 3>{{0xff, 0xff, 0xff}},
+          0x1d100);
+        const SaveStateMutation shorter(restored.saveState());
+        for (std::size_t index = 3; index < 9; ++index)
+          REQUIRE(shorter.readByte("system.iop.sio2.cpuResult.bytes[" +
+            std::to_string(index) + "].value") == 0);
+      }
+      NekoSystem destination;
+      const auto before = destination.saveState();
+      auto mutations = std::vector<std::pair<std::string, std::uint64_t>>{
+        {"cpuResult.profile", 255}, {"cpuResult.endpoint", 2},
+        {"cpuResult.length", 8}, {"cpuResult.cursor", 10},
+        {"cpuResult.status[1].value", 0}, {"transferCompleted", 0}};
+      if (endpoint == 0)
+      {
+        mutations.emplace_back("cpuResult.profile", packet[3] == 0 ? 9 : 8);
+        mutations.emplace_back("controllerConfigured", 0);
+        mutations.emplace_back("cpuResult.status[0].value", 0x2d100);
+      }
+      for (std::size_t index = 0; index < expected.size(); ++index)
+        mutations.emplace_back("cpuResult.bytes[" + std::to_string(index) + "].value",
+          expected[index] ^ 1);
+      for (const auto &mutation : mutations)
+      {
+        CAPTURE(mutation.first);
+        SaveStateMutation invalid(state);
+        invalid.writeScalar("system.iop.sio2." + mutation.first, mutation.second);
+        invalid.refreshChecksum();
+        REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+        REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+        REQUIRE(destination.saveState() == before);
+      }
+    }
+  }
+}
+
+TEST_CASE("SIO2 actuator query guest preserves both selectors across aliases and observers",
+  "[iop][sio2][sio2-actuator-query][trace][save-state]")
+{
+  for (const IOPWord selector : {0u, 1u})
+  {
+    for (const IOPWord upper : {0x1f80u, 0x9f80u, 0xbf80u})
+    {
+      CAPTURE(selector);
+      CAPTURE(upper);
+      const std::array<IOPWord, 95> program{{
+        0x3c010000 | upper, 0x34218200,
+        0x3c020014, 0x34420540, 0xac220000,
+        0x3c02ffc0, 0x34420505, 0xac220040,
+        0x3c020002, 0x34420014, 0xac220044,
+        0x24020001, 0xa0220060, 0x24020043, 0xa0220060,
+        0xa0200060, 0x24020001, 0xa0220060, 0xa0200060,
+        0x240203bd, 0xac220068,
+        0x90340064, 0x90350064, 0x90360064, 0x90370064, 0x90380064,
+        0x24020001, 0xac220080, 0x3c08fffd, 0x3508ffff, 0xac288e70,
+        0x3c020024, 0x34420940, 0xac220000,
+        0x24020001, 0xa0220060, 0x24020045, 0xa0220060, 0xa0200060,
+        0x2402005a, 0xa0220060, 0xa0220060, 0xa0220060,
+        0xa0220060, 0xa0220060, 0xa0220060, 0x240203bd, 0xac220068,
+        0x90320064, 0x90320064, 0x90320064, 0x90320064, 0x90320064,
+        0x90320064, 0x90320064, 0x90320064, 0x90320064,
+        0x24020001, 0xac220080, 0xac288e70,
+        0x24020001, 0xa0220060, 0x24020046, 0xa0220060, 0xa0200060,
+        0x24020000 | selector, 0xa0220060,
+        0x2402005a, 0xa0220060, 0xa0220060, 0xa0220060, 0xa0220060, 0xa0220060,
+        0x240203bd, 0xac220068,
+        0x90230064, 0x90240064, 0x90250064, 0x90260064, 0x90270064,
+        0x90280064, 0x90290064, 0x902a0064, 0x902b0064,
+        0x8c2c006c, 0x8c2d0070, 0x8c2e0074, 0x8c2f0080,
+        0x24020001, 0xac220080, 0x8c300080,
+        0x240203bd, 0xac220068, 0x24111234, 0
+      }};
+      NekoSystem reference;
+      installProgram(reference, program);
+      const auto initial = reference.saveState();
+      reference.startTrace();
+      reference.runMasterCycles(753);
+      REQUIRE(reference.iopCore().retiredInstructions() == program.size());
+      REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+      REQUIRE(reference.iopCore().exception().kind == IOPException::None);
+      for (std::size_t index = 0; index < actuatorQueryReplies[selector].size(); ++index)
+        REQUIRE(reference.iopCore().generalRegister(3 + index) ==
+          actuatorQueryReplies[selector][index]);
+      constexpr std::array<IOPWord, 5> entryReply{{0xff, 0x41, 0x5a, 0, 0}};
+      for (std::size_t index = 0; index < entryReply.size(); ++index)
+        REQUIRE(reference.iopCore().generalRegister(20 + index) == entryReply[index]);
+      REQUIRE(reference.iopCore().generalRegister(12) == 0x1100);
+      REQUIRE(reference.iopCore().generalRegister(13) == 0xf);
+      REQUIRE(reference.iopCore().generalRegister(14) == 0);
+      REQUIRE(reference.iopCore().generalRegister(15) == 1);
+      REQUIRE(reference.iopCore().generalRegister(16) == 0);
+      REQUIRE(reference.iopCore().generalRegister(17) == 0x1234);
+      const auto interrupts = IOPTraceTest::subsystemEvents(
+        reference, NekoTraceSubsystem::IOPInterruptController);
+      REQUIRE(interrupts.size() == 5);
+      REQUIRE(interrupts[0].masterCycle == 161);
+      REQUIRE(interrupts[1].masterCycle == 241);
+      REQUIRE(interrupts[2].masterCycle == 377);
+      REQUIRE(interrupts[3].masterCycle == 473);
+      REQUIRE(interrupts[4].masterCycle == 593);
+      REQUIRE(interrupts[0].value0 == sio2IRQ);
+      REQUIRE(interrupts[1].value0 == 0);
+      REQUIRE(interrupts[2].value0 == sio2IRQ);
+      REQUIRE(interrupts[3].value0 == 0);
+      REQUIRE(interrupts[4].value0 == sio2IRQ);
+      const auto reads = controlEvents(reference, (upper << 16) | 0x8264);
+      REQUIRE(reads.size() == 23);
+      for (std::size_t index = 0; index < modelQueryReply.size(); ++index)
+      {
+        REQUIRE(reads[5 + index].value1 == modelQueryReply[index]);
+        REQUIRE(reads[14 + index].value1 == actuatorQueryReplies[selector][index]);
+      }
+      for (const auto cut : {0u, 377u, 473u, 569u, 585u, 593u, 601u, 609u,
+        617u, 625u, 633u, 641u, 649u, 657u, 665u, 713u})
+      {
+        CAPTURE(cut);
+        NekoSystem source;
+        source.loadState(initial);
+        source.runMasterCycles(cut);
+        const auto checkpoint = source.saveState();
+        std::vector<NekoTraceEvent> suffix;
+        for (const auto &event : reference.trace())
+          if (event.masterCycle > cut) suffix.push_back(event);
+        REQUIRE(suffix.size() > 3);
+        for (unsigned mode = 0; mode < (cut < 569 ? 2u : 4u); ++mode)
+        {
+          CAPTURE(mode);
+          NekoSystem restored;
+          restored.loadState(checkpoint);
+          const auto observer = std::make_shared<IOPTraceTest::Observer>();
+          if (mode == 1) restored.startTrace();
+          if (mode == 2) restored.startTrace(3, observer);
+          if (mode == 3) restored.startTrace(0, observer);
+          restored.runMasterCycles(753 - cut);
+          IOPTraceTest::requireMachine(restored, reference);
+          if (mode == 1)
+            IOPTraceTest::requireEvents(restored.trace(), suffix);
+          if (mode >= 2)
+          {
+            REQUIRE_FALSE(observer->overflow);
+            IOPTraceTest::requireEvents(
+              {observer->events.begin(), observer->events.begin() + observer->count}, suffix);
+            REQUIRE(restored.traceTruncated());
+            REQUIRE(restored.trace().size() == (mode == 2 ? 3 : 0));
+          }
         }
       }
     }
