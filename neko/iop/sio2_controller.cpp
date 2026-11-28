@@ -80,29 +80,48 @@ SIO2Controller::CPUResult SIO2Controller::classifyControllerTransfer(
 {
   if (controlValue != 0x3bd || resultPhase != SIO2DMAResultPhase::Empty ||
       ingressPhase != SIO2IngressPhase::CPU || hasUnreadCPUResult() ||
-      transmitInputCount != 5 || transmitInput[0] != 1 ||
-      transmitInput[2] != 0 || transmitInput[4] != 0)
+      transmitInputCount < 3 || transmitInput[0] != 1 || transmitInput[2] != 0)
     return {};
   const auto endpoint = static_cast<std::uint8_t>(commandDescriptors[0] & 3);
   CPUResult reply;
-  if (transmitInput[1] == 0x42 && transmitInput[3] == 0 &&
-      hasDigitalPollProgramming())
-    reply.profile = CPUProfile::DigitalPoll;
-  else if (transmitInput[1] == 0x43 && transmitInput[3] == 1 &&
-      hasConfigurationEntryProgramming())
-    reply.profile = CPUProfile::ConfigurationEntry;
-  else
-    return {};
-  if (endpoint == 0 && (controllerConfigured ||
-      (reply.profile == CPUProfile::DigitalPoll && input == nullptr)))
+  if (transmitInputCount == 5 && transmitInput[4] == 0)
+  {
+    if (transmitInput[1] == 0x42 && transmitInput[3] == 0 &&
+        hasDigitalPollProgramming())
+      reply.profile = CPUProfile::DigitalPoll;
+    else if (transmitInput[1] == 0x43 && transmitInput[3] == 1 &&
+        hasConfigurationEntryProgramming())
+      reply.profile = CPUProfile::ConfigurationEntry;
+  }
+  else if (transmitInputCount == 9 && transmitInput[1] == 0x45 &&
+      hasModelQueryProgramming())
+  {
+    for (std::size_t index = 3; index < 9; ++index)
+      if (transmitInput[index] != 0x5a)
+        return {};
+    reply.profile = CPUProfile::ModelQuery;
+  }
+  if (reply.profile == CPUProfile::None)
     return {};
   reply.endpoint = endpoint;
-  reply.length = 5;
+  reply.length = reply.profile == CPUProfile::ModelQuery ? 9 : 5;
   if (endpoint == 0)
   {
-    const auto bytes = reply.profile == CPUProfile::DigitalPoll
-      ? digitalPollReply(*input) : configurationEntryReply();
-    std::copy(bytes.begin(), bytes.end(), reply.bytes.begin());
+    if (reply.profile == CPUProfile::ModelQuery)
+    {
+      if (!controllerConfigured)
+        return {};
+      reply.bytes = modelQueryReply();
+    }
+    else
+    {
+      if (controllerConfigured ||
+          (reply.profile == CPUProfile::DigitalPoll && input == nullptr))
+        return {};
+      const auto bytes = reply.profile == CPUProfile::DigitalPoll
+        ? digitalPollReply(*input) : configurationEntryReply();
+      std::copy(bytes.begin(), bytes.end(), reply.bytes.begin());
+    }
     reply.status = presentPadStatus;
   }
   else
@@ -124,6 +143,11 @@ std::array<std::uint8_t, 5> SIO2Controller::digitalPollReply(
 std::array<std::uint8_t, 5> SIO2Controller::configurationEntryReply() noexcept
 {
   return {{0xff, 0x41, 0x5a, 0, 0}};
+}
+
+std::array<std::uint8_t, 9> SIO2Controller::modelQueryReply() noexcept
+{
+  return {{0xff, 0xf3, 0x5a, 3, 2, 0, 2, 1, 0}};
 }
 
 SIO2TransferResult SIO2Controller::startDMACardTransfer() noexcept
@@ -231,6 +255,11 @@ bool SIO2Controller::hasConfigurationEntryProgramming() const noexcept
   return hasPairedCPUProgramming(0x00140540, 0xffc00505, 0x00020014);
 }
 
+bool SIO2Controller::hasModelQueryProgramming() const noexcept
+{
+  return hasPairedCPUProgramming(0x00240940, 0xffc00505, 0x00020014);
+}
+
 bool SIO2Controller::hasMatchingCompletedCPUProgramming() const noexcept
 {
   if (cpuResult.profile == CPUProfile::DigitalPoll)
@@ -238,6 +267,9 @@ bool SIO2Controller::hasMatchingCompletedCPUProgramming() const noexcept
       cpuResult.endpoint == (commandDescriptors[0] & 3);
   if (cpuResult.profile == CPUProfile::ConfigurationEntry)
     return hasConfigurationEntryProgramming() &&
+      cpuResult.endpoint == (commandDescriptors[0] & 3);
+  if (cpuResult.profile == CPUProfile::ModelQuery)
+    return hasModelQueryProgramming() &&
       cpuResult.endpoint == (commandDescriptors[0] & 3);
   return dmaCardProfile() != nullptr || hasCPUCardReadProgramming() ||
     hasCPUMultitapSupportProgramming();
@@ -406,13 +438,20 @@ bool SIO2Controller::hasValidCPUResult() const noexcept
       if (cpuResult.endpoint > 1) return false;
       expectedLength = 5;
       break;
+    case CPUProfile::ModelQuery:
+      if (cpuResult.endpoint > 1) return false;
+      expectedLength = 9;
+      break;
     default: return false;
   }
   if (cpuResult.length != expectedLength || cpuResult.cursor > cpuResult.length)
     return false;
   const bool controllerReply = cpuResult.profile == CPUProfile::DigitalPoll ||
-    cpuResult.profile == CPUProfile::ConfigurationEntry;
+    cpuResult.profile == CPUProfile::ConfigurationEntry ||
+    cpuResult.profile == CPUProfile::ModelQuery;
   const bool presentPad = controllerReply && cpuResult.endpoint == 0;
+  if (presentPad && cpuResult.profile == CPUProfile::ModelQuery)
+    return cpuResult.bytes == modelQueryReply() && cpuResult.status == presentPadStatus;
   for (std::size_t index = 0; index < cpuResult.bytes.size(); ++index)
   {
     if (presentPad && cpuResult.profile == CPUProfile::DigitalPoll &&
@@ -435,7 +474,8 @@ bool SIO2Controller::hasValidTransferState() const noexcept
 {
   if (!hasValidCPUResult() ||
       (cpuResult.profile != CPUProfile::None && !transferCompleted) ||
-      (cpuResult.profile == CPUProfile::ConfigurationEntry &&
+      ((cpuResult.profile == CPUProfile::ConfigurationEntry ||
+        cpuResult.profile == CPUProfile::ModelQuery) &&
         cpuResult.endpoint == 0 && !controllerConfigured))
     return false;
   if (resultCursor % 4 != 0 || resultCursor >= DMA_INPUT_BYTES ||
@@ -477,7 +517,8 @@ bool SIO2Controller::hasValidTransferState() const noexcept
   if (cpuResult.profile == CPUProfile::None)
     return supportsControl(control) || control == 0x3bd;
   if (cpuResult.profile == CPUProfile::DigitalPoll ||
-      cpuResult.profile == CPUProfile::ConfigurationEntry)
+      cpuResult.profile == CPUProfile::ConfigurationEntry ||
+      cpuResult.profile == CPUProfile::ModelQuery)
     return supportsControl(control) || control == 0x3bd;
   return supportsControl(control) || control == 0xb1 ||
     (control == 0x3bd &&

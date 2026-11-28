@@ -736,7 +736,7 @@ void NekoSaveStateCodec::readIOP(
       auto &reply = sio2.cpuResult;
       const auto profile = reader->readFieldU8("profile");
       reader->requireField(
-        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::ConfigurationEntry),
+        profile <= static_cast<std::uint8_t>(SIO2Controller::CPUProfile::ModelQuery),
         "SIO2 CPU result profile is invalid");
       reply.profile = static_cast<SIO2Controller::CPUProfile>(profile);
       reply.endpoint = reader->readFieldU8("endpoint");

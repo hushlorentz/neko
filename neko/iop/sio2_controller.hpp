@@ -98,7 +98,8 @@ class SIO2Controller final
       MultitapSupport12,
       MultitapSupport13,
       DigitalPoll,
-      ConfigurationEntry
+      ConfigurationEntry,
+      ModelQuery
     };
     struct CPUResult
     {
@@ -106,17 +107,19 @@ class SIO2Controller final
       std::uint8_t endpoint = 0;
       std::uint8_t length = 0;
       std::uint8_t cursor = 0;
-      std::array<std::uint8_t, 7> bytes{};
+      std::array<std::uint8_t, 9> bytes{};
       std::array<std::uint32_t, 3> status{};
     };
     bool hasCPUCardReadProgramming() const noexcept;
     bool hasCPUMultitapSupportProgramming() const noexcept;
     bool hasDigitalPollProgramming() const noexcept;
     bool hasConfigurationEntryProgramming() const noexcept;
+    bool hasModelQueryProgramming() const noexcept;
     bool hasMatchingCompletedCPUProgramming() const noexcept;
     static std::array<std::uint8_t, 5> digitalPollReply(
       const NekoInputState &input) noexcept;
     static std::array<std::uint8_t, 5> configurationEntryReply() noexcept;
+    static std::array<std::uint8_t, 9> modelQueryReply() noexcept;
     CPUResult classifyControllerTransfer(std::uint32_t controlValue,
       const NekoInputState *input) const noexcept;
     bool hasPairedCPUProgramming(std::uint32_t firstDescriptor,

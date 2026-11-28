@@ -4484,9 +4484,24 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected exact five-byte configuration entry through
       existing SIO2 admission/result/IRQ owners, with independent persistent
       endpoint state, red/green and authored guest/reset/restore conformance.
-- [ ] Verify entry reply delivery and state retention with fresh cold/restored
+- [x] Verify entry reply delivery and state retention with fresh cold/restored
       BIOS comparisons after the implementation checkpoint; attribute the next
       dependency without assuming analog mode or guest connection.
+
+### Controller Command `0x45` Contract
+
+- [x] Research the demonstrated nine-byte configured-controller command `0x45`
+      through the existing SIO2 owner; select its bounded request/reply and
+      state contract before planning implementation.
+
+### SIO2 Configured Controller Model Query
+
+- [x] Implement the selected exact `0x45` query through existing SIO2
+      admission/result/IRQ owners with nine-byte immutable replies, shared
+      persistence and red/green plus authored guest/reset/restore conformance.
+- [ ] Verify model reply delivery with fresh cold/restored BIOS comparisons
+      after the implementation checkpoint; attribute the next dependency
+      without inferring analog, actuator operation or guest readiness.
 
 ### Evidence-Driven Controller Dependencies
 
